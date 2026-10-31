@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 # CI from commit #1 (spec Â§16): build, unit tests, lint, vulnerability scan,
 # a clean apply of db/schema.sql to PostgreSQL 18, and the RLS isolation
@@ -6,9 +6,8 @@
 
 on:
   # Manual re-run for a commit whose push run was killed mid-flight (a runner
-  # restart, #502) or lost a job to a flake (#463): Forgejo 16 has no re-run API,
-  # and tag-provenance requires the tagged commit's push run to be green, so
-  # without this the only lever was a person clicking Re-run in the web UI.
+  # restart) or lost a job to a flake: tag-provenance requires the tagged
+  # commit's push run to be green, so this is the lever for getting one.
   # Dispatched with `ref` = the commit or branch to test; it runs the same jobs.
   workflow_dispatch:
   # Feature branches are tested via their pull request only; pushing a branch
@@ -32,7 +31,7 @@ on:
   # protection only gates `main`, so the tag run's result gated nothing. The
   # one guarantee worth keeping — that a tag was actually cut from a commit
   # whose CI passed on main, not a stray local commit — now lives in its own
-  # cheap job: .forgejo/workflows/tag-provenance.yml, which is the only
+  # cheap job: .github/workflows/tag-provenance.yml, which is the only
   # workflow in this repo that still triggers on `tags:`.
   push:
     branches: [main]
@@ -60,6 +59,9 @@ on:
 # Keyed on workflow + ref so a PR branch supersedes itself while main is
 # unaffected. Tags no longer reach this workflow at all (#356), so there is no
 # second group to worry about superseding.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -225,10 +227,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history, so a pull request's commit messages and identities
+          # can be read against its base.
+          fetch-depth: 0
+      # Pull requests from forks get no repository secrets, so the operator
+      # denylist (layer 1) cannot run for them. That must not block outside
+      # contributions: for a fork PR the layer is skipped with a visible
+      # notice and a maintainer re-runs the check after review. For pushes
+      # and same-repository pull requests the denylist is REQUIRED.
+      - name: Is the operator denylist available?
+        id: patterns
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$EVENT" = "pull_request" ] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "have=0" >> "$GITHUB_OUTPUT"
+            echo "::notice::Pull request from a fork - the maintainer-only denylist layer is skipped here and must be re-run by a maintainer after review."
+          else
+            echo "have=1" >> "$GITHUB_OUTPUT"
+          fi
       - name: Portability check
+        if: steps.patterns.outputs.have == '1'
         env:
           MAILROOM_PORTABILITY_PATTERNS: ${{ secrets.MAILROOM_PORTABILITY_PATTERNS }}
         run: sh scripts/portability-check.sh --require-patterns
+      - name: Portability check (in-tree layers only, fork pull request)
+        if: steps.patterns.outputs.have == '0'
+        run: sh scripts/portability-check.sh
+      - name: Pull request title, commit messages and identities
+        if: github.event_name == 'pull_request' && steps.patterns.outputs.have == '1'
+        env:
+          MAILROOM_PORTABILITY_PATTERNS: ${{ secrets.MAILROOM_PORTABILITY_PATTERNS }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -eu
+          {
+            printf '%s\n' "$PR_TITLE"
+            git log --format='%an%n%ae%n%cn%n%ce%n%B' "origin/$BASE_REF..HEAD"
+          } | sh scripts/portability-check.sh --messages
       - name: Portability check self-test
         # #548: proves layer 3 (the scheme-less image-reference/registry-login
         # check) can actually reject, against fixtures built under mktemp -d —

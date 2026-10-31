@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# Cross-implementation OpenPGP interop (Forgejo #263).
+# Cross-implementation OpenPGP interop (#263).
 #
 # Runs the `interop`-tagged tests against a REAL GnuPG:
 #   - internal/pgpverify: gpg verifies a message Mailroom signed, and Mailroom
@@ -28,7 +28,7 @@
 #     out needs MAILROOM_SKIP_GPG_INTEROP=1, which is deliberate and visible.
 #
 # Same container-only shape as scripts/tantivy-test.sh and integration-test.sh,
-# for the same reason: Forgejo runner jobs are themselves containers with a
+# for the same reason: CI runner jobs are themselves containers with a
 # socket-mounted Docker, so host paths and ports do not resolve from inside one.
 set -eu
 

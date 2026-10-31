@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
 # The login gate + OIDC multi-user provisioning, proven end to end against the
-# REAL image and a REAL OIDC provider (Forgejo #92, #98).
+# REAL image and a REAL OIDC provider (#92, #98).
 #
 # cmd/mailroom/gate_test.go proves the gate over the real mux, in process, with
 # no network. This script proves the other half: that the thing we actually ship

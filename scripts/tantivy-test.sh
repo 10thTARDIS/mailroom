@@ -1,10 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# Build + test the CGO search backend (ADR-006, Forgejo #20).
+# Build + test the CGO search backend (ADR-006, #20).
 #
 # Everything goes through the Docker API only (docker cp + docker start -a) —
 # no bind mounts, no published ports, no host toolchain. That is deliberate and
-# matches scripts/integration-test.sh: the Forgejo runner executes jobs in
+# matches scripts/integration-test.sh: the CI runner executes jobs in
 # containers with a mounted docker socket, so host paths and host ports do not
 # resolve from inside a job. This shape works identically on the runner, on a
 # Linux host, and in Git Bash on Windows.
@@ -78,7 +78,7 @@ CID=$(docker create \
   "$GO_IMAGE" sh -c "$NET_RETRY"'
     set -e
     retry apk add --no-cache gcc musl-dev curl tar >/dev/null
-    # ⚠ DOWNLOAD, CHECK, THEN EXTRACT — never `curl … | tar` (Forgejo #311).
+    # ⚠ DOWNLOAD, CHECK, THEN EXTRACT — never `curl … | tar` (#311).
     #
     # In a pipeline the shell reports the exit status of the LAST command, so a
     # failed curl (404 on a bumped TANTIVY_VERSION, a proxy error page, a

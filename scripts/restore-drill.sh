@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# THE RESTORE DRILL (spec §11, ADR-005, Forgejo #40).
+# THE RESTORE DRILL (spec §11, ADR-005, #40).
 #
 #   "A backup that hasn't restored is a hypothesis."
 #
@@ -77,7 +77,7 @@
 # Each MUST exit non-zero. `--self-test` runs all ten, then a clean run.
 #
 # Everything goes through the Docker API only — docker cp + docker exec, no bind
-# mounts, no published ports — because the Forgejo runner executes jobs inside
+# mounts, no published ports — because the CI runner executes jobs inside
 # containers with a socket-mounted Docker, where host paths and host ports do not
 # resolve. Same shape as scripts/integration-test.sh and scripts/tantivy-test.sh.
 set -eu
@@ -394,13 +394,22 @@ if [ "$SELF_TEST" -eq 1 ]; then
   echo "###############################################################################"
   echo "# SELF-TEST: restore an OLDER snapshot then migrate forward — the drill MUST pass"
   echo "###############################################################################"
-  if sh "$0" --migrate-forward; then
+  # The child reports "no older revision" through a marker file, not an exit
+  # status: its cleanup trap runs under errexit and rewrites the status.
+  skipfile="$(mktemp)"
+  rc=0
+  DRILL_SKIP_FILE="$skipfile" sh "$0" --migrate-forward || rc=$?
+  if [ "$rc" -eq 0 ]; then
     echo "--- self-test OK: an older backup restores and migrates forward to HEAD"
+  elif [ "$rc" -ne 0 ] && [ -s "$skipfile" ]; then
+    echo "::warning::migrate-forward phase SKIPPED: the head migration is in the root commit, so there is no older revision to restore from"
+    echo "--- self-test SKIPPED (not passed): migrate-forward has no older revision in this history"
   else
     echo "!!! SELF-TEST FAILED: restore-then-migrate-forward did not pass"
     fails=$((fails + 1))
     drill_network_report
   fi
+  rm -f "$skipfile"
   echo
   [ "$fails" -eq 0 ] || { echo "SELF-TEST FAILED ($fails)"; exit 1; }
   echo "SELF-TEST PASSED: the drill fails when it must, and passes when it must."
@@ -610,6 +619,19 @@ if [ "$MIGRATE_FWD" -eq 1 ]; then
   }
   OLD_REV="$(git_at rev-parse --verify "${ADD_COMMIT}^" 2>/dev/null || true)"
   [ -n "$OLD_REV" ] || {
+    # A full-history clone whose ROOT commit already contains the head migration
+    # (the public repository starts from a single squashed commit) has no older
+    # revision to build the fixture from. That is a property of the history, not
+    # a defect: say so loudly and record it in $DRILL_SKIP_FILE, which --self-test
+    # reports as SKIPPED.
+    # A shallow clone is told apart so it still fails.
+    if [ "$(git_at rev-parse --is-shallow-repository 2>/dev/null || echo true)" = "false" ]; then
+      echo "restore-drill: $HEAD_MIG was added by the root commit $ADD_COMMIT; there is no older" >&2
+      echo "  revision to build the migrate-forward fixture from. SKIPPING this phase until a" >&2
+      echo "  migration lands after the root commit." >&2
+      [ -z "${DRILL_SKIP_FILE:-}" ] || echo skipped > "$DRILL_SKIP_FILE"
+      exit 3
+    fi
     echo "restore-drill: $HEAD_MIG was added by $ADD_COMMIT, which has no parent in this" >&2
     echo "  clone. Check out with full history (fetch-depth: 0)." >&2
     exit 1

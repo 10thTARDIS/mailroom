@@ -12,7 +12,7 @@
 # Everything goes through the Docker API only (docker cp, docker exec,
 # container-to-container networking) â no published ports, no bind mounts,
 # no host toolchain â the same shape as scripts/integration-test.sh, for the
-# same reason (Forgejo runner jobs are themselves containers with a
+# same reason (CI runner jobs are themselves containers with a
 # socket-mounted Docker; host ports/paths don't resolve from in here).
 set -eu
 

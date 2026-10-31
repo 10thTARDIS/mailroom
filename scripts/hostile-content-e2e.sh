@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
-# Hostile content, proven end to end against the REAL image (Forgejo #39,
+# Hostile content, proven end to end against the REAL image (#39,
 # spec §11). Companion to the in-process suites (internal/api, cmd/mailroom,
 # internal/provider) and to docs/hostile-content.md.
 #
@@ -23,7 +23,7 @@
 #
 # Everything is container-to-container: no published ports, no host toolchain, no
 # bind mounts of source. Same shape as scripts/gate-e2e.sh and mailsync-test.sh,
-# so it runs identically on the Forgejo runner, on Linux, and in Git Bash.
+# so it runs identically on the CI runner, on Linux, and in Git Bash.
 #
 # Usage:  scripts/hostile-content-e2e.sh
 #         MAILROOM_IMAGE=mailroom:test scripts/hostile-content-e2e.sh
@@ -619,7 +619,7 @@ fi
 
 echo
 echo "--- 6. A REAL BROWSER renders the sanitized body; nothing runs, nothing"
-echo "       fetched — AND the content-fit auto-height works (Forgejo #100)."
+echo "       fetched — AND the content-fit auto-height works (#100)."
 
 # ⚠ THE POLICY UNDER TEST IS READ OUT OF THE REPO, NOT TYPED IN HERE (#308).
 #
@@ -716,7 +716,7 @@ const HARNESS = "window.__h=[];window.addEventListener('message',function(e){" +
   "var f=document.getElementById('f');" +
   "if(f&&e.source===f.contentWindow&&e.data&&e.data.type==='mailroom-height'&&typeof e.data.height==='number'){window.__h.push(e.data.height);}});";
 
-// --- the ATTACHMENT PREVIEW stage (Forgejo #131) ------------------------------
+// --- the ATTACHMENT PREVIEW stage (#131) ------------------------------
 // The preview is served by its OWN route (internal/api/blob.go PreviewHandler) —
 // the one door on this server that hands a stranger's bytes to a browser with an
 // inline disposition. What makes that safe is the response, not the embedding

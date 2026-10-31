@@ -75,3 +75,6 @@ www.rfc-editor.org
 # Operator guide docs/oauth-providers.md (#52): the consoles where the operator registers their OAuth apps.
 console.cloud.google.com
 entra.microsoft.com
+
+# GitHub Container Registry: where the release image is published.
+ghcr.io

@@ -1,0 +1,203 @@
+name: Tag Provenance and Publish
+
+# A release pushes `main` and then the `vX.Y.Z` tag. ci.yml and
+# restore-drill.yml deliberately do not run on tags (it would repeat the whole
+# matrix against byte-identical code), so this workflow is the cheap
+# replacement for the one guarantee a tag run could add: that the tag was cut
+# from a commit that actually went through main's CI. It checks
+#   1. the tagged commit is reachable from origin/main, and
+#   2. a push-triggered run of ci.yml for that EXACT commit already succeeded.
+# It fails loudly, with the fix, rather than silently passing or skipping.
+#
+# The publish job needs the provenance job, which is what makes "published"
+# mean "provenance proven": a separate tag-triggered workflow would race it and
+# could publish an image for a tag whose provenance failed.
+#
+# Do NOT add this workflow to branch protection's required checks. It only
+# runs on a `v*` tag (or by hand), so a required context from it would wedge
+# every pull request.
+#
+# Dry run: dispatch it by hand with a `version` to run the provenance check and
+# the CHANGELOG extraction for that version without publishing anything.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Dry run: version to check, without the leading v (e.g. 1.98.0)"
+        required: true
+      commit:
+        description: "Dry run: commit to check provenance for (default: the dispatched ref's head)"
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tag-provenance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history and every branch ref, so origin/main resolves locally
+          # for the merge-base check.
+          fetch-depth: 0
+
+      - name: Resolve the version and commit under test
+        id: ver
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -eu
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION#v}"
+            SHA="${INPUT_COMMIT:-$GITHUB_SHA}"
+            echo "DRY RUN: nothing will be published."
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            SHA="$GITHUB_SHA"
+          fi
+          git cat-file -e "${SHA}^{commit}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "version $VERSION, commit $SHA"
+
+      - name: The tagged commit must be reachable from main
+        env:
+          SHA: ${{ steps.ver.outputs.sha }}
+        run: |
+          set -eu
+          if ! git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+            echo "::error::origin/main did not resolve after a full-history checkout - cannot verify provenance"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not reachable from main."
+            echo "This tag was cut from a commit that never went through main."
+            echo "Push it as a branch, let CI go green, merge to main, THEN tag main's tip."
+            exit 1
+          fi
+          echo "$SHA is reachable from main."
+
+      - name: CI must have already succeeded for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.ver.outputs.sha }}
+        run: |
+          set -eu
+          # A push-triggered run is the ordinary evidence. A workflow_dispatch
+          # run of the same workflow on the same commit is the same evidence
+          # (it exists to re-run a push run that was killed mid-flight). A
+          # pull_request run tests a merge preview, not this commit, so it
+          # does not count.
+          found=""
+          for ev in push workflow_dispatch; do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SHA&status=success&event=$ev&per_page=100" \
+              --jq '[.workflow_runs[] | select(.path | startswith(".github/workflows/ci.yml"))] | length')
+            echo "$ev-triggered successful CI runs for $SHA: $n"
+            if [ "$n" -gt 0 ]; then found="$ev"; break; fi
+          done
+          if [ -z "$found" ]; then
+            echo "::error::no successful push- or dispatch-triggered CI run found for $SHA"
+            echo "This commit never had a green CI run on main (or CI has not finished yet)."
+            echo "Merge to main, let CI go green, THEN tag main's tip - or dispatch ci.yml"
+            echo "on this commit and let it go green."
+            exit 1
+          fi
+          echo "a successful CI run ($found) exists for $SHA."
+
+      - name: The version must have a CHANGELOG entry
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eu
+          sh scripts/changelog-section.sh "$VERSION" > "$RUNNER_TEMP/notes.md"
+          echo "CHANGELOG.md documents $VERSION; release notes are $(wc -l < "$RUNNER_TEMP/notes.md") lines:"
+          sed -n '1,12p' "$RUNNER_TEMP/notes.md"
+          case "$VERSION" in
+            *-*) echo "pre-release: would publish :$VERSION only, as a GitHub pre-release." ;;
+            *)   echo "final release: would publish :$VERSION and :latest, as a GitHub release." ;;
+          esac
+
+  # Publish the release image and create the GitHub release. Only on a real tag
+  # push, and only after provenance is proven.
+  publish-image:
+    needs: [tag-provenance]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/10thtardis/mailroom
+      VERSION: ${{ needs.tag-provenance.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Registry login
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Build the release image
+        run: |
+          # --build-arg MAILROOM_VERSION is required: without it the binary
+          # reports 0.0.0-dev and a running instance cannot say which release
+          # it is. --no-cache is required too: the runtime stage's `apk add`
+          # must see the package mirror as it is at release time, never an
+          # earlier build's cached layer.
+          docker build --no-cache \
+            --build-arg MAILROOM_VERSION="$VERSION" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --label "org.opencontainers.image.licenses=AGPL-3.0-only" \
+            -t "$IMAGE:$VERSION" .
+
+      - name: The image must report the tagged version
+        run: |
+          # Checked BEFORE the push, so a mis-stamped image is never published.
+          # Pass NO binary path: ENTRYPOINT is /mailroom and docker appends
+          # arguments.
+          GOT=$(docker run --rm "$IMAGE:$VERSION" --version)
+          echo "image reports: $GOT"
+          case "$GOT" in
+            *"$VERSION"*) echo "version stamp matches the tag." ;;
+            *) echo "::error::image reports '$GOT', which does not contain the tagged version '$VERSION'"; exit 1 ;;
+          esac
+
+      - name: Push
+        run: |
+          # Deployments pin the exact version (by digest). `:latest` is a
+          # convenience tag for a FINAL release only; a pre-release never moves it.
+          docker push "$IMAGE:$VERSION"
+          case "$VERSION" in
+            *-*) ;;
+            *) docker tag "$IMAGE:$VERSION" "$IMAGE:latest"; docker push "$IMAGE:latest" ;;
+          esac
+          docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$VERSION"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          sh scripts/changelog-section.sh "$VERSION" > "$RUNNER_TEMP/notes.md"
+          PRE=""
+          case "$VERSION" in *-*) PRE="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" $PRE

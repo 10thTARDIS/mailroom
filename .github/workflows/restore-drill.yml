@@ -60,16 +60,14 @@ on:
   # tagged merge got two restore-drill runs. `branches: ["**"]` matches every
   # branch name, including one containing `/` (a `renovate/...` branch, where
   # a bare `*` would stop at the slash) — while a `branches` filter of ANY
-  # pattern structurally excludes tag refs: Forgejo's push matcher only
-  # evaluates a `branches` pattern against a ref that IS a branch (see
-  # forgejo.org/modules/actions/workflows.go, matchPushEvent — a tag ref fails
-  # `refName.IsBranch()` before any pattern is even compared), so this is not
+  # pattern structurally excludes tag refs: a `branches` filter is only
+  # evaluated against a ref that IS a branch, so this is not
   # a narrower branch allowlist, it is "every branch, no tags". A tag run
   # verified nothing branch protection gates (only `main` is protected), and
   # the one guarantee worth keeping — that a tag was cut from a commit that
   # actually passed CI on main — now lives in its own job, which is the only
   # workflow in this repo that still triggers on `tags:`:
-  # .forgejo/workflows/tag-provenance.yml.
+  # .github/workflows/tag-provenance.yml.
   push:
     branches: ["**"]
 
@@ -88,6 +86,9 @@ on:
 # (mailroom-drill-srcpg-*, mailroom-drill-dstpg-*), and while their cleanup now
 # traps EXIT INT TERM, the cheapest way to not leak a container is not to
 # interrupt the thing holding it.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false

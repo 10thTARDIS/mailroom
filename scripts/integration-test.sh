@@ -13,7 +13,7 @@
 #
 # Everything goes through the Docker API only (docker cp, docker exec,
 # container-to-container networking) â no published ports, no bind mounts,
-# no host toolchain. That is deliberate: the Forgejo runner executes jobs in
+# no host toolchain. That is deliberate: the CI runner executes jobs in
 # containers with a mounted docker socket, so host-port mappings and host
 # paths do not resolve from inside a job. This shape works identically on
 # the runner, Linux hosts, and Git Bash on Windows.

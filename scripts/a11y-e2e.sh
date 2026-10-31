@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
-# ACCESSIBILITY, PROVEN END TO END AGAINST THE REAL IMAGE (Forgejo #447, spec §12).
+# ACCESSIBILITY, PROVEN END TO END AGAINST THE REAL IMAGE (#447, spec §12).
 # The automated half of #447; web/ACCESSIBILITY.md is the half it asserts.
 #
 # WHY IT EXISTS. web/ACCESSIBILITY.md records decisions that are invisible in a
@@ -78,7 +78,7 @@
 # Everything is container-to-container: no published ports, no host toolchain
 # beyond the one npm-installed file, no bind mounts of source. Same shape as
 # scripts/hostile-content-e2e.sh and scripts/tabs-e2e.sh, so it runs identically
-# on the Forgejo runner, on Linux, and in Git Bash.
+# on the CI runner, on Linux, and in Git Bash.
 #
 # EXIT CODES (one per failure kind, like hostile-content):
 #     0  CLEAN

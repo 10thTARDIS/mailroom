@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
 # Decide whether a commit can affect a RESTORE — the relevance filter behind
-# .forgejo/workflows/restore-drill.yml (Forgejo #306, #273).
+# .github/workflows/restore-drill.yml (#306, #273).
 #
 # ── why this exists as a script, and why it computes rather than lists ────────
 #
@@ -92,7 +92,7 @@ ROOTS="${MODULE}/cmd/mailroom-drill ${MODULE}/cmd/mailroom-migrate"
 EXTRA_PATHS='scripts/backup.sh
 scripts/restore-drill.sh
 scripts/drill-relevance.sh
-.forgejo/workflows/restore-drill.yml
+.github/workflows/restore-drill.yml
 go.mod
 go.sum
 third_party/go-imap/'
@@ -170,7 +170,7 @@ decide() {
 
   # Anchored prefix match, the same shape the old regex had — a changed file is
   # relevant when its path STARTS with one of these. The sed escapes the regex
-  # metacharacters that occur in real paths (`.` in .forgejo and go.mod), so
+  # metacharacters that occur in real paths (`.` in .github and go.mod), so
   # `go.mod` cannot also match `gohmod`. `/` is deliberately NOT escaped: it is
   # an ordinary character in an ERE, and `\/` is undefined behaviour that only
   # GNU grep happens to accept — every path here is full of them.
