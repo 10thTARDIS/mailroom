@@ -11,13 +11,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [1.98.1] — 2026-10-31
 
-**Mailroom is now developed in the open on GitHub.** This release adds no new features and changes nothing in how Mailroom behaves. It is the first release published from the public repository: the server image now comes from GitHub's container registry, release notes appear on the GitHub releases page, and the README has been rebuilt to show what Mailroom is and where it is going. Every earlier release, back to the first, is described further down this changelog.
+**Mailroom is now developed in the open on GitHub.** This release adds no new features and changes nothing in how Mailroom behaves. It is the first release published from the public repository: the server image now comes from GitHub's container registry, release notes appear on the GitHub releases page, and the README has been rebuilt to show what Mailroom is and where it is going. Every earlier release, back to the first, is described in the project's CHANGELOG.md.
 
 ### Where to get it
 
 - **The image is `ghcr.io/10thtardis/mailroom:1.98.1`.** Pin it by digest, as before; `:latest` is published only as a convenience and is never a pin.
 - **No registry login is needed** to pull it.
-- **Each release has a page on GitHub** whose notes are the matching section of this changelog. Releases up to 1.98.0 were published before the move and are recorded only here.
+- **Each release has a page on GitHub** whose notes are the matching section of CHANGELOG.md. Releases up to 1.98.0 were published before the move and are recorded only there.
 
 ### Upgrading
 
