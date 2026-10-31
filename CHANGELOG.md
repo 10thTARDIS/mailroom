@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.1] — 2026-10-31
+
+**The first beta of 1.99.0: Mailroom now tidies up after its own background work.** Every finished background job used to leave a record behind forever. This beta deletes old ones once a day and adds a report for the person who runs Mailroom. Nothing about reading or sorting mail changes. Later betas add learned placement improvements, and the final 1.99.0 adds OAuth sign-in for AI tools.
+
 ### Housekeeping
 
 - **Old background-job records are cleaned up automatically.** Every snooze, scheduled send, attachment scan, Trash purge and drawer sweep leaves a small record behind when it finishes, and until now nothing ever removed them, so the table only grew. Mailroom now deletes finished records after 30 days, and records of jobs that failed for good after 90 days, once a day. Jobs that are still waiting or running are never touched.
