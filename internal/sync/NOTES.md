@@ -1,4 +1,4 @@
-# internal/sync — go-imap v2 beta.8 spike notes (issue #3)
+# internal/sync — go-imap v2 beta.8 spike notes
 
 Findings below come from reading `github.com/emersion/go-imap/v2@v2.0.0-beta.8`
 source directly out of the module cache (not vendored — vendoring is
@@ -44,7 +44,7 @@ library implements QRESYNC:
 
 **Path forward** (per spec §4's "verify QRESYNC support in v2 at spike
 time"): `SyncSession` implements CONDSTORE-only reconciliation now — the
-sync engine (#10) diffs UIDs via an open-ended `UIDSetRange(uid, 0)`
+sync engine diffs UIDs via an open-ended `UIDSetRange(uid, 0)`
 against the mailbox's current `UIDNEXT` to find new/vanished messages, and
 uses `FetchItems.ChangedSince` (MODSEQ-filtered fetch) to find flag
 changes, rather than QRESYNC's single-round-trip vanished-message list.

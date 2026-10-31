@@ -78,3 +78,6 @@ entra.microsoft.com
 
 # GitHub Container Registry: where the release image is published.
 ghcr.io
+
+# README status badges (CI, release, licence, Go version).
+img.shields.io

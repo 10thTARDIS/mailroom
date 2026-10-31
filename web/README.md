@@ -1,7 +1,7 @@
 # Mailroom web
 
 The web app + shared TS client-core for Mailroom (spec `docs/mailroom-spec.md`
-§12), and the daily-driver UI of Forgejo issue #23. It is a separate toolchain
+§12), and the daily-driver UI. It is a separate toolchain
 from the Go core — no Go code is touched from here — but it is a **shipped
 artifact**: the `web` stage of the repo-root `Dockerfile` builds it and the
 runtime image serves it from `/srv/web` (`config.DefaultWebRoot`), so a type
@@ -32,7 +32,7 @@ web/
 │   │   ├── actions.ts   # every mutation: instant local apply → queue → reconcile
 │   │   ├── views.ts     # the view model → JMAP filters
 │   │   └── routes.ts    # every surface as a value: parse/format the hash, and the
-│   │                    # one table from a route to a View (#373)
+│   │                    # one table from a route to a View
 │   └── app/             # the web app — React, and the ONLY place DOM code lives
 │       ├── main.tsx     # entry point
 │       ├── auth.ts      # login/logout redirects (the session cookie does the rest)
@@ -43,8 +43,8 @@ web/
 │       ├── prefs.ts     # theme (system/light/dark) + density
 │       ├── i18n.ts      # t() + the `en` catalog — no hardcoded user-facing strings
 │       ├── styles.css   # the design system (solid surfaces, no transparencies)
-│       ├── desk.css     # the desk (#375)
-│       ├── settings.css # the settings page (#374) — one searchable page, twelve rows
+│       ├── desk.css     # the desk
+│       ├── settings.css # the settings page — one searchable page, twelve rows
 │       └── ui/          # App (the routing table) + Shell (header, rail, toasts, the
 │                        # one key map) + routes/{List,Settings,Compose}Route, and the
 │                        # components they render: Sidebar, MessageList, ThreadPane,
@@ -113,7 +113,7 @@ On Windows/Git Bash prefix with `MSYS_NO_PATHCONV=1`.
   `http.FileServer`, so a deep path (`/thread/abc`) would 404 on reload. Every
   surface lives in the URL *hash* instead (`#/inbox`, `#/search/from:alice`,
   `#/inbox?m=<id>`, `#/settings/rules`, `?compose=reply:<id>`) — parsed and
-  formatted by `core/routes.ts`, driven by `app/routing.ts` (#373).
+  formatted by `core/routes.ts`, driven by `app/routing.ts`.
 - **Auth.** An unauthenticated browser never loads this bundle — nor any asset of
   it: `/` and every other path redirect to `/auth/login`, which is a
   *server-rendered* sign-in page (`internal/auth/page.go`), deliberately NOT part
@@ -139,7 +139,7 @@ On Windows/Git Bash prefix with `MSYS_NO_PATHCONV=1`.
 | Light/dark (system + manual), density, responsive, high-contrast | **Real** |
 | **Message bodies, attachments, reply-all, PWA/Web Push, account health** | **Real.** See the note below. |
 
-### ⚠ This table was stale for the whole 1.x line (#351)
+### ⚠ This table was stale for the whole 1.x line
 
 Until 2026-08-30 the rows above listed message bodies as **"NOT POSSIBLE YET"**,
 attachments as not downloadable, reply-all as impossible, PWA/Web Push as
@@ -167,5 +167,5 @@ is the code, and what is missing is in the project's issues.
 
 ## CI
 
-`.forgejo/workflows/ci.yml` has a `web` job (`npm ci && npm run build`), and the
+`.github/workflows/ci.yml` has a `web` job (`npm ci && npm run build`), and the
 Dockerfile's `web` stage runs the same command — a type error fails the image.

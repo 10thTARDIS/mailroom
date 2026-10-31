@@ -1,6 +1,6 @@
 # ADR-039: A PGP signature is shown as one of four honest states, and a changed key is the user's decision
 
-**Status:** Accepted (Forgejo #47 v1.92 item 4, #626 section E; builds on ADR-024,
+**Status:** Accepted (v1.92 item 4; builds on ADR-024,
 ADR-037 and ADR-038)
 
 ## Context
@@ -8,7 +8,7 @@ ADR-037 and ADR-038)
 ADR-037 verified a signature inside a decrypted message and ADR-038 refused to
 encrypt to a recipient whose key changed, both leaving the user without a way to
 act. Two things were missing: signature results on ordinary signed mail, and the
-decision a changed key calls for (the 2026-09-07 ask on #47: "signed with a key
+decision a changed key calls for (the 2026-09-07 ask: "signed with a key
 you have not seen from this sender", both fingerprints, trust or keep).
 
 The design question that is not glue: **what may be called "verified".** The
@@ -103,7 +103,7 @@ the sender is.
 
 ### 6. Signatures inside the encryption (RFC 3156 section 6.2)
 
-Added after the 1.92.0-rc.2 test (#47, "rc.2 test finding"): Thunderbird, like
+Added after the 1.92.0-rc.2 test: Thunderbird, like
 GnuPG and most clients, signs and encrypts in ONE OpenPGP message (section 6.2,
 "combined": one-pass signature, literal data and signature packets inside the
 SEIPD packet), not as a nested `multipart/signed` (section 6.1). Section 1 and
@@ -137,7 +137,7 @@ had no signature line.
 - **Weak hashes are refused on our side.** Measured in go-crypto v1.5.2: the v1
   reader verifies a SHA-1 signature as good; `RejectMessageHashAlgorithms` is only
   consulted by the v2 API. The crypto process therefore reports SHA-1 (and MD5,
-  RIPEMD-160) as `bad`, the verify-side twin of the #301 C2 refusal in Sign.
+  RIPEMD-160) as `bad`, the verify-side twin of the matching refusal in Sign.
   `pgpverify` (section 6.1) had the same gap and accepted a SHA-1 detached
   signature as verified; it now applies the same list (`pgpverify.WeakHashes`,
   which a test holds equal to the crypto process's), so the two forms agree. MD5
@@ -174,5 +174,4 @@ had no signature line.
 
 ## References
 
-- #47 (2026-09-07 ask; v1.92 plan item 4; the rc.2 test finding), #626 section E,
-  #301 C2; ADR-024, ADR-037, ADR-038; RFC 3156 sections 5, 6.1 and 6.2.
+- ADR-024, ADR-037, ADR-038; RFC 3156 sections 5, 6.1 and 6.2.

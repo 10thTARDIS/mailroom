@@ -28,7 +28,7 @@ floor get `cannotCalculateChanges` and refetch.
 - Weekly compaction deletes rows older than the retention window (default
   90 days) and advances the floor.
 
-### Compaction (mailroom#526, implemented)
+### Compaction (implemented)
 
 - The job is `internal/changelog`, job kind `change_log_compact` — a
   recurring per-user durable job, seeded at boot and self-rescheduling,

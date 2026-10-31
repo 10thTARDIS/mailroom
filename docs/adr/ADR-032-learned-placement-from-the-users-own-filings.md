@@ -1,6 +1,6 @@
 # ADR-032: Learned placement: known senders are filed by the user's own filings, at ingest, behind a correction gate
 
-**Status:** Accepted (Forgejo #714, increment 1; amends ADR-023)
+**Status:** Accepted (increment 1; amends ADR-023; next increments: #28)
 
 ## Context
 
@@ -22,8 +22,8 @@ rule already does the job.
 
 Two things change that verdict for known senders:
 
-1. **ADR-023's measurements came from a test mailbox with little history**
-   (#714). A long-used daily mailbox is a different
+1. **ADR-023's measurements came from a test mailbox with little history**.
+   A long-used daily mailbox is a different
    population, and ADR-023's numbers do not describe it.
 2. **The goal is different.** Most mail comes from repeat senders, so a
    memory of "this sender's mail goes in this area", learned from the user's
@@ -33,12 +33,12 @@ Two things change that verdict for known senders:
    user to accept a rule.
 
 ADR-023 still governs everything else. Content generalisation for unseen
-senders stays on the 2.x semantic route (#67/#241), and the per-label learner
+senders stays on the 2.x semantic route (#8/#22), and the per-label learner
 stays suggest-only behind its promotion gate. `internal/ml/train.go` still
 trains label models with `dryRun = true`. Learned placement does not use those
 models, and this ADR does not change their status.
 
-### What a long-used mailbox looks like (#714, read-only, counts only)
+### What a long-used mailbox looks like (read-only, counts only)
 
 Measured read-only on a long-used daily mailbox, and reported here as findings rather
 than figures:
@@ -73,7 +73,7 @@ The evidence is a row of `app.message_labels` for an area's **own** label with
 `applied_by = 'user'`. Re-file, the label menu, the sender card and drag and
 drop all write that row. Rows from `desk`, `setup`, `rule`, `ml`, `agent`, or
 the new `learned` are never evidence. A model trained on its own output
-confirms its own mistakes (#169). Mail in Trash is excluded.
+confirms its own mistakes. Mail in Trash is excluded.
 
 ### 2. Key: the From address, with the domain as a narrow fallback
 
@@ -255,7 +255,7 @@ verdict is about, to differ from Mailroom's.
   - The pass clause must carry exactly one `header.from`, equal to the
     sender's domain after case-folding, root-dot removal and IDNA
     normalisation (`ml.NormalizeAuthDomain`). A pass with no `header.from`,
-    or with two, does not count. **Amended by #846** (see "Amendment:
+    or with two, does not count. **Amended** (see "Amendment:
     relaxed DMARC alignment" below): it may also be exactly the sender
     domain's organisational domain.
   - Any DMARC `fail` clause vetoes.
@@ -394,7 +394,7 @@ apply (addendum).
 
 ## Addendum (increment 2a): the backfill of existing mail
 
-**Status:** Accepted (#714, increment 2a). The simulation's per-sender list was
+**Status:** Accepted (increment 2a). The simulation's per-sender list was
 reviewed and applying it approved.
 
 `mailroom-admin placement-backfill --user-id U` applies learned placement to
@@ -441,7 +441,7 @@ states that its count is exact.
 ### A3. What a move is
 
 A move is Re-file's swap, from the area-filing plan Rule/apply uses
-(`PlanAreaFiling`, #708). The other areas' own labels applied by `desk` or
+(`PlanAreaFiling`). The other areas' own labels applied by `desk` or
 `setup` come off, and the learned area's own label goes on with
 `applied_by = 'learned'`. User, rule, learned and other routing labels are
 never touched: such mail is held before the planner decides, and a contested
@@ -513,14 +513,14 @@ it has already undone and changes nothing.
   bound of 0.764, and the area stops. Adding 30 kept backfills would make
   that 49/50, about 0.89, and the area would act again.
 
-## Amendment (#846): relaxed DMARC alignment for subdomain senders
+## Amendment: relaxed DMARC alignment for subdomain senders
 
 **Status:** Accepted (decision, 2026-10-23: relax it as
 described).
 
 ### Finding
 
-The `placement-explain` run for #840 showed that most
+A `placement-explain` run showed that most
 senders refused as `unauthenticated` wrote from a subdomain, such as
 `news.example.com`. Each message carried the provider's trusted header with
 `dkim=pass`, `spf=pass` and `dmarc=pass header.from=example.com`. The
@@ -592,10 +592,10 @@ Its zero value matches nothing, so no caller changes behaviour by accident.
 
 | Caller | Mode | Why |
 |---|---|---|
-| `ingest.LearnedSender` (arrival, `placement-backfill` via `BackfillSenders`, `placement-explain` via `ExplainLearnedRaw`) | **Relaxed** | The decision on #846. One function serves all three paths, so the backfill and the explanation judge exactly as arrival does. |
+| `ingest.LearnedSender` (arrival, `placement-backfill` via `BackfillSenders`, `placement-explain` via `ExplainLearnedRaw`) | **Relaxed** | The decision in that amendment. One function serves all three paths, so the backfill and the explanation judge exactly as arrival does. |
 | `mailroom-admin placement-explain`, the per-clause `header.from` line (`DMARCHeaderFromMatch`) | **Relaxed** | It restates the decision above, so it prints "exact match", "org-domain match" or "no". |
 | `mailroom-admin from-field-report`, the DMARC column | **Relaxed** | Its contract is to measure the verdict placement acts on. |
-| `ingest.autocryptAuthenticated` (Autocrypt key eligibility, ADR-038) | **Strict** | Encryption-key trust is a separate decision. Relaxing it was not part of #846, so it keeps its behaviour. |
+| `ingest.autocryptAuthenticated` (Autocrypt key eligibility, ADR-038) | **Strict** | Encryption-key trust is a separate decision. Relaxing it was not part of that amendment, so it keeps its behaviour. |
 | `ical.Verified` (calendar "Verified") | **Strict** | The badge asserts the exact organiser address to the user. Relaxing it needs its own decision. |
 
 **Not callers:** the sender warnings read `AffirmativelyPassed`. The
@@ -656,12 +656,12 @@ test went red, and the mechanism was restored.
 
 ## References
 
-- **#714**: the epic, the production measurements and this design.
+- **#28**: the next increments of learned placement.
 - **ADR-023**: amended here, for placement of known senders.
 - **ADR-031**: area labels are local-only, which is why the provenance needed
   its own property.
-- **#169**: never train on your own output.
-- **#708**: Re-file's swap semantics. A rule's area label wins at ingest.
+- Never train on your own output.
+- Re-file's swap semantics: A rule's area label wins at ingest.
 - `internal/placement`, `internal/store/learned_placement.go`,
   `internal/store/placement_report.go`, `db/migrations/00060_learned_placement.sql`.
 - Increment 2a: `internal/store/placement_backfill.go`,

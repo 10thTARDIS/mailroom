@@ -1,6 +1,6 @@
 # Client design exploration: six directions to react to
 
-*Forgejo #371, first issue of the v1.65.0 client experience rebuild. A seventh direction, written
+*The first issue of the v1.65.0 client experience rebuild. A seventh direction, written
 from a reader's reaction to the first six, is at the end of the directions.*
 
 This is a document to point at, not a plan. It offers six genuinely different answers to "what
@@ -583,7 +583,7 @@ solves a problem the user does not have, and the discomfort it produces is not t
 
 A reader of the six described what they want instead. It is not any one of them; it is a
 hybrid of three ideas the exploration kept apart, plus one thing none of them centred. This is what
-"not that, but the middle bit" looks like written down, and it is the direction #372 wireframes
+"not that, but the middle bit" looks like written down, and it is the direction the wireframes
 first.
 
 What the reader said, in substance: there must be an inbox. It should be prioritised, either as two
@@ -693,11 +693,11 @@ whatever share of the inbox has no mapped label starts in Needs sorting.
 **Server work.** The structure needs none: areas are labels and tabs, the line is the existing
 threshold, archive and All mail are existing folder semantics, and the flag can ride the existing
 flagged state with a label or keyword for its reason. Two small things to check before wireframes
-become plans: a per-user "which labels are areas" setting, which is the same small addition #375
+become plans: a per-user "which labels are areas" setting, which is the same small addition the "what Inbox means" proposal
 already anticipated; and whether the rules engine can express "older than N days" for self-emptying
 drawers, or whether that is a job.
 
-**Settled in pass-1 wireframes (#372, three rounds).** Two tabs (Review first,
+**Settled in pass-1 wireframes (three rounds).** Two tabs (Review first,
 Everything else) over one desk. The in-tray is a bounded strip above the tabs: one line closed
 (count, oldest wait, how many over a week), at most five rows open, the full tray as its own view
 grouped by wait; one flag, no reasons. Areas as listed, the five tabs as defaults, a mapped label
@@ -719,7 +719,7 @@ tray shows how long an item has waited and the flag today is a boolean. Everythi
 per-account and per-tab query filters, thread collapse, attachment release, snooze wake markers,
 sender warnings, seal state, account health.
 
-**Settled in pass-2 mockups (#372, six rounds).** The structure dressed once, in both
+**Settled in pass-2 mockups (six rounds).** The structure dressed once, in both
 themes side by side. A cool paper-grey ground with the list as a lighter sheet on it, three tone
 steps and hairlines for all layering, no transparency; one verdigris accent spent on the line, the
 focused row and the active tab; two account colours and otherwise no colour on rows; four semantic
@@ -869,7 +869,7 @@ any particular mailbox are recorded.
 **What these would and would not say.** They would say whether the mailbox is mostly durable
 relationships, whether the alias structure is real, and how many messages a threshold surfaces a
 day. They would say nothing about whether those messages are the right ones: the classification
-epic (#220) found that respectable ranking coexisted with poor precision at the threshold that
+epic found that respectable ranking coexisted with poor precision at the threshold that
 decides what a user sees, so any direction that puts the score in charge is betting on a model
 whose precision at the operating point has to be re-measured, not assumed.
 
@@ -879,30 +879,30 @@ The milestone's other issues were drafted before any of this existed. Their fate
 direction chosen, so none is rewritten here, but the effect of each direction is
 already clear enough to record.
 
-- **#375, let the user choose what "Inbox" means.** Invalidated in its current framing by all six:
+- **Let the user choose what "Inbox" means.** Invalidated in its current framing by all six:
   no direction makes "which view is the inbox" a stored preference. The question it was asking
   survives as the first row of the table above (what the score does to the list) and the second (what
   category is). Single File comes closest to the original, with a per-session choice of queue. Its
-  proposal to pull "split inbox" out of #68 is answered differently by each direction (see the last
+  proposal to pull "split inbox" out of the notifications, shortcuts and webhooks issue (#9; split inbox is now #41) is answered differently by each direction (see the last
   table row).
-- **#373, routing and a settings shell.** Survives under every direction: all six make settings a
+- **Routing and a settings shell.** Survives under every direction: all six make settings a
   destination you enter and leave, and two make it a route that the browser's back button understands.
-- **#374, settings pages for accounts, identities and signatures.** Reshaped under every direction:
+- **Settings pages for accounts, identities and signatures.** Reshaped under every direction:
   five make settings one searchable page whose sections show state rather than a set of pages;
   Correspondents First attaches relationship settings to the correspondent and keeps only instance
   settings on a page.
-- **#376, a design system worth the name.** Survives and is sharpened: every direction wants two equal
+- **A design system worth the name.** Survives and is sharpened: every direction wants two equal
   token ramps rather than one inverted, semantic tones (warning, held, sealed, returned) that hold in
   both themes, colour reserved for accounts and labels, and no transparency.
 - **The quarantine-release interaction (ADR-027 section 8).** Every direction gives it a home and
   the same wording rules; the server half already exists.
-- **The collapseThreads client half (#210).** Every direction makes the row a thread. Conversations may be rare on a given mailbox, which is worth checking.
-- **#380, React 19 and TypeScript 7.** Unaffected by the choice; still held for after the components
+- **The collapseThreads client half.** Every direction makes the row a thread. Conversations may be rare on a given mailbox, which is worth checking.
+- **React 19 and TypeScript 7.** Unaffected by the choice; still held for after the components
   settle.
 
 ## What happened next
 
-The seventh direction was the result. #372 turned it into structural wireframes (three rounds) and
+The seventh direction was the result. The wireframing work turned it into structural wireframes (three rounds) and
 then dressed mockups (six rounds) until the structure stopped moving. The provisional issues were
 rewritten against the result, the surfaces the mockups added were filed as their own issues, the
 server work the design needs was filed rather than assumed, and the rebuild was carved into

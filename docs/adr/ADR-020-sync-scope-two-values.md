@@ -1,7 +1,7 @@
 # ADR-020: `sync_scope` is two values, not three — `headers` cannot exist under ADR-001
 
 **Status:** Accepted (narrows the baseline schema's advertised enum; raised by
-Forgejo #62, selective sync)
+selective sync)
 
 ## Context
 
@@ -20,7 +20,7 @@ if stored.SyncScope == syncScopeOff || !selectable(mb) { … skip … }
 ```
 
 Everything else falls through to a full sync. There was no `CHECK` constraint, and
-until #62 there was no way to write the column at all except direct SQL — so the
+until selective sync there was no way to write the column at all except direct SQL — so the
 only person who could ever have set `'headers'` was an operator reading that
 comment and trusting it.
 
@@ -50,7 +50,7 @@ at minimum:
 - how the reaper reasons about a mailbox holding a mix of both.
 
 That is an architecture change with its own ADR, not a setting. It also has a much
-weaker motivation than it first appears: the point of selective sync in #62 is *do
+weaker motivation than it first appears: the point of selective sync is *do
 not touch this folder*, and `'off'` delivers that completely. `'headers'` is an
 optimisation for a folder you *do* want to see — a different feature, wanting a
 different design (probably lazy body fetch on open, which needs no new identity).

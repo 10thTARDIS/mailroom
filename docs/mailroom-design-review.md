@@ -91,7 +91,7 @@ Ordered roughly by how much pain the omission causes.
 11. **Schema migration policy** once users hold tens of GB: name the tool (goose / golang-migrate / Atlas — any is fine), forward-only, **expand-and-contract pattern** with online backfill jobs for large-table changes (never a blocking `UPDATE` in a migration), migration checks already promised in CI (§16) — define what they check.
 12. **ADRs:** add `docs/adr/` and record every decision in the register below as ADR-001…N. Cheap, and it's how the open-source version explains itself.
 13. **Per-user data export** (v1.x in matrix): specify format now (mbox or maildir + JSON sidecars for labels/scores) since it constrains nothing but reassures everyone; export is also your escape hatch if a migration goes wrong.
-14. **PWA push on iOS:** Web Push works only for installed-to-home-screen PWAs on iOS (16.4+), with OS-level throttling. Fine — but set expectations in docs so "notifications don't work on my iPhone" isn't issue #1.
+14. **PWA push on iOS:** Web Push works only for installed-to-home-screen PWAs on iOS (16.4+), with OS-level throttling. Fine — but set expectations in docs so "notifications don't work on my iPhone" isn't the first issue anyone files.
 
 ---
 
@@ -219,7 +219,7 @@ Covered by D1/D3/D8/D9 plus: put `schema_version` in backups; treat `messages`/`
 10. Migration tool chosen; `docs/migrations.md` policy written.
 11. Migadu answers in hand (concurrent IMAP cap; SMTPUTF8) or conservative defaults documented.
 12. License chosen.
-13. The 0.5 daily-driver milestone defined in Forgejo with its issue list.
+13. The 0.5 daily-driver milestone defined on the tracker with its issue list.
 
 ---
 

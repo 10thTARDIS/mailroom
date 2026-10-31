@@ -1,7 +1,7 @@
 # ADR-018: A second hash catches re-delivered mail; identity stays the content hash
 
 **Status:** Accepted (amends ADR-001's "no canonicalization in v1"; raised by
-Forgejo #206, dogfooding)
+dogfooding)
 
 ## Context
 
@@ -113,8 +113,8 @@ Three implementation details are load-bearing rather than incidental:
   backfill-dedup-hash`, which must decrypt each blob and so cannot be a SQL
   `UPDATE`. NULL means "does not participate", i.e. the pre-00023 behaviour. Not
   unique because rows sharing a hash can already exist in a real database *right
-  now*, so the constraint could not be created; once those are collapsed (#206
-  part 3, deliberately separate because it moves provenance and deletes message
+  now*, so the constraint could not be created; once those are collapsed (a
+  deliberately separate step, because it moves provenance and deletes message
   rows) a follow-up migration can add it and make the guarantee structural.
 - **Until the backfill runs, the fix only protects mail that arrives after it.**
   This is stated in the command's own output rather than left to be discovered.
@@ -139,4 +139,3 @@ Three implementation details are load-bearing rather than incidental:
 - spec §4, §14 · `docs/mailroom-data-model.md` §2 (its four worked dedup examples)
 - `db/migrations/00023_dedup_hash.sql`, `internal/ingest/dedup.go`,
   `cmd/mailroom-admin/diffduplicates.go`, `cmd/mailroom-admin/backfilldedup.go`
-- Forgejo #206

@@ -1,6 +1,6 @@
 # ADR-030: Threading is Message-ID/References hint matching; JWZ stays unwired until a mailbox needs it
 
-**Status:** Accepted (Forgejo #434, v1.81.1; a deliberate deviation from spec §4)
+**Status:** Accepted (v1.81.1; a deliberate deviation from spec §4)
 
 ## Context
 
@@ -27,17 +27,17 @@ messages in four directions and takes the **first** match (oldest
 | Merges logged | No merges happen |
 
 `internal/thread` is a complete, tested implementation of §4: the five JWZ
-steps, loop detection, root-set pruning and the restricted fallback (#12). It
-has no importers. Until #429/#434 nobody had noticed the deviation, because a
-correct JWZ package in the tree makes it look conformant, and #210's first fix
-was made in that package and changed nothing.
+steps, loop detection, root-set pruning and the restricted fallback. It
+has no importers. Nobody had noticed the deviation, because a
+correct JWZ package in the tree makes it look conformant, and the first fix for a
+threading bug was made in that package and changed nothing.
 
-The package was kept, documented as unused
-(#434 option C), and no ADR was written because that was a deferral. The
+The package was kept, documented as unused,
+and no ADR was written because that was a deferral. The
 deviation is now recorded as a decision.
 
 **What the decision rests on.** On a small test mailbox (measured
-for #434): few messages carry References, only a handful of those resolve to an existing
+at the time): few messages carry References, only a handful of those resolve to an existing
 thread, and none resolve to more than one. JWZ would have merged nothing. That
 zero has a tiny denominator: it shows the mailbox cannot exercise the
 difference, not that the difference does not matter. A large long-used mailbox
@@ -82,6 +82,5 @@ has not been measured.
 ## References
 
 - Spec §4 (`docs/mailroom-spec.md`, the threading sentence)
-- #434, #429, #210, #12
 - `internal/store/ingest.go` (`FindThreadByHints`), `internal/thread/`
 - `docs/mailroom-design-review.md` item 7 (threading false merges)

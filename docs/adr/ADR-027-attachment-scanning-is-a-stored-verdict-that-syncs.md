@@ -1,7 +1,7 @@
 # ADR-027: Attachment scanning is a *stored, syncing verdict* — not a check at the click
 
-**Status:** **Accepted** (Forgejo #333). Increments 0–5 built and deployed (v1.57–v1.61); the
-client *interaction* for releasing a quarantine remains with #371–#376. Amendments made after
+**Status:** **Accepted**. Increments 0–5 built and deployed (v1.57–v1.61); the
+client *interaction* for releasing a quarantine remains to be built. Amendments made after
 measurement are marked inline as `AMENDED, increment N` rather than rewritten over, because in
 three of five increments what this document specified turned out not to match what the database
 or the daemon actually did.
@@ -30,7 +30,7 @@ addresses**, and it bounds this work:
 > ask for it. *ClamAV scanning is v1.x.*
 
 ⚠ The first draft said that document "names exactly one residual path". It names about ten, of
-which this is one. #333 phrased it correctly and the compression lost the qualifier — the
+which this is one. The original proposal phrased it correctly and the compression lost the qualifier — the
 difference between *"this closes the residual risk"* and *"this closes one of ten"*.
 
 ## 1. The requirement, and what it does not deliver
@@ -65,30 +65,30 @@ The first draft let §4 read as though closing the visible-but-unscanned window 
   *worse than no badge*: it inverts the caution that the present absence of any claim
   preserves. What syncs is "scanned, nothing found, as of DB *N*, *T* ago" — never "clean".
 
-⚠ **The offline consumers do not exist yet.** Native apps are 2.x (#64), the Tauri client 3.x
-(#72). This ADR specifies the server side so a verdict *can* sync; it does not design a UI for
+⚠ **The offline consumers do not exist yet.** Native apps are 2.x (#5), the Tauri client 3.x
+(#13). This ADR specifies the server side so a verdict *can* sync; it does not design a UI for
 a client that does not exist.
 
 ## 2. What increment 0 measured
 
-`mailroom-admin attachment-report` (PR #378), against a real corpus.
+`mailroom-admin attachment-report`, against a real corpus.
 
 ⚠ **Define the unit first, because it is not "files the sender attached".** `internal/mime`
 classifies **every non-text leaf part** as an attachment (`walk.go:226-249`) — including
 inline `cid:` images and `application/pgp-signature` parts. The report deliberately uses the
 system's own definition so its numbers compare with `has_attachments` and JMAP. The
-consequence: "233 attachments" counts leaf parts, and an unknown but probably large share of
-the 194 JPEGs are inline newsletter images rather than files anyone attached.
+consequence: the attachment count is a count of leaf parts, and an unknown but probably large
+share of the JPEGs are inline newsletter images rather than files anyone attached.
 
 | | |
 |---|---|
-| messages / attachment parts | 2041 / 233 |
-| unreadable, truncated, nested | 0 / 0 / 0 |
-| largest part | 5.4 MB |
-| over clamd's `StreamMaxLength` (see the correction below) | 0 |
-| zip-shaped | 0 |
-| declared types | 194 jpeg, 17 pdf, 8 pgp-signature, 6 png, 3 ics, 3 octet-stream, 2 csv |
-| declared ≠ sniffed | 16 — **13 shown benign**, **3 unexplained** |
+| attachment parts | about one per ten messages |
+| unreadable, truncated, nested | none |
+| largest part | a few MB |
+| over clamd's `StreamMaxLength` (see the correction below) | none |
+| zip-shaped | none |
+| declared types | mostly JPEG; then PDF, PGP signatures, PNG, iCalendar, octet-stream and CSV |
+| declared ≠ sniffed | a small number — **most shown benign**, **a few unexplained** |
 
 ⚠ The first draft said "16, all benign". Benignity was demonstrated for 13 (pgp-signature, ics
 and csv sniffing as `text/plain`). The three unexplained are the octet-stream-declared parts —
@@ -120,18 +120,18 @@ nothing else.
 `app.attachments` has existed since the scaffold commit, carrying `filename`, `content_type`,
 `size_bytes`, `content_hash` and a `scan_status` column already reading
 `'unscanned'|'clean'|'flagged'`. **No production code writes it.** Measured: 0 rows, against
-messages that did carry `has_attachments` (#383 repaired a few).
+messages that did carry `has_attachments` (a later fix repaired a few).
 
 Storing a per-attachment verdict therefore means **building that projection first** — a write
 path at ingest plus a backfill. Unavoidable under §1.
 
 ⚠ **The first draft's claim about the reclaim guard was wrong on three counts, and the error
-was copied from #333's evidence comment instead of checked against the code.** It said the
+was copied from the proposal's evidence instead of checked against the code.** It said the
 guard exists in "both copies", is "structurally incapable of firing", and is "untested code".
 In fact:
 
 - There is **one** guard. `internal/store/blobreclaim.go` opens with *"This file holds the ONE
-  blob-reclaim guard the store shares (#300)"*. The other reference in that file is
+  blob-reclaim guard the store shares"*. The other reference in that file is
   `BlobRowCensus`, a read-only report.
 - It **runs constantly** — on every draft retire, purge, collapse and account delete. What has
   never happened in production is its *attachments clause matching*, because the table is
@@ -140,9 +140,9 @@ In fact:
   `app.attachments` row and asserts reclaim is withheld; `purge_integration_test.go` does the
   same; the suite carries the positive control. Those tests predate the claim by two weeks.
 
-This is the #169/#220 pattern the project names — a claim from a measurement thread
-propagating into a decision document unaudited. It was repeated in #333 and #378 and needs
-correcting there too. **What is true:** the clause becomes production-live the moment the
+This is the pattern the project names — a claim from a measurement thread
+propagating into a decision document unaudited. It was repeated in the proposal and in the report's
+write-up and needs correcting there too. **What is true:** the clause becomes production-live the moment the
 projection populates `content_hash`, and that transition deserves attention even though the
 code is covered.
 
@@ -175,7 +175,7 @@ Re-measured with **distinct files**, which a content-hash cache cannot hit (Clam
 was used: a §5c re-scan is *triggered by a signature update*, which **flushes that cache** — so
 the estimate used the one number its own trigger invalidates.
 
-**Full-corpus cold re-scan: ~9 seconds**, not the 5 the first draft claimed.
+**A full cold re-scan of that corpus took seconds, nearly twice what the first draft claimed.**
 
 ⚠ **Still unmeasured, and stated rather than hidden:** the files were random bytes, which
 engage no format parser. Real PDFs and archives cost more, possibly much more. The figures also
@@ -245,7 +245,7 @@ coding.)
 
 4. **A single message must never pause the account.** **Done**, and it is what 2 and 3 are for.
 
-> **AMENDED, increment 6 (#415): the breaker was built into ONE of the two paths that send
+> **AMENDED, increment 6: the breaker was built into ONE of the two paths that send
 > bytes to clamd, and the other one undid it.** Step 3 above is written as a property of
 > ingest, and that is where it lives. But the row ingest writes when the breaker opens is due
 > on the next re-scan pass, and `internal/rescan` sent the same bytes to the same daemon with
@@ -307,7 +307,7 @@ transaction as the message rows; the change-log invariant requires it anyway.
 
 ### 4d. First sync, honestly
 
-Synchronous scanning does **not** reintroduce #351 B2's memory problem: that fix was streaming
+Synchronous scanning does **not** reintroduce the earlier first-sync memory problem: that fix was streaming
 ingest, and scans happen per message inside the stream.
 
 ⚠ But cursors advance **once per mailbox**, so a clamd blip part-way through a very large
@@ -332,7 +332,7 @@ quarantine on a cadence** — turning every false positive into a recurring figh
 persisted state that re-scan respects, and it is a mutation of a JMAP-visible object, so it owes
 a `change_log` row.
 
-> **AMENDED, increment 5 (#396): `released` is NOT a value of `scan_status`.** The concern above
+> **AMENDED, increment 5: `released` is NOT a value of `scan_status`.** The concern above
 > is exactly right and the modelling was wrong. It now lives in `app.attachment_releases`, keyed
 > on the part's **content digest** (migration 00044), for three reasons the column could not
 > satisfy:
@@ -349,8 +349,8 @@ a `change_log` row.
 >    decision. Nothing a scanner writes can reach the release table.
 >
 > No data migration was needed: no code ever wrote the value (`SetScanVerdicts` refused it by
-> construction, and nothing else writes the column), checked against the live database — 267
-> `clean`, 1 `unknown`, 0 `released`. The vocabulary is now four states plus a release flag.
+> construction, and nothing else writes the column), checked against a live database — only
+> `clean` and `unknown` present, no `released`. The vocabulary is now four states plus a release flag.
 
 ### 5a. ⚠ Stock ClamAV collapses `unknown` into `clean`, so the model does not exist by default
 
@@ -435,7 +435,7 @@ seen rather than assumed.
 tiering saves nothing.** Every attachment sits in an actively re-scanned band, so the whole corpus
 re-scans at least weekly. The tiers are upper bounds on frequency, not yet a reduction.
 
-> **AMENDED, increment 6 (#409/#407/#415): the queue had no termination argument, and the
+> **AMENDED, increment 6: the queue had no termination argument, and the
 > missing one cost more than any tier boundary could.** This section specifies when a row
 > becomes *due*. It never says when a row *leaves* — and the predicate that implements it
 > answered only the first question, so three ordinary populations were due forever:
@@ -500,7 +500,7 @@ affirmatively endorses the file. The first draft contained zero occurrences of "
 
 **Required:** `pgpmail.Signals` already detects `PGPMIMEEncrypted` with no key material. An
 encrypted part maps to **`unknown`, never `clean`**, and the scan moves to wherever plaintext
-exists once #47's decryption lands. Same rule for encrypted archives (§5a).
+exists once PGP decryption lands. Same rule for encrypted archives (§5a).
 
 **Done** (increment 3, `ingest.forcedUnknownReason`), covering `PGPMIMEEncrypted` **and**
 `SMIMEEncrypted`. ⚠ Inline PGP (`PGPInlineMessage`) is deliberately **excluded**: its
@@ -508,7 +508,7 @@ ciphertext sits in a text body rather than an attachment part, so no attachment 
 blessed and the parts alongside it are genuinely scannable. Folding it in would mark ordinary
 attachments `unknown` because the sender happened to paste an armored block into the body.
 
-> **AMENDED (#47 increment 6b, ADR-037): the scan has moved to where plaintext
+> **AMENDED (PGP decryption, ADR-037): the scan has moved to where plaintext
 > exists, which is the request.** Decrypted plaintext is never stored, so there is nothing
 > to scan at ingest and nowhere to keep a verdict. Parts of a decrypted message have their
 > own partIds (`e.<path>`) and are scanned by clamd ON DEMAND when downloaded or previewed,
@@ -610,7 +610,7 @@ They are not:
 release** — which then covers CID rendering, client-side previews, foreign clients and raw fetch
 automatically. Raw-message and export paths need their own decision (§11).
 
-This is architecture, not the UI detail deferred to #371–#376. What is legitimately deferred is
+This is architecture, not the UI detail deferred to the client work. What is legitimately deferred is
 the *interaction*: a confirmation dialog clickable on muscle memory is theatre; a release so
 obstructive that a false positive becomes a deletion is the opposite failure.
 
@@ -618,26 +618,26 @@ obstructive that a false positive becomes a deletion is the opposite failure.
 ever deleted automatically. The scanner is the component most likely to be wrong.
 
 ⚠ **Quarantine acts on content, not on one row.** Re-delivered mail means the same attachment
-exists as N rows sharing a `content_hash` (#206). A quarantine or a release must hit **all** of
+exists as N rows sharing a `content_hash`. A quarantine or a release must hit **all** of
 them — the writeback-hit-1-of-N-copies bug's exact shape.
 
-> **AMENDED, increment 5 (#396): the requirement stands, the join key did not exist, and the
+> **AMENDED, increment 5: the requirement stands, the join key did not exist, and the
 > reason it duplicates is not the one named above.** Two measurements taken before any of this
 > was built:
 >
-> - **`app.attachments.content_hash` is NULL on all 268 rows.** That column is a **blob
+> - **`app.attachments.content_hash` is NULL on every row.** That column is a **blob
 >   reference** — `blobreclaim.go` reads it to decide whether a blob is still in use — and
 >   `internal/attachproj` leaves it NULL deliberately, because a part's bytes are a slice of the
 >   message blob and there is no per-attachment blob to name. Writing a part digest into it would
 >   arm the reclaim guard against blobs that do not exist. Migration 00044 therefore adds a
 >   separate `part_hash`, computed in `internal/attachscan` where both scanning paths already
 >   hold the decoded bytes, so ingest and re-scan cannot derive it differently.
-> - **Zero messages share a `dedup_hash`.** There are no redeliveries on this corpus at all, so
->   #206 is the wrong citation. What duplicates is the case `blobreclaim.go` already names — the
+> - **Zero messages share a `dedup_hash`.** Redeliveries were absent from the measured corpus, so
+>   re-delivery is the wrong explanation. What duplicates is the case `blobreclaim.go` already names — the
 >   same attachment on several **different** messages: by the only proxy available before a
 >   digest existed, `(filename, size, content_type)` equality, a large share of rows,
 >   one newsletter image on a dozen messages. ⚠ That figure is an upper bound and provably loose
->   (eight `signature.asc` at 307 bytes are eight *different* signatures), which is why
+>   (several `signature.asc` parts of identical size are different signatures), which is why
 >   `attachment-report` now prints the true digest-based census.
 >
 > **What enforcement does, as shipped:** `flagged` and `unknown` are refused at the part-download
@@ -669,7 +669,7 @@ claim it can make.
 for every attachment-bearing message, plus search-index replay. Survivable for a small corpus; a full
 client resync of a very large one is not.
 
-> **AMENDED, increment 5 (#396): "append a change row on every mutation" is the obvious reading
+> **AMENDED, increment 5: "append a change row on every mutation" is the obvious reading
 > of the load-bearing invariant and it is the WRONG one here.** Re-scan rewrites every row of
 > every due message on every pass, and §5c's tiers keep this entire corpus in an actively
 > re-scanned band — so a row per `UPDATE` is ~257 `Email` change rows a week, forever, for
@@ -809,7 +809,7 @@ the residual — the file on disk — is what this ADR addresses. **Spec §11 sh
 and never rendered*.** `hostile-content.md`'s residual entry must be **reworded, not removed**,
 since §1a establishes the risk is narrowed rather than closed.
 
-**Done in increment 5 (#396).** Spec §11 now reads "neutralised and never rendered", with the
+**Done in increment 5.** Spec §11 now reads "neutralised and never rendered", with the
 mechanism named (the server chooses the Content-Type from a small allowlist) and the one place
 the scanner DOES withhold bytes stated beside it, so the sentence is not read as "we block
 nothing". `hostile-content.md`'s entry is reworded rather than removed and grew the four
@@ -840,9 +840,9 @@ deliberately allows; the raw message is never blocked; and an encrypted or over-
    three orders of magnitude.
 
    ⚠ **THE PREDICATE SPELLED OUT ABOVE WOULD HAVE DONE NOTHING, and it stood in this document and
-   in #395 unchallenged.** `scanned_db_version < current` matches NOTHING for a never-scanned row,
+   in the increment plan unchallenged.** `scanned_db_version < current` matches NOTHING for a never-scanned row,
    because `NULL < n` is NULL rather than true. Checked against the live database before any of it
-   was written: it would have skipped all 255 unscanned attachments — the entire backlog the
+   was written: it would have skipped every unscanned attachment — the entire backlog the
    increment exists to clear — while the job logged a successful pass. The live predicate is
    `(scanned_db_version IS NULL OR scanned_db_version < $1)`, and the census prints the
    never-scanned count on its own line so a backlog that is not moving is a number rather than
@@ -864,15 +864,15 @@ deliberately allows; the raw message is never blocked; and an encrypted or over-
    the job ran, and it logged a successful pass.** None of them could produce an error. That is
    the failure mode this whole document keeps circling, arriving in the same four lines of SQL
    each time.
-5. Enforcement (§8) and the client surface (#371–#376).
+5. Enforcement (§8) and the client surface.
 
-   **Done** (v1.61.0, #396) — the server half. One gate on the part-download route, plus the
+   **Done** (v1.61.0) — the server half. One gate on the part-download route, plus the
    preview route and the draft-attach path; `Email.attachmentScan` keyed by `partId`;
    `Email/releaseAttachment` and `app.attachment_releases`; the export sidecar §11 had been owed
    since increment 2; the digest census in `attachment-report`.
 
    ⚠ **THE JOIN KEY §8 NAMES DID NOT EXIST, AND THE DUPLICATION IT CITES IS NOT WHAT DUPLICATES.**
-   `content_hash` is NULL on all 268 rows on purpose (it is a blob reference the reclaim guard
+   `content_hash` is NULL on every row on purpose (it is a blob reference the reclaim guard
    reads), and zero messages share a `dedup_hash`, so the re-delivery framing was wrong too.
    Both measured before writing anything; see the amendment in §8. Third increment running in
    which a specification turned out not to be a measurement.
@@ -880,10 +880,9 @@ deliberately allows; the raw message is never blocked; and an encrypted or over-
    ⚠ **AND THE INVARIANT, APPLIED LITERALLY, WOULD HAVE MEANT A WEEKLY FULL RESYNC** — a change
    row per verdict write, over a corpus every tier re-scans. See §9's amendment.
 
-   What remains is the client *interaction* (#371–#376): the property, the method and the data
+   What remains is the client *interaction*: the property, the method and the data
    model are here for it to build against.
-6. **Termination: a row the scanner could not process must still leave the queue** (#409, #407,
-   #415). Not a feature — the correction to the same four lines of SQL, for the fourth time, and
+6. **Termination: a row the scanner could not process must still leave the queue**. Not a feature — the correction to the same four lines of SQL, for the fourth time, and
    the first one where the shape is *different*.
 
    The three earlier defects were all "the row that needed work did not match". This one is its
@@ -903,7 +902,7 @@ deliberately allows; the raw message is never blocked; and an encrypted or over-
    including the ones that give up, as the predicate's leading factor — see §5c's amendment for
    the termination argument and §4b's for how the same witness closes the re-scan path's missing
    circuit breaker. Plus `SetScanVerdicts` and `StampScanVerdicts` collapsing into one method
-   with a required stamp, because **two write paths where only one stamped** is what #407 was.
+   with a required stamp, because **two write paths where only one stamped** is what one of those defects was.
 
    ⚠ **The audit was blind to all of it**, and that is the finding to carry. `attachment-report`
    re-derived "due for re-scan" from stamped versions and never learned about the digest arm, so
@@ -936,7 +935,7 @@ deliberately allows; the raw message is never blocked; and an encrypted or over-
 Mailroom's structured log is the only record.** `deploy/clamd.conf` sets no `LogFile` and no
 `LogSyslog`, so the container's own output is startup and errors; a detection is recorded by
 `internal/ingest` instead, at `WARN`, and inherits the app's existing rotation — the
-`json-file` driver's `10m x 5` in `deploy/compose.yml` (#351). No separate retention policy is
+`json-file` driver's `10m x 5` in `deploy/compose.yml`. No separate retention policy is
 needed, which is the point: a second log with its own lifetime is a second thing to get wrong,
 in the one container that should hold least.
 
@@ -958,7 +957,7 @@ own mail server because a sidecar is restarting.
 
 ⚠ **What that leaves undone, said out loud rather than implied.** Outbound attachments are
 therefore **not scanned at all** in this increment: `internal/compose` writes projection rows
-(#393) that stay `unscanned`, and §5d's aggregate reports them as such rather than folding them
+that stay `unscanned`, and §5d's aggregate reports them as such rather than folding them
 into "clean". Scanning at submit belongs with increment 5, because until §8's download gate
 exists a verdict on outbound mail changes nothing anyone can observe. The decision recorded
 here is only that an outage must not *block* the send — which the current code already

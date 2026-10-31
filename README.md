@@ -1,145 +1,204 @@
-# Mailroom
+<h1 align="center">Mailroom</h1>
 
-Mailroom is a self-hosted email **client** for the IMAP/SMTP accounts you
-already have. It is **never a mail server**: your mail stays with your
-provider. Mailroom keeps a synchronised copy, indexes it for fast local
-search, sorts it, and writes your changes back. It speaks
-[JMAP](https://jmap.io) to its clients and IMAP/SMTP upstream; the bundled
-React web app is one JMAP client, and a conformant JMAP client can connect too.
+<p align="center">
+  <strong>A self-hosted email client that sorts your mail the way you do, and never sends it anywhere else.</strong>
+</p>
 
-It is a Go server on PostgreSQL 18, with forced row-level security so no user
-can see another's rows, message bodies in an encrypted blob store, and PGP
-keys behind a separate crypto process. It runs as a Docker Compose stack.
+<p align="center">
+  <a href="https://github.com/10thTARDIS/mailroom/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/10thTARDIS/mailroom/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/10thTARDIS/mailroom/releases"><img alt="Release" src="https://img.shields.io/github/v/release/10thTARDIS/mailroom?include_prereleases&sort=semver"></a>
+  <a href="LICENSE"><img alt="Licence: AGPL-3.0-only" src="https://img.shields.io/badge/licence-AGPL--3.0--only-blue"></a>
+  <img alt="Go" src="https://img.shields.io/github/go-mod/go-version/10thTARDIS/mailroom">
+</p>
 
-**Status: 1.x, shipping.** Every release is tagged, recorded in
-[CHANGELOG.md](CHANGELOG.md), and published as a GitHub release; the newest one
-is at the top of the changelog. [docs/mailroom-spec.md](docs/mailroom-spec.md) is the authoritative
-specification.
+<p align="center">
+  <img src="docs/images/desk-light.png#gh-light-mode-only" alt="The desk: mail to review first, grouped by area, with the in-tray and follow-ups above" width="900">
+  <img src="docs/images/desk-dark.png#gh-dark-mode-only" alt="The desk: mail to review first, grouped by area, with the in-tray and follow-ups above" width="900">
+</p>
 
-## What it does
+Mailroom connects to the IMAP/SMTP accounts you already have (Gmail, Outlook,
+Fastmail, Migadu, your own server) and gives you one fast, searchable, sorted
+inbox across all of them. It is **never a mail server**: your mail stays with
+your provider, and Mailroom keeps a synchronised copy on a server you run,
+writing your changes back.
 
-- **Accounts and sync.** Several IMAP/SMTP accounts per user, in one unified
-  view or one at a time. Incremental CONDSTORE sync with IDLE push for the
-  Inbox, plus reconciliation for what a plain poll misses (mail moved or
-  deleted in another client, UIDVALIDITY changes, silently truncated fetches).
-  An ingest-only mode observes a mailbox without ever writing to it. Bulk
-  import of mbox, maildir and Google Takeout archives. Outlook and Microsoft
-  365 accounts connect by signing in (OAuth), with no passwords.
-- **The desk.** The inbox arranged into **areas** (built from category tabs
-  and labels), split by **the line**, a learned priority score you can move,
-  into what needs you now and per-area drawers that can auto-archive. Starred
-  mail collects in the in-tray. A day-one wizard turns a folder-sorted mailbox
-  into a desk without silently moving anything.
-- **Sorting.** **Move to area** for any selection, or everything from one
-  sender, with one Undo. **Learned placement** files a sender's new mail where
-  you have filed it before, only for authenticated senders, behind a
-  correction gate. Deterministic rules with a preview before you save, and
-  "apply to existing mail". Rule suggestions induced from your own filing.
-  Snooze, pin and mute.
-- **Search.** Per-user Tantivy indexes with typed operators (`from:`, `to:`,
-  `subject:`, `label:`, `area:`, `list:`, `filename:`, `larger:`, `is:`,
-  `has:pdf`, relative dates like `newer_than:7d`), `OR` and brackets, search
-  by domain (`from:shop.example`), phrases and typo tolerance. Results update
-  as you type, ordered newest first or by best match; an options form writes
-  the query for you; contacts and areas are suggested; and saved searches
-  work as smart folders.
-- **Reading safely.** HTML sanitised on the server and rendered in a
-  sandboxed frame; remote images blocked by default and, when allowed, fetched
-  through your own server; tracking pixels suppressed; sender-authentication
-  notices and spoofing warnings; attachments previewed in a viewer and scanned
-  with ClamAV, with quarantine and release.
-- **Writing.** Rich text, plain text or Markdown; alias-aware From with
-  server-side validation; Reply, Reply all and Forward; autosaved drafts;
-  Undo Send, Send later and Send & archive; signatures and templates; an
-  Outbox; bounce (DSN) tracking; contact autocomplete.
-- **Encryption.** PGP encryption and decryption through a separate crypto
-  process, signing and signature checks, WKD key publishing and automatic
-  discovery of correspondents' keys.
-- **Contacts, calendar and away.** Contacts built from your mail, with notes,
-  merging and VIPs; meeting invitations answered from the message; an
-  out-of-office reply managed through the provider's ManageSieve.
-- **AI tools, on your terms.** An MCP server with scoped API keys, rate and
-  budget limits, and approval before anything is sent or deleted.
-- **The web app.** Responsive from phone to desktop, installable as a PWA,
-  keyboard-first with a command palette, light and dark themes, Web Push
-  notifications, and accessibility checked in CI with axe-core and the
-  browser's accessibility tree.
-- **Running it.** OIDC sign-in with sessions that renew quietly and a
-  signed-in devices page, with every unauthenticated route closed and tested; per-user isolation enforced by row-level security and a required
-  negative-test suite; backups with a scripted restore drill; Prometheus
-  metrics; per-user export and hard delete; an operator CLI whose writing
-  commands report before they act.
+Most mail tools that triage for you are cloud services that read your mail on
+someone else's machines. Mailroom does that work on your own hardware, learns
+from where *you* file things, and explains every decision it makes.
 
-## What is planned
+## How it fits together
 
-- **Next in 1.x:** live Gmail sync through OAuth (connecting works today; sync
-  is switched on after live testing); OAuth sign-in for AI tools; a redesigned
-  Settings and Contacts.
-- **2.x:** optional, self-hosted LLM features; native iOS and Android apps;
-  CardDAV contacts; bulk unsubscribe; semantic search; S/MIME.
-- **3.x:** a desktop client, shared mailboxes and delegation, CalDAV, and
-  hardware-key PGP.
-
-## Running it
-
-The deployment stack (Postgres, migrations, the crypto process, malware
-scanning and the server, with secrets as mounted files) is in
-[`deploy/`](deploy/). The walkthrough, including secrets, mail accounts and
-OIDC, is **[deploy/README.md](deploy/README.md)**. In short:
-
-```sh
-cd deploy
-cp .env.example .env      # set OIDC, the operator, and MAILROOM_IMAGE to a released tag
-#   ...create deploy/secrets/* (deploy/README.md §2)
-docker compose -f compose.yml up -d
+```mermaid
+flowchart LR
+    subgraph clients["Your devices"]
+        web["Web app<br/>(phone to desktop, installable)"]
+        jmap["Any JMAP client"]
+        ai["AI assistants<br/>(MCP, scoped keys)"]
+    end
+    subgraph server["Your Mailroom server"]
+        core["Sync · sorting · search<br/>sanitising · sending"]
+        db[("PostgreSQL<br/>row-level security")]
+        blobs[("Encrypted<br/>message store")]
+        crypto["PGP keys in a<br/>separate process"]
+        av["ClamAV<br/>attachment scanning"]
+    end
+    subgraph providers["Your mail providers"]
+        imap["IMAP / SMTP<br/>Gmail · Outlook · any IMAP"]
+    end
+    web & jmap & ai -->|JMAP| core
+    core <--> db
+    core <--> blobs
+    core <--> crypto
+    core <--> av
+    core <-->|"sync and writeback"| imap
 ```
 
-Pin `MAILROOM_IMAGE` to an exact release (`ghcr.io/10thtardis/mailroom:X.Y.Z`);
-`:latest` is never a pin. The server runs non-root on a read-only root
-filesystem and refuses to start without a usable authentication path.
+## What it does today
 
-## Development
+<table>
+<tr>
+<td width="50%" valign="top">
 
-A Go module (`mailroom`) plus a TypeScript web app under `web/`. CGO is used
-only for the Tantivy search engine, behind a build tag. The canonical build
-and test path is Docker, so no local Go or Node toolchain is needed:
+### 🗂️ The desk
+Your inbox arranged into **areas** (Primary, Updates, Promotions and any you
+make) and split by **the line**: what needs you now sits above it, everything
+else waits in per-area drawers that can archive themselves. Move the line to
+change how strict it is. A day-one wizard turns a folder-sorted mailbox into a
+desk without moving anything behind your back.
 
-```sh
-sh scripts/integration-test.sh    # store + RLS isolation tests (real Postgres)
-sh scripts/migrate-check.sh       # migrations apply and match db/schema.sql
-sh scripts/mailsync-test.sh       # sync engine against a live Dovecot
-sh scripts/tantivy-test.sh        # the CGO search backend
-sh scripts/gate-e2e.sh            # the login gate against a real OIDC provider
-sh scripts/hostile-content-e2e.sh # hostile mail neutralised in headless Chromium
-sh scripts/restore-drill.sh       # back up, restore, prove the restore is alive
-```
+</td>
+<td width="50%" valign="top">
 
-CI runs these and more on every push, with `golangci-lint`, `govulncheck` and
-the web build. One invariant holds the design together: **every mutation of a
-JMAP-visible object appends a `change_log` row in the same transaction**,
-enforced by the store layer and its tests. See
-Development and testing and
-Architecture.
+### 🧭 Sorting that learns from you
+**Move to area** for one message or everything from a sender, with one Undo.
+**Learned placement** files a sender's new mail where you filed it before,
+only for authenticated senders and behind a correction gate. Rules with a
+preview before you save, suggested rules from your own filing, snooze, pin and
+mute.
 
-To let users connect Gmail and Outlook accounts, see the operator guide
-[docs/oauth-providers.md](docs/oauth-providers.md).
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-Reference documents live in [docs/](docs/) (the spec, the feature matrix,
-the data model, the hostile-content threat model, the runbooks) and
-[docs/adr/](docs/adr/); [db/schema.sql](db/schema.sql) is the reference DDL.
+### 🔎 Search that keeps up
+Per-user full-text indexes with operators (`from:`, `subject:`, `has:pdf`,
+`newer_than:7d`, `area:`, `list:` and more), `OR` and brackets, typo
+tolerance, results as you type, and saved searches as smart folders.
 
-## License
+</td>
+<td valign="top">
 
-Copyright (C) 2026 Ryan Brooks.
+### 🛡️ Reading safely
+HTML sanitised on the server and shown in a sandbox. Remote images blocked
+until you allow them, then fetched through your own server. Tracking pixels
+suppressed, spoofing and sender-authentication warnings, and attachments
+scanned with ClamAV before you open them in the built-in viewer.
 
-Licensed under the **GNU Affero General Public License, version 3** — see
-[`LICENSE`](LICENSE). Source files carry a one-line
-`SPDX-License-Identifier: AGPL-3.0-only` rather than full header banners.
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-The AGPL was chosen deliberately (see
-[ADR-011](docs/adr/ADR-011-license.md)). Mailroom exists because every capable
-AI-triage mail product is cloud SaaS that egresses your mail; the AGPL is what
-keeps a hosted fork from quietly becoming that. If you run a modified Mailroom
-as a network service, your users are entitled to your source. Self-hosting it
-for yourself, your family or your team carries no such obligation — that is the
-case this project is built for, and the licence asks nothing of you there.
+### ✍️ Writing
+Rich text, plain text or Markdown. Reply, Reply all and Forward with the right
+identity, aliases included. Autosaved drafts, Undo Send, Send later, Send &
+archive, signatures and templates, bounce tracking and contact autocomplete.
+
+</td>
+<td valign="top">
+
+### 🔐 Encryption
+PGP encryption, decryption, signing and signature checks, with private keys
+held by a separate crypto process. WKD publishing for your keys and automatic
+discovery of your correspondents' keys.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📇 Contacts, calendar and away
+Contacts built from your mail, with notes, merging and VIPs. Meeting
+invitations answered from the message. An out-of-office reply managed at your
+provider, so it works even when Mailroom is down.
+
+</td>
+<td valign="top">
+
+### 🤖 AI tools, on your terms
+A built-in MCP server lets an assistant search, read, sort and draft mail
+through scoped API keys, with rate and budget limits and your approval before
+anything is sent or deleted. Bring any model; nothing leaves your server unless
+you connect it.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 📱 One app, every screen
+Responsive from phone to desktop and installable as an app, with push
+notifications, light and dark themes, a command palette and full keyboard
+control. Accessibility is checked on every change with axe-core and the
+browser's accessibility tree.
+
+</td>
+<td valign="top">
+
+### 🏠 Built to self-host
+Several accounts per person in one unified view. Sign-in through your own
+identity provider (OIDC), with quiet session renewal and a signed-in devices
+page. Strict per-user isolation in the database, encrypted message storage,
+tested backups and restore, Prometheus metrics, export and hard delete.
+
+</td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/sender-card-light.png" alt="The sender card: why a message is here, its area, and one-click actions for everything from that sender" width="49%">
+  <img src="docs/images/reading-dark.png" alt="Reading a message in the dark theme, with a warning that a sender claiming your own domain was not authenticated" width="49%">
+</p>
+<p align="center"><sub>Every placement explains itself (left); a message pretending to come from your own domain is flagged before you trust it (right). Screenshots use synthetic test mail.</sub></p>
+
+## Where it's going
+
+Mailroom is in its **1.x** series and shipping regularly; every release is
+listed in the [changelog](CHANGELOG.md). The plan, with every item tracked as
+an issue:
+
+| | Focus | Highlights |
+|---|---|---|
+| **[Next release](https://github.com/10thTARDIS/mailroom/milestone/1)** | Connecting AI tools without pasting keys | [OAuth sign-in for MCP clients](https://github.com/10thTARDIS/mailroom/issues/34) |
+| **[1.x](https://github.com/10thTARDIS/mailroom/milestone/2)** | Finishing and polishing | [Live Gmail sync](https://github.com/10thTARDIS/mailroom/issues/3) · [a redesigned Settings](https://github.com/10thTARDIS/mailroom/issues/30) · [server-side filter editing](https://github.com/10thTARDIS/mailroom/issues/29) · [smarter learned placement](https://github.com/10thTARDIS/mailroom/issues/28) · [Office document previews](https://github.com/10thTARDIS/mailroom/issues/21) · speed on very large mailboxes |
+| **[2.x](https://github.com/10thTARDIS/mailroom/milestone/3)** | Mobile and intelligence | [Native iOS and Android apps](https://github.com/10thTARDIS/mailroom/issues/5) · [optional self-hosted LLM features](https://github.com/10thTARDIS/mailroom/issues/4) · [semantic search](https://github.com/10thTARDIS/mailroom/issues/8) · [CardDAV contacts](https://github.com/10thTARDIS/mailroom/issues/6) · [newsletter digests](https://github.com/10thTARDIS/mailroom/issues/7) · [S/MIME](https://github.com/10thTARDIS/mailroom/issues/10) · [phishing warnings](https://github.com/10thTARDIS/mailroom/issues/11) |
+| **[3.x](https://github.com/10thTARDIS/mailroom/milestone/4)** | Teams and the desktop | [A desktop app](https://github.com/10thTARDIS/mailroom/issues/13) · [shared mailboxes and delegation](https://github.com/10thTARDIS/mailroom/issues/14) · [CalDAV calendar](https://github.com/10thTARDIS/mailroom/issues/15) · [hardware-key PGP](https://github.com/10thTARDIS/mailroom/issues/16) · [disposable aliases](https://github.com/10thTARDIS/mailroom/issues/17) |
+
+The [feature matrix](docs/mailroom-feature-matrix.md) lists every feature and
+its status.
+
+## Help build it
+
+Mailroom is open to contributions, and there is plenty to do at every level:
+
+- **Use it and report what breaks.** Every mail provider is a little different,
+  and reports from providers we haven't tested are especially valuable.
+- **Take on an issue** from the [1.x milestone](https://github.com/10thTARDIS/mailroom/milestone/2),
+  or weigh in on one labelled
+  [`needs-design`](https://github.com/10thTARDIS/mailroom/labels/needs-design).
+- **Improve the docs** wherever they tripped you up.
+
+Start with **[CONTRIBUTING.md](CONTRIBUTING.md)**. Security problems go
+through [private reporting](SECURITY.md), not public issues.
+
+## Learn more
+
+| | |
+|---|---|
+| 🚀 **Run it** | [Deploying Mailroom](deploy/README.md) with Docker Compose, then [connecting Gmail and Outlook](docs/oauth-providers.md) and [AI tools](docs/mcp.md) |
+| 🛠️ **Develop it** | [Developing Mailroom](docs/development.md): layout, tests and house rules |
+| 📚 **Understand it** | [All documentation](docs/README.md): the spec, data model, threat model and design decisions |
+| ⚖️ **Licence** | [AGPL-3.0-only](docs/license.md), free to self-host for yourself, your family or your team |
+
+<sub>Copyright © 2026 Ryan Brooks. Licensed under the GNU Affero General Public License v3.0 only.</sub>

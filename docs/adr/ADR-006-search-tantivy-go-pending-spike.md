@@ -1,6 +1,6 @@
 # ADR-006: Search = embedded Tantivy via tantivy-go, pending spike; Bleve fallback; Mailroom owns the query AST
 
-**Status:** Accepted — spike PASSED (`docs/search-spike.md`, Forgejo #2).
+**Status:** Accepted — spike PASSED (`docs/search-spike.md`).
 `anyproto/tantivy-go` v1.0.6 builds reproducibly with CGO in a musl-native
 container (no Rust toolchain in CI; prebuilt static `.a` fetched per release),
 and passed correctness (term/prefix/phrase/boolean/field, incremental

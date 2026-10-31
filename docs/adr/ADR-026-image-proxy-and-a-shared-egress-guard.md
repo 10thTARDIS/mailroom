@@ -1,6 +1,6 @@
 # ADR-026: The image proxy is a *cache in front of a shared egress guard*, and the guard ships first
 
-**Status:** **Accepted** (Forgejo #55 increment 3). The four questions this ADR left open
+**Status:** **Accepted**. The four questions this ADR left open
 were settled at the time; the outcomes are §3e, and the appendix keeps
 the analysis that preceded them — including the two places the decision went against this
 ADR's own recommendation, and what each of those requires in exchange. Nothing here is
@@ -11,8 +11,8 @@ changes the shape of the work.
 
 Spec §11 requires *"remote content blocked by default (opt-in image proxy that strips
 tracking params)"* and *"SSRF guard on image proxy / WKD / outbound fetches (allowlist,
-no internal ranges, DNS-rebind protection)"*. #55 increment 3 is the last item on that
-issue.
+no internal ranges, DNS-rebind protection)"*. This is the last item of that hardening
+work.
 
 Three increments have already landed and they change what this one is for:
 
@@ -87,7 +87,7 @@ What it is NOT is a defence against open-tracking; v1.42.0 did that, and better.
 ## 2. ⚠ The finding that reorders the work: there is already an unguarded egress path
 
 While establishing that the proxy would be Mailroom's first server-side outbound fetch —
-a claim made repeatedly in #55's own comments, **including by me** — it turned out to be
+a claim made repeatedly while the work was planned, **including by me** — it turned out to be
 false.
 
 `internal/webpush/send.go` POSTs to `sub.Endpoint`, a URL supplied by the client when it
@@ -137,7 +137,7 @@ It must:
 - **Never report a failure as an empty success.** A refused, timed-out or over-size fetch
   is a distinct outcome the caller must handle. This is the shape that has cost this
   project repeatedly — most recently a security check that reported *"the tracker was
-  contacted"* because it could not read its own evidence (#332).
+  contacted"* because it could not read its own evidence.
 
 **`webpush` adopts it in the same change**, which fixes §2 and gives the guard a second
 caller immediately — a component with one caller is a component whose interface nobody has
@@ -210,7 +210,7 @@ decide this, but to size what is being enabled.
 **B. The cache reuses the blob store.** What that buys is genuine: encryption at rest
 under the user's own DEK for free, content-addressed dedup that matters at this shape
 (thousands of images from hundreds of hosts, where logos and spacers repeat heavily), and **no second
-store for #54's hard-delete sweep to learn about** — the blob store is already in it.
+store for the hard-delete sweep to learn about** — the blob store is already in it.
 
 ⚠ **What it costs is three prerequisites, none of which exist today.** Reusing the store
 is not the same as reusing it unchanged:
@@ -230,7 +230,7 @@ is not the same as reusing it unchanged:
    cache shares with a purged attachment would have its row reclaimed and its file deleted
    out from under the cache — and per that file's own comment, deleting the row destroys
    the `dek_id` the ciphertext is opened with, so the bytes do not leak, they become
-   permanently unreadable. **This is #300's `ml_models` hazard exactly, and finding it a
+   permanently unreadable. **This is the `ml_models` hazard exactly, and finding it a
    second time by accident would be the more expensive way to learn it.**
 
 Two further things are accepted rather than fixed: cached third-party bytes now enter the
@@ -357,7 +357,7 @@ retry into a fallback" is a case that occurs in practice, not only in theory.
 - **A new egress path exists, and it is a permanent security surface.** Everything in §3a
   is load-bearing, and each item wants a test that watches it refuse — a guard asserted
   only by "it fetched the good URL" is the vacuous-pass shape this project keeps paying
-  for (#131, #242, #332).
+  for.
 - **`webpush` changes behaviour**: a subscription endpoint that resolves to a private
   address stops working. That is the fix, but it is a behaviour change and existing rows
   should be checked before it lands.
@@ -381,7 +381,7 @@ retry into a fallback" is a case that occurs in practice, not only in theory.
 
 ---
 
-## Amendment (#667): the app fetches a proxied image, not the message frame
+## Amendment: the app fetches a proxied image, not the message frame
 
 **What this ADR assumed.** §3b made an allowed image a same-origin `/jmap/proxy/…` path,
 and the client restored that path as the image's `src` inside the message frame, for the
@@ -392,8 +392,8 @@ by the session cookie, which is `HttpOnly` and `SameSite=Lax`. The message frame
 sandboxed without `allow-same-origin` (and must stay so: `docs/hostile-content.md` §2.1),
 so its origin is opaque, a request from it is cross-site, and the browser withholds the
 cookie. Every proxied image arrived unauthenticated and was refused. That is confirmed in
-Chromium and in Firefox. Production's cache shows some images did load through the proxy
-on one earlier day, from a client that was not identified, so it is not claimed for every
+Chromium and in Firefox. A real instance's proxy cache showed that some images had loaded through
+the proxy, from a client that was not identified, so it is not claimed for every
 browser. The dev-auth
 harnesses have no credential to withhold, the one OIDC lane used curl, and no lane loaded
 a proxied image, so nothing in CI could see it. It was found in use, as "not all images are loading".
@@ -451,7 +451,7 @@ the sender's own, the browser fetches it, and the message policy admits `https:`
 
 ---
 
-## Amendment (#922): fetch allowed senders' images at arrival, and keep them while the message is kept
+## Amendment: fetch allowed senders' images at arrival, and keep them while the message is kept
 
 **What went wrong.** §7 measured some sampled fetches answering 403, all on one host
 whose image URLs carry `token-time` / `token-hash`: a signed URL with an expiry. The proxy
@@ -623,7 +623,7 @@ elsewhere — which is the better failure direction.
 
 ⚠ **This is unmeasured and cheap to measure.** Of the hosts in the corpus, the split
 between `https` and `http`-only is one row of `proxy-report` (§6). Deciding first and
-measuring after is the pattern #55 has now avoided three times.
+measuring after is the pattern this work has now avoided three times.
 
 **Recommendation: `https` only, and let the measurement reopen it.** If the report shows a
 material number of `http`-only hosts carrying images a reader would miss, revisit with
@@ -644,12 +644,12 @@ evidence. Reversible in either direction; failing closed first is the cheaper mi
 **What is actually at stake.** A cache is the only thing that hides *when* a message was
 opened, from the second open onward. It is also a new store of third-party bytes, and —
 less obviously — **a record of which images this person loaded and when**, which is itself
-sensitive and interacts with #54 (export and hard delete).
+sensitive and interacts with export and hard delete.
 
 | option | for | against |
 |---|---|---|
 | **reuse the blob store** | exists; encrypted at rest; content-addressed, so identical images dedupe | it is the **restore unit** (ADR-005: Postgres + blobs + key store). Third-party images would be backed up, and would count against `StorageQuota`, which is meant to describe the user's own mail |
-| **a separate cache: size cap + TTL, not backed up** | matches an existing precedent exactly; disposable; bounded; easy to purge | new code; a second store to reason about in #54 |
+| **a separate cache: size cap + TTL, not backed up** | matches an existing precedent exactly; disposable; bounded; easy to purge | new code; a second store to reason about in export and hard delete |
 | **no cache at first** | least code; no new sensitive store | gives up the only timing protection available; every re-open re-pings the sender |
 
 ⚠ **The precedent is exact and already in the spec.** The search index is described as *"a
@@ -659,12 +659,12 @@ the same category of thing: derived, disposable, reconstructible by re-fetching.
 
 **Recommendation: a separate cache, capped and TTL'd, explicitly excluded from backup,**
 following the search index's precedent — and shipped *after* the endpoint, so the endpoint
-can be evaluated without it. Whatever is chosen, the cache must be named in #54's
+can be evaluated without it. Whatever is chosen, the cache must be named in the
 hard-delete sweep: "delete my data" that leaves a directory of images the person was sent
 is not hard delete.
 
 > **Outcome: the blob store (§3e).** The "for" column understated it — dedup is worth more
-> at this shape than the row suggests, and being *already* inside #54's sweep is a
+> at this shape than the row suggests, and being *already* inside the hard-delete sweep is a
 > correctness benefit rather than a convenience, since the separate store would have been
 > a new thing to remember. The "against" column understated it too: this needs a class
 > column and a migration, a `StorageQuota` exclusion without which a stranger's images can

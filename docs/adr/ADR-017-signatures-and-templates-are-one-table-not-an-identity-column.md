@@ -1,7 +1,7 @@
 # ADR-017: Several signatures and templates live in one table beside `identities.signature_html`
 
 **Status:** Accepted (resolves a conflict inside the spec; raised by
-per-identity signatures + templates, Forgejo #56)
+per-identity signatures + templates)
 
 ## Context
 
@@ -82,7 +82,7 @@ transaction (`clearSnippetDefaultExcept`, which matches the slot with
   decides which applies, and nothing else may ask the question.
 - Writes are **full-object**, never partial. `kind` and `identity_id` together
   decide which picker offers a snippet, so a partial update could silently move a
-  signature to a different address — the same class of bug as Forgejo #170, where
+  signature to a different address — the same class of bug as an earlier one where
   a narrow write dropped a field something else depended on.
 - Which signature applies is one decision in one place
   (`web/src/core/snippets.ts`: `automaticSignature` and `offeredSignatures`),
@@ -104,4 +104,3 @@ transaction (`clearSnippetDefaultExcept`, which matches the slot with
   §12 (multiple signatures)
 - `db/migrations/00022_compose_snippets.sql`, `internal/store/compose_snippets.go`,
   `internal/api/compose_snippet.go`, `web/src/core/snippets.ts`
-- Forgejo #56; the partial-write hazard is the one from #170

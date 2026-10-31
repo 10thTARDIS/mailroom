@@ -1,9 +1,11 @@
-# Mailroom — test-instance deployment
+# Deploying Mailroom
 
-This directory is a self-contained Docker Compose stack for standing up a
-**test instance** of Mailroom: Postgres, schema
-migrations, and the server, wired together with non-root, least-privilege
-containers per spec §11.
+This directory is a self-contained Docker Compose stack for running Mailroom:
+Postgres, schema migrations, the crypto process, malware scanning and the
+server, wired together with non-root, least-privilege containers per spec §11.
+The same stack serves a trial instance and a real one; the
+[guide to connecting your first real mailbox](../docs/production-cutover-runbook.md)
+covers what changes when real mail is involved.
 
 Placeholders below (`mail.example.com`, hostnames, ports) are neutral —
 substitute your own values; nothing in this repo should encode a real

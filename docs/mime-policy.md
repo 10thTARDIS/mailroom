@@ -124,7 +124,7 @@ validation should check it. See `testdata/corpus/truncated_garbage.eml`
 and `testdata/corpus/missing_headers.eml` (the latter is *not* fatal —
 an empty-but-well-formed header block is valid).
 
-## EAI / SMTPUTF8 — PENDING (spec §18.1, issue #17)
+## EAI / SMTPUTF8 — PENDING (spec §18.1)
 
 `internal/mime.AddressRequiresEAI` is a **detection-only** stub: it flags
 an address (`mime.Address.EAI`) whose local-part or domain contains

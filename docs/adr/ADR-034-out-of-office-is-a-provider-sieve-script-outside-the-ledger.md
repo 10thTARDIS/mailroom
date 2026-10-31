@@ -1,6 +1,6 @@
 # ADR-034: Out of office is one provider-side Sieve script, refused over any other active script, and its replies are outside the outbound ledger
 
-**Status:** Accepted (Forgejo #50; records a deviation from spec §5)
+**Status:** Accepted (records a deviation from spec §5)
 
 ## Context
 

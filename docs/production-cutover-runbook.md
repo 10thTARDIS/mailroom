@@ -98,7 +98,7 @@ mail in flight costs a maintenance window.
 tag you deployed.
 
 ⚠ **Check that the signature updater is actually updating — a fresh
-`clamav-db` volume is itself a first-boot-only failure mode (#641).** Before
+`clamav-db` volume is itself a first-boot-only failure mode.** Before
 v1.79.0, freshclam could not initialise on an empty volume, and the container
 reported *healthy* anyway, because the image keeps it alive with no updater
 running. An instance could scan its whole first sync of real mail against the
@@ -131,8 +131,8 @@ failure in this document because it looks like success:
   as;
 - your real login then either **is refused** (when the emails match —
   `app.users.email` is UNIQUE while `upsert_login` resolves only on
-  `oidc_subject`), or **creates a second, empty user** (when they differ). Since
-  #574 neither is silent: the refusal logs `login refused: this email already
+  `oidc_subject`), or **creates a second, empty user** (when they differ). Neither is
+  silent: the refusal logs `login refused: this email already
   belongs to another user` at ERROR, the split logs `login created a NEW user`
   at WARN, and both name `token_subject` and `operator_subject`.
 
@@ -148,13 +148,13 @@ owns the mail with `deploy/rebind-operator-subject.sql` first.
 **Check:** after setting it, one login lands in a user that can see the declared
 accounts in the accounts screen.
 
-### 1.5 The host prerequisites (#532)
+### 1.5 The host prerequisites
 
 At-rest volume encryption and TLS termination, each with a way to verify it —
 not "it was configured". If your deployment is managed by automation, this is
 that automation's half.
 
-### 1.6 The provider must let this mailbox SEND as its aliases (#590)
+### 1.6 The provider must let this mailbox SEND as its aliases
 
 A catchall domain RECEIVES at every address, and that is all a catchall grants.
 Sending as a derived, per-correspondent address is a separate permission, and
@@ -166,7 +166,7 @@ mail from: 550 "5.7.1 sender address rejected: not allowed"
 
 Without that permission, sends from a derived alias are refused this way; once the
 mailbox is allowed to send as any address on its domain, a send arrives at an
-external mailbox with the alias in `From` untouched (#533). ⚠ **The permission is
+external mailbox with the alias in `From` untouched. ⚠ **The permission is
 per MAILBOX, not per domain** — a second mailbox does not inherit the first one's
 setting. Grant it at the provider for this mailbox before §3.
 
@@ -185,7 +185,7 @@ Attach the real account with **writeback disabled** for it:
 ⚠ The instance-wide switch is on for `1`, `true`, `yes` or `on` and off for `0`,
 `false`, `no` or `off` (any case). **Any other value — `enabled`, `y`, a typo —
 stops the server at boot** with `MAILROOM_WRITEBACK_DISABLED must be one of …`
-(#556; before v1.73.1 it read as OFF, silently, which is the failure this guard
+(before v1.73.1 it read as OFF, silently, which is the failure this guard
 replaced). After setting it, confirm the boot log carries the WARN
 `writeback is DISABLED instance-wide` before attaching anything real.
 
@@ -206,7 +206,7 @@ Two lines matter, and they are different lines:
 - ⚠ **The instance logs JSON, not text.** A grep written against the e2e
   harness's text format matches nothing and reads as silence.
 - **`mailboxes_deferred` is not an error count.** It appears on both lines from
-  v1.78.0 (#638) and counts mailboxes this pass did not ask the server about,
+  v1.78.0 and counts mailboxes this pass did not ask the server about,
   because the server refused a `UID SEARCH` for rate limiting. Nothing was
   concluded about them and they are due again next pass; they are deliberately
   *not* in `mailbox_errors`. A non-zero value with a `mailboxes deferred to the
@@ -223,7 +223,7 @@ Two lines matter, and they are different lines:
   Compare the observed-per-hour rate with the default `MAILROOM_IMAP_SEARCH_RATE`
   (30/min): it should sit well inside it.
 - **`mailboxes_unchanged` and `observations_skipped` are work not done, on
-  purpose** (#620; both lines). On a server with `LIST-STATUS` the pass's one
+  purpose** (both lines). On a server with `LIST-STATUS` the pass's one
   `LIST` also reports every folder's status. `mailboxes_unchanged` counts
   folders not `SELECT`ed because nothing moved since the last poll; they are
   still counted in `mailboxes`, so that figure does not drop.
@@ -246,7 +246,7 @@ Two lines matter, and they are different lines:
   `messages:0, flag_updates:0, bodies_fetched:0`. That is the steady state, not
   the backfill — do not read the backfill's duration from it.
 - On an account with many folders a steady-state pass can take most of the
-  polling interval, because every folder is selected each pass (#620) and
+  polling interval, because every folder is selected each pass and
   SEARCH pacing adds the rest. A pass that outlasts the interval is not a hang;
   the next one simply starts later.
 
@@ -295,7 +295,7 @@ Mailroom may do to the real mailbox.
    in Mailroom, wait for the writeback pass, and confirm the flag on the provider
    — by census or another client, not by Mailroom's own view.
    ✅ MEASURED (v1.72.0+): an action reaches the provider in about a second,
-   because an enqueued intent wakes the drain at once (#581); read it off
+   because an enqueued intent wakes the drain at once; read it off
    `applied_at − created_at` in `app.writeback_intents`. ⚠ Expect longer when a
    sync pass already holds the account — the drain waits for it rather than
    racing it. Report both numbers, never just the best.
@@ -304,9 +304,9 @@ Mailroom may do to the real mailbox.
    random moment lands up to one pass-length later. Measure it on this step and
    note the number for your own instance.
 3. **Sending.** Only once reads and writebacks are behaving, and only after
-   §1.6. Verify with the round-trip address (#531), and check what the recipient
+   §1.6. Verify with the round-trip address, and check what the recipient
    actually sees in the `From` header rather than what compose believed it
-   selected (#533). Send once from a **derived alias** to an external address and
+   selected. Send once from a **derived alias** to an external address and
    confirm it arrives: that is the one send §1.6 exists for.
 4. **The destructive background jobs, last.** `MAILROOM_TRASH_RETENTION`
    governs an unattended purge that hard-deletes Trash after 30 days by default
@@ -337,7 +337,7 @@ cd deploy && MAILROOM_IMAGE=<image-ref>:vX.Y.Z \
 - ⚠ **A rollback to ≤ v1.70.0 recreates the plaintext-DSN volume**
   (`<project>_runtime-secrets`). Those compose files write the composed DSNs
   there at every start; v1.71.0 does not use it. **Delete it again after rolling
-  forward** — it is the thing #537 removed.
+  forward** — it is the thing v1.71.0 removed.
 - ⚠ **A job kind the old build does not know** (e.g. `change_log_compact`, added
   in v1.71.0) logs `no handler registered for job kind` and **retries**, by
   design, so it recovers when you roll forward. It dead-letters after 5 attempts,
@@ -357,7 +357,7 @@ not carry them), then start the old tag.
 
 ⚠ **Still not rehearsed end to end — say so rather than assume it.** This section
 was written at a release that crossed no migration. What IS proven is each half on its own: the restore half by
-the restore drill against a real artifact (#540, runbook §5a there), and the old
+the restore drill against a real artifact (runbook §5a there), and the old
 tag against its own schema is simply what it ran before the upgrade. What is not
 is the whole sequence timed as one, under pressure. Walk it on a throwaway copy
 before cutover if the cutover itself will cross a migration.
@@ -388,7 +388,7 @@ and it is the case worth thinking about before you need it:
 - **Record the real numbers** that only your own mailbox can produce: per-container
   `memory.peak` after the first full sweep, and the steady-state pass duration.
 - **Check the schedule actually runs**: the weekly `change_log_compact` job, the
-  drawer sweep, the purge, and the backup schedule (#539). A schedule nobody
+  drawer sweep, the purge, and the backup schedule. A schedule nobody
   observes is not a schedule.
 
 ---
@@ -456,7 +456,7 @@ and the change log. Only the before/after case is covered by the live test; a
 sync running *during* the moves is not.
 
 **Expect about two STATUS commands per folder, unpaced.** Only `UID SEARCH` is known
-to be rate-limited at the provider (#638). If STATUS turns out to be limited too,
+to be rate-limited at the provider. If STATUS turns out to be limited too,
 the run stops at the refused command and a re-run continues; `--max-folders` in
 batches of 50 keeps each run short either way.
 
@@ -476,7 +476,7 @@ unchanged and no message was soft-deleted (the sync log's `messages_vanished` st
 exactly this against Dovecot and PostgreSQL: 8 messages before and after, 7 bodies
 re-fetched and deduplicated, 0 vanished.
 
-⚠ **MEASURED (#656): before v1.80.1 this check FAILED for a
+⚠ **MEASURED: before v1.80.1 this check FAILED for a
 large move.** Sync fetched a folder's new mail as ONE `UID FETCH n:*`. Thousands of
 messages moved into INBOX made that a download of over a gigabyte; it broke off
 mid-stream, and the provider then refused the command (`NO [UNAVAILABLE]`) on every

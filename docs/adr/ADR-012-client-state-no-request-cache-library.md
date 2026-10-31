@@ -1,11 +1,11 @@
 # ADR-012: Client state lives in the TS client-core; no request-cache library (TanStack Query)
 
-**Status:** Accepted (deviates from spec §3's client-library sketch; raised while building §12's web UI, Forgejo #23)
+**Status:** Accepted (deviates from spec §3's client-library sketch; raised while building §12's web UI)
 
 ## Context
 
 Spec §3 lists TanStack Query among the client libraries. Building the daily-driver
-web UI (#23) made that a concrete choice, and it turned out to conflict with two
+web UI made that a concrete choice, and it turned out to conflict with two
 harder constraints that the spec states elsewhere.
 
 **JMAP is already a cache-coherence protocol.** Spec §13 commits us to "opaque
@@ -26,9 +26,9 @@ hardest, most correctness-sensitive code in the product.
 
 There is also a specific correctness trap that a generic request cache gets wrong
 by default. An `Email` object is a *projection of the requested properties* — the
-cheap list/poll `Email/get` deliberately does not fetch bodies (#82). A
+cheap list/poll `Email/get` deliberately does not fetch bodies. A
 last-write-wins object cache would let a cheap poll blank the body of the message
-currently open. And until #84/#86 landed, a naive overwrite-on-refetch made
+currently open. And until canonical placement and expunge reconciliation were fixed, a naive overwrite-on-refetch made
 archived mail visibly bounce back into the inbox.
 
 ## Decision
@@ -57,8 +57,8 @@ for this project.
 - The v2 native clients (spec §12) can import `core/` and inherit offline,
   optimistic apply, and sync for free. That is the main payoff.
 - The optimistic overlay is currently doing double duty: part of it exists to hide
-  server bugs (#84 canonical placement, #86 expunge reconciliation) rather than to
-  express genuine offline intent. **Once #84 and #86 have both landed and settled,
+  server bugs (canonical placement, expunge reconciliation) rather than to
+  express genuine offline intent. **Once both fixes have landed and settled,
   the overlay's "stickiness" should be revisited and simplified** — otherwise a
   future reader will mistake a workaround for architecture.
 - If a future client needs plain request caching for a non-JMAP surface (an admin
@@ -68,5 +68,3 @@ for this project.
 
 - Spec §3 (libraries), §12 (clients & design system, shared TS client-core), §13
   (API: state strings + exact `/changes`), §14 (change log).
-- Forgejo #23 (web UI), #82 (Email bodies — the projection problem), #84
-  (canonical placement), #86 (expunge reconciliation).

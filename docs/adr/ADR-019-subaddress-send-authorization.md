@@ -1,6 +1,6 @@
 # ADR-019: A subaddress is authorized by its base, syntactically — never by a header
 
-**Status:** Accepted (extends spec §5's send-as rule; raised by Forgejo #62,
+**Status:** Accepted (extends spec §5's send-as rule; raised by
 dogfooding)
 
 ## Context

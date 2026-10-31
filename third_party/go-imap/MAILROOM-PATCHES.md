@@ -4,7 +4,7 @@ This directory is go-imap **v2.0.0-beta.8** (module `github.com/emersion/go-imap
 MIT licence, see `LICENSE`), copied unmodified from the Go module cache and then
 patched as described below. Mailroom builds against it through
 `replace github.com/emersion/go-imap/v2 => ./third_party/go-imap` in the
-top-level `go.mod` (Forgejo #52, ADR-047 §5).
+top-level `go.mod` (#3, ADR-047 §5).
 
 **Why vendored in-repo rather than a hosted fork:** a hosted fork would be a
 second repository the build depends on, at a URL that must stay reachable and
@@ -61,7 +61,7 @@ Run the patch's own tests with `cd third_party/go-imap && go test ./imapclient -
 server answered `FLAGS ()`, and stays nil when the response carried no FLAGS
 item at all (`imapclient/fetch.go`, `populateItemData`).
 
-**Why:** Forgejo #909. Unpatched, both read as nil, so a message whose FLAGS
+**Why:** Unpatched, both read as nil, so a message whose FLAGS
 never arrived — a response truncated before the item, or a server that sent
 FLAGS in a second FETCH response for the same message (go-imap routes that one
 to the unilateral handler) — was indistinguishable from a message with no

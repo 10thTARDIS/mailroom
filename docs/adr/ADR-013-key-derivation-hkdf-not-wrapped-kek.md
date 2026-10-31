@@ -1,6 +1,6 @@
 # ADR-013: 0.5/1.0 keys are HKDF-derived from the master key; the wrapped-KEK hierarchy is deferred
 
-**Status:** Accepted (deviation from spec §9 / ADR-005's key hierarchy; raised by the backup/restore work, Forgejo #95)
+**Status:** Accepted (deviation from spec §9 / ADR-005's key hierarchy; raised by the backup/restore work)
 
 ## Context
 
@@ -42,7 +42,7 @@ and key-rotation improvement, not a correctness requirement for the MVP.
   escrow — there is no separate "wrapped-key store."** The only stored key
   material is the *sealed credential columns* in Postgres (a `pg_dump` carries
   them); the mail-blob and credentials keys are re-derived from the master at
-  boot and are never stored. The #40 restore drill is built to this reality.
+  boot and are never stored. The restore drill is built to this reality.
 - **The master key is more load-bearing than the wrapped design implies.**
   Because it also seeds the per-user blob **paths** (HMAC), losing it makes the
   blob store not merely unreadable but **unaddressable** — the files cannot even
@@ -62,7 +62,7 @@ and key-rotation improvement, not a correctness requirement for the MVP.
 Introduce per-user KEKs (random, wrapped by the master) and rekey the derived
 DEKs under them, so master rotation becomes a KEK re-wrap and per-user
 compromise is contained. That work must: add the wrapped-key store to the backup
-restore unit (the `#40` manifest already carries a `wrapped_key_store.location`
+restore unit (the restore drill's manifest already carries a `wrapped_key_store.location`
 field so this becomes a deliberate change, not a silent omission), provide the
 real `RewrapKEK`, and supersede this ADR.
 
@@ -73,4 +73,3 @@ real `RewrapKEK`, and supersede this ADR.
   (file-based master key, boot unseal, offline escrow).
 - `internal/crypto`, `internal/onboarding/credentials.go`,
   `internal/syncrunner/resolver.go`, `cmd/mailroom` (`blobPathInfo`).
-- Forgejo #95 (this deviation), #40 (the restore drill built to it).

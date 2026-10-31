@@ -1,6 +1,5 @@
 .git
 .gitignore
-.forgejo
 .github
 
 # Docs, ADRs, dev scratch — not needed inside the build context's image, but

@@ -1,6 +1,6 @@
 # ADR-038: Outgoing mail is signed then encrypted to recipients whose keys we trust, and to the sender
 
-**Status:** Accepted (Forgejo #47, v1.92 item 3; builds on ADR-024 and
+**Status:** Accepted (v1.92 item 3; builds on ADR-024 and
 ADR-037; the key-changed confirmation is `ContactKey/decide`, ADR-039)
 
 ## Context
@@ -165,5 +165,5 @@ Per-Bcc ciphertexts. Encrypting drafts. Searching encrypted mail (ADR-037).
 
 ## References
 
-- #47 (v1.92 plan, item 3); ADR-024, ADR-036, ADR-037; RFC 3156 §4, §6.1;
+- ADR-024, ADR-036, ADR-037; RFC 3156 §4, §6.1;
   Autocrypt Level 1 (header must match From; here, additionally, authenticated)

@@ -26,7 +26,7 @@ of the first. **They fail differently, and that is the part worth remembering:**
   problem. You would find out the first time someone asked you to read an old
   encrypted message.
 
-That asymmetry is why the drill grew a step for it ([`#40`], step 5) rather than
+That asymmetry is why the drill grew a step for it ([the restore drill], step 5) rather than
 leaving it to be noticed.
 
 **Do not point both secrets at the same file.** It appears to work — the stack
@@ -73,7 +73,7 @@ increment 3 of [ADR-024], the sealed PGP private keys alongside them. This
 document is the escrow leg for both roots.
 
 [ADR-024]: adr/ADR-024-pgp-keys-behind-a-crypto-process-with-its-own-root.md
-[`#40`]: backup-restore-runbook.md
+[the restore drill]: backup-restore-runbook.md
 
 ## Threat model for the escrow copy
 
@@ -99,7 +99,7 @@ it survives copy/paste and printing.
 | PGP root | `deploy/secrets/mailroom_pgp_root_key.txt` | `MAILROOM_PGP_ROOT_KEY_FILE` |
 
 ⚠ **And a third secret that is not a Mailroom key at all: the age identity.**
-This document said "two" until #351 and then escrowed exactly two, which left
+This document once said "two" and escrowed exactly two, which left
 the one that opens the other two wherever `age-keygen` happened to write it.
 
 | | file | what it is |
@@ -225,7 +225,7 @@ the old ones** rather than expecting a rotation to clean up after it.
 
 The offline **recovery** key (the age identity) does not depend on the master
 key. There are **two** reasons it might need replacing, they are not the same
-event, and until #541 this section described only the first.
+event, and this section once described only the first.
 
 ### The identity may be COMPROMISED
 
@@ -283,7 +283,7 @@ against a bad backup; it does nothing against a lost key.
 
 ## Recovery (disaster restore)
 
-⚠ **Install BOTH roots. This section covered only the master key until #351, and
+⚠ **Install BOTH roots. This section once covered only the master key, and
 the omission is unrecoverable** — see the asymmetry at the top of this file.
 
 ⚠ **Do not run `deploy/README.md` §2's generation commands on a restore.** They
@@ -306,7 +306,7 @@ When rebuilding from backups onto a fresh host:
    ```
 
    ⚠ The filename is `mailroom-pgp-root-**key**.age`, matching what the escrow
-   section above writes. This line said `mailroom-pgp-root.age` until #541's
+   section above writes. This line said `mailroom-pgp-root.age` until a
    rehearsal ran the procedure verbatim and hit
    `failed to open input file: no such file or directory` — **on the second
    root, during a disaster restore, on the exact secret this document opens by
@@ -327,7 +327,7 @@ When rebuilding from backups onto a fresh host:
 
 4. Boot Mailroom. Unseal is automatic. The master key is exercised immediately
    (mail becomes readable, or you get `blob: not found`). Stored PGP keys are
-   still unsealed **lazily, on first use** — but since migration 00055 (#525)
+   still unsealed **lazily, on first use** — but since migration 00055
    the `crypto` service compares its root with a check value the database
    recorded at its first boot, and **refuses to start on a mismatch**: the
    container restarts, never turns healthy, and logs `PGP ROOT MISMATCH`. That

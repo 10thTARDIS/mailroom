@@ -1,6 +1,6 @@
 # Hostile content: the threat model, and what is (and is not) defended
 
-**Status:** implemented, Forgejo #39. Authoritative spec: `docs/mailroom-spec.md`
+**Status:** implemented. Authoritative spec: `docs/mailroom-spec.md`
 §11; feature matrix §2 and §8.
 
 If you are about to touch the message render path, the attachment download path,
@@ -29,7 +29,7 @@ The specific adversaries, in the order they matter:
 | 1 | **Stored XSS on our origin** | `<script>`, `on*=` handlers, `<svg><script>`, `javascript:` URLs, mutation-XSS against a sanitizer, an HTML/SVG *attachment* served inline |
 | 2 | **Tracking / read receipts** | A 1×1 remote `<img>`, a CSS `background:url()`, `@font-face`, `srcset`, `<link rel=preconnect>`, `<meta http-equiv=refresh>` |
 | 3 | **Credential phishing** | A `<form>` that posts offsite; a link that looks like ours |
-| 3a | **Lying about *who sent it*** | A display name that is itself an address (`"security@bank.example" <attacker@evil.example>`); a `U+202E` in a name that reorders the address rendered beside it — §2.3b. The `From` header is unauthenticated, so this is bounded rather than closed until #55 |
+| 3a | **Lying about *who sent it*** | A display name that is itself an address (`"security@bank.example" <attacker@evil.example>`); a `U+202E` in a name that reorders the address rendered beside it — §2.3b. The `From` header is unauthenticated, so this is bounded rather than closed until the `From` is authenticated (DMARC/ARC verification) |
 | 4 | **Clickjacking / UI redress** | Framing our app from an attacker's page |
 | 5 | **Header injection / response splitting** | A filename or a subject reflected into a response header |
 | 6 | **Network interception** | Cleartext IMAP/SMTP; a stripped `STARTTLS`; an unverified certificate |
@@ -51,7 +51,7 @@ sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts"
 
 `allow-same-origin` is absent — and it must **never** be added: the document has
 an **opaque origin**, so it cannot read our cookies, our `localStorage`, our DOM
-or our session. `allow-scripts` **is** present (Forgejo #100, for content-fit
+or our session. `allow-scripts` **is** present (for content-fit
 auto-height, below), and it is safe only because `allow-same-origin` is not:
 `allow-scripts` + `allow-same-origin` *together* would additionally let the frame
 delete its own `sandbox` attribute. We take one precisely because we never take
@@ -66,7 +66,7 @@ the other — a script in this frame has no origin to abuse.
 > `trusted-html:` marker and the forcing test pins their file and count. See
 > `docs/adr/ADR-015`. The message-**rendering** path above is unaffected.
 
-**Content-fit auto-height, and why `allow-scripts` is not a hole (Forgejo #100).**
+**Content-fit auto-height, and why `allow-scripts` is not a hole.**
 A parent cannot measure an opaque-origin iframe's content, so sizing the frame to
 its content needs a script *inside* the frame to `postMessage` its height out. The
 frame therefore runs **exactly one script — ours** — and nothing else can, held
@@ -85,7 +85,7 @@ shut by three independent facts that all hold at once:
    hash check is a backstop, not the first line.
 
 Remove any one of the three and `allow-scripts` becomes a hole. The reporter is
-the last node in `<body>`, posts `{type:"mailroom-height", height, width}` (its content height and natural width; the width lets a phone scale a wide newsletter to fit, #801) on load and on
+the last node in `<body>`, posts `{type:"mailroom-height", height, width}` (its content height and natural width; the width lets a phone scale a wide newsletter to fit) on load and on
 a `ResizeObserver`, and the parent (`ThreadPane`'s `HtmlBody`) accepts it **only**
 when `event.source === iframe.contentWindow`, validates the shape, and **clamps**
 the values — so a pathological message cannot make a mile-tall frame; past the cap
@@ -110,12 +110,12 @@ we emit is a rendering of a tree we fully inspected, not a substring of the
 attacker's bytes — which is what closes the mutation-XSS gap that string-matching
 sanitizers live in.
 
-**CSS gets the same treatment, and did not always** (`internal/api/sanitize_css.go`,
-Forgejo #297). A `style=""` value and a `<style>` body are **tokenized** with a
+**CSS gets the same treatment, and did not always** (`internal/api/sanitize_css.go`).
+A `style=""` value and a `<style>` body are **tokenized** with a
 CSS Syntax Level 3 tokenizer, **filtered** against an allowlist of *properties*
 (plus an allowlist of value functions, selector functions and at-rules), and
 **re-serialized canonically** — every name emitted comes from our own tables and
-every identifier is re-escaped. Until #297 this half was a regular expression, and
+every identifier is re-escaped. Until the tokenizer this half was a regular expression, and
 §2.3 records exactly what that cost.
 
 It hooks in at exactly one place: `bodyValues` in `internal/api/body.go`, which is
@@ -176,7 +176,7 @@ image proxy:
   The frame fetches nothing: its policy stays `img-src data:` and no parked URL
   is restored into it. It could not fetch them anyway. Its origin is opaque, so
   the browser withholds the `SameSite=Lax` session cookie from any request it
-  makes, and the proxy refuses an unauthenticated request (Forgejo #667). The
+  makes, and the proxy refuses an unauthenticated request. The
   banner says the fetch goes through the server, so the sender learns you opened
   the mail but not the reader's browser or location, and it reports any image
   that could not be loaded.
@@ -184,7 +184,7 @@ image proxy:
   to `data: https:`. The banner says the fetch goes straight to the sender's
   server.
 
-#### 2.3a Remembering that decision, per sender (Forgejo #202)
+#### 2.3a Remembering that decision, per sender
 
 Until 1.14.0 the allow was **per message, per open, and never persisted**, on the
 reasoning that *"I trusted this one newsletter once" must not become "this sender
@@ -217,14 +217,14 @@ narrow and visible:
   a privacy decision that had to be remade in every browser would be remade
   carelessly.
 
-> **⚠ THE GRANT IS KEYED ON AN UNAUTHENTICATED `From` (Forgejo #307).** Everything
+> **⚠ THE GRANT IS KEYED ON AN UNAUTHENTICATED `From`.** Everything
 > above is about keeping the grant *narrow*, and that half is solid — the schema
 > cannot express a wildcard, the store refuses anything wider than one address or
 > one domain, and every grant is listed and revocable. What none of it establishes
 > is that the sender **is who the `From` header says**.
 >
 > `From:` is unauthenticated by construction. Mailroom does not verify DKIM, SPF or
-> DMARC on the read path today (#55), so `matchingRemoteAllow` compares a remembered
+> DMARC on the read path today, so `matchingRemoteAllow` compares a remembered
 > value against a string the sender chose. The consequence is exact and bounded:
 > **anyone who can forge `From: news@publisher.example` inherits a grant the user
 > made for that publisher, and their remote images load without a banner.** They
@@ -235,7 +235,7 @@ narrow and visible:
 > This is a **stated boundary, not an oversight**, and it is the reason the grant is
 > deliberately not a wider mechanism: it decides only what to *un-park*, so a forged
 > `From` buys exactly the thing the user already chose to give the real sender.
-> Closing it properly means an authenticated `From` — DMARC/ARC verification, #55 —
+> Closing it properly means an authenticated `From` — DMARC/ARC verification —
 > at which point `RemoteAllow` should match on the *verified* identity rather than
 > the header. Hardening the store further would not help: **the scope is not the
 > weak part, the identity is.**
@@ -256,7 +256,7 @@ Unlike a blocked `<img>`, these are **not parked** in a `data-mailroom-*`
 attribute — the URL is *gone from the bytes*, so there is nothing for a client to
 restore and nothing for a future `img-src` widening to turn back on.
 
-> **⚠ For CSS that sentence was false until Forgejo #297, and the way it was false
+> **⚠ For CSS that sentence was false until the CSS tokenizer, and the way it was false
 > is worth keeping.** The CSS filter was a regular expression looking for the
 > literal bytes `url(`, `@import`, `expression(`. CSS Syntax §4.3.1 decodes an
 > identifier's escapes **before** anything compares it, so
@@ -298,7 +298,7 @@ restore and nothing for a future `img-src` widening to turn back on.
 > intersection would still be empty and "Show remote content" would be a button
 > that does nothing. The cost is stated plainly in `cmd/mailroom/main.go`.
 >
-> **⚠ Since Forgejo #667 the frame no longer loads proxied images at all**, so
+> **⚠ Since the proxy began refusing unauthenticated requests the frame no longer loads proxied images at all**, so
 > with the proxy on the message policy stays `img-src data:` and the paragraph
 > below describes headroom that only the proxy-off path still uses. The two
 > policies are unchanged, and are kept as written so that path keeps working.
@@ -309,13 +309,13 @@ restore and nothing for a future `img-src` widening to turn back on.
 > `https://` deployment `https:` still covers it; on a plain-`http://` one nothing
 > did — `'self'` matches nothing in the opaque origin and bare `http:` is refused
 > on purpose — so every allowed image was silently blocked by the browser, with
-> no server-side trace (Forgejo #460). Both policies now name the deployment's
+> no server-side trace. Both policies now name the deployment's
 > *one* explicit origin when remote content is allowed: the message CSP gets
 > `window.location.origin`, and the shell CSP gets the origin of the configured
 > OIDC redirect URL when that is `http://` (`appCSPFor` in `main.go`). Neither
 > ever admits the `http:` scheme itself.
 
-#### 2.3b Sender-authored text in *our* chrome (Forgejo #307)
+#### 2.3b Sender-authored text in *our* chrome
 
 Everything above §2.3 is about the message **body**, and the body is defended by
 being put somewhere it cannot reach us. Three strings are **not** in the frame and
@@ -386,7 +386,7 @@ The **raw** message bytes stay reachable (a part's `blobId`) because "view sourc
 is a real feature. That path never renders: it is `application/octet-stream` +
 `attachment` + `nosniff`. **Rendering is sanitized; downloading is inert.**
 
-### 2.4a The third door: attachment preview (Forgejo #131)
+### 2.4a The third door: attachment preview
 
 For two releases this section could end "those are the only two doors." It cannot
 any more, and pretending otherwise would be worse than the door itself.
@@ -473,7 +473,7 @@ frame-ancestors 'none'
 ```
 
 `script-src` allows `'self'` (the app's own external module script) **and** the
-one hash-pinned message height reporter (Forgejo #100). The reporter hash is here
+one hash-pinned message height reporter. The reporter hash is here
 because the `srcdoc` message frame **inherits this policy** and the two intersect
 (§2.1 / §2.2): without the hash in *this* policy the intersection would ban the
 reporter and auto-height would break. It adds **no** general inline-script
@@ -529,7 +529,7 @@ and every JSON response carries `nosniff` + `default-src 'none'; sandbox`.
   build if **any** non-`_test.go` file sets `InsecureSkipVerify: true`,
   `AllowInsecureNoTLS: true`, or names `TLSInsecure`/`TLSStartTLS`.
 
-### 2.8 Inline (CID) images — rendering them without a remote fetch (Forgejo #99)
+### 2.8 Inline (CID) images — rendering them without a remote fetch
 
 A `multipart/related` mail embeds images (a signature logo, a header banner) as
 MIME parts and references them from the HTML with `cid:` URLs (RFC 2392). Those
@@ -573,7 +573,7 @@ The string rewrite is sound for the same reason `restoreRemoteContent` is: it ru
 only on the server's own sanitized output, where every `"` in text and attribute
 values is `&#34;`, so ` src="cid:` occurs only in an `<img>` src the server wrote.
 
-> **Render preference (Forgejo #99).** The reading pane now **prefers the HTML
+> **Render preference.** The reading pane now **prefers the HTML
 > body** whenever a message has one, falling back to the `text/plain` twin only
 > for text-only mail. Almost every real message is `multipart/alternative`;
 > rendering the plain-text alternative hid layout, inline images and the
@@ -581,7 +581,7 @@ values is `&#34;`, so ` src="cid:` occurs only in an `<img>` src the server wrot
 > opaque-origin iframe with the strict CSP — that sandbox is exactly what makes
 > defaulting to HTML safe.
 
-### 2.9 HTML we *generate*: Markdown compose (Forgejo #56)
+### 2.9 HTML we *generate*: Markdown compose
 
 Everything above is about HTML arriving from outside. Markdown compose adds the one
 place where **we** build an HTML document from user input
@@ -616,7 +616,7 @@ correct failure, since the recipient still reads what was written.
 point of Markdown, and it means a recipient with HTML disabled sees exactly the
 bytes the sender reviewed before pressing Send.
 
-### 2.10 A URL out of a message: unsubscribe detection (Forgejo #58)
+### 2.10 A URL out of a message: unsubscribe detection
 
 `List-Unsubscribe` (RFC 2369) is a sender-controlled URL that the product now puts in
 front of the user, so it gets a paragraph. **Most real mail carries it** (a majority of messages in a
@@ -627,7 +627,7 @@ real test mailbox), so this is not a corner case.
 a server-side POST to an address a stranger chose would be this project's **first
 outbound fetch on behalf of a message**, i.e. an SSRF surface aimed at whatever the
 sender wrote — internal hosts, cloud metadata endpoints, the operator's own network.
-Forgejo #58 scopes unsubscribe to *surfacing* the affordance, and that scope is what
+The design scopes unsubscribe to *surfacing* the affordance, and that scope is what
 keeps the door shut. If one-click is ever wanted it needs its own ADR, an
 egress-restricted fetcher, and a re-reading of §2.3's claim that Mailroom makes no
 outbound fetch on a message's behalf.
@@ -665,7 +665,7 @@ reply, and a reply confirms to the sender that the address is live and read — 
 a sender who never had consent is worth more than the unsubscribe. The panel says so,
 in the same spirit as §2.3's banner saying what loading an image reveals.
 
-### 2.11 A calendar out of a message: invitations (Forgejo #725, ADR-033)
+### 2.11 A calendar out of a message: invitations (ADR-033)
 
 An `.ics` — a `text/calendar` part or attachment — is attacker-controlled input with
 two features a body does not have: it carries **addresses Mailroom will send to**
@@ -706,7 +706,7 @@ door, and each has a test that goes red without it.
   From check, ingest-only mode and Undo Send apply unchanged. An organiser that is
   missing or not one plain address is refused with a sentence, and nothing is written.
 - **Only an AUTHENTICATED organiser changes another message's card** (security
-  review of #725). A UID is in every copy of an invitation, and ORGANIZER is a string
+  review of the invitation work). A UID is in every copy of an invitation, and ORGANIZER is a string
   the sender typed, so matching on them alone let anyone who had seen an invitation
   cancel or supersede it on the card. A CANCEL or a higher-SEQUENCE REQUEST now affects
   another message only when `ical.Verified` holds: the message has exactly one From
@@ -742,7 +742,7 @@ document.
   was decrypted for indexing — so it carries the same at-rest exposure as the raw
   mail store and MUST live on a volume/filesystem-level-encrypted disk (LUKS/dm-crypt
   or equivalent), the same deployment requirement stated for the blob store; see
-  spec §7 and §11 (mailroom#41).
+  spec §7 and §11.
 - **A browser bug in iframe sandboxing or CSP.** We bet on origin isolation. If
   the browser's isolation is broken, so are we — as is every other webmail.
 - **The user clicking a phishing link.** Links work (that is the point). We force
@@ -786,16 +786,16 @@ document.
   detectable by any heuristic over a string the sender chose — the reading pane
   shows the real address, as it does for every message, and that is the whole of
   the answer until the `From` is **authenticated**. *DMARC/ARC verification is
-  #55.* The same gap is what §2.3a's remembered remote-content grant is keyed on.
+  not yet done on this path.* The same gap is what §2.3a's remembered remote-content grant is keyed on.
 
-  ⚠ **MEASURED IN v1.61.0 (#397), AND THE SENTENCE ABOVE HELD.** The obvious rule
+  ⚠ **MEASURED IN v1.61.0, AND THE SENTENCE ABOVE HELD.** The obvious rule
   — "the display name matches a contact but the address is not theirs" — was run
   against a real mailbox: it fired on **a few percent** of messages and was
   legitimate **every single time**. Almost all of it is an ESP sending on a
   brand's behalf, which authenticates correctly because the ESP signs as itself.
   The rule measures *delegation*, not deception, so it was not built.
 - **Homograph display names and lookalike domains** (`раypal.example` in Cyrillic).
-  ⚠ **HALF OF THIS MOVED OUT OF THIS LIST IN v1.61.0** (#397), and the half that
+  ⚠ **HALF OF THIS MOVED OUT OF THIS LIST IN v1.61.0**, and the half that
   stayed is the more interesting one.
   - **Lookalike SENDING DOMAINS are now flagged.** `Email.senderWarnings` reduces
     the `From` domain to what it *renders* as and compares it against the domains
@@ -809,9 +809,9 @@ document.
   - **Neither is a domain that merely CONTAINS a brand** (`paypal-security.example`).
     That is not a confusable; it is a different domain that reads convincingly,
     and catching it needs a brand list with a much worse false-positive profile.
-  - *Phishing / homograph warnings about URLs in bodies remain v2* (#70). Same
+  - *Phishing / homograph warnings about URLs in bodies remain v2* (#11). Same
     machinery, different object: that one judges links, this one judges senders.
-- **Inline (CID) images now render** (Forgejo #99), and they do it *without*
+- **Inline (CID) images now render**, and they do it *without*
   opening the remote hole — see §2.8. The residual non-defence is only the general
   one: an inline image is attacker-supplied bytes, decoded by the browser's image
   codecs; we never serve it as `image/svg+xml` or any active type (§2.4), so it is
@@ -823,7 +823,7 @@ document.
 |---|---|
 | The sanitizer removes every construct in a hostile corpus, and the output's **DOM** contains nothing that executes or fetches | `internal/api/sanitize_test.go` (`assertSafeDOM`) |
 | Surviving CSS declares only allowlisted **properties**, contains no `<url-token>` / unlisted function / unlisted at-rule, and — decoded by a **second, independent** escape decoder — contains no dangerous literal | `sanitize_test.go` `assertInertCSS` (three checks) |
-| A CSS-escaped `url()` / `@import` / `expression()`, `image-set()` and the rest of the image-function family are removed — the #297 payloads, measured fetching in real Chromium before the fix | `sanitize_test.go` `TestSanitizeCSS`, and the `#297:` cases in `TestSanitizeHTML` |
+| A CSS-escaped `url()` / `@import` / `expression()`, `image-set()` and the rest of the image-function family are removed — the CSS-escape payloads, measured fetching in real Chromium before the fix | `sanitize_test.go` `TestSanitizeCSS`, and the `#297:` cases in `TestSanitizeHTML` |
 | The CSS allowlist has not been tightened into uselessness: a real newsletter's media query, class rules and cell styling survive | `TestSanitizerKeepsLegitimateCSS` (the positive control for every `#297:` case) |
 | Each of the three CSS assertions **can actually fail**, and does not fire on inert CSS | `TestTheCSSInertnessCheckerCanActuallyFail` |
 | The sanitizer is a **fixed point** (no mutation-XSS gap) and never panics | `TestSanitizeHTMLIsIdempotent`, `TestSanitizeHTMLIsTotal` |
@@ -845,7 +845,7 @@ document.
 | A `List-Unsubscribe` target is refused unless it is `https` with a host and no userinfo, or a `mailto` with an address — `javascript:`, `data:`, `file:`, `ftp:`, plain `http:` and schemeless all yield no affordance, and a refused link does not cost the message its mailto | `internal/api/unsubscribe_test.go` `TestParseListUnsubscribeRefusesUnsafeTargets` (each refusal negative-controlled) |
 | The `unsubscribe` property survives the whole chain to `Email/get` — and an unsafe target yields `null` **there**, on a real row, not just in the parser | `internal/api/unsubscribe_integration_test.go` |
 | `unsubscribe` is **not** a default Email property, so a sender-controlled string never enters the list view | `TestUnsubscribeIsNotADefaultEmailProperty` (with a positive control) |
-| A calendar part is bounded while it is parsed (size, components, properties, depth, parameters, attendees), a RRULE is never expanded, a hostile TZID floats, and a CR/LF in any field cannot become a content line of the REPLY | `internal/ical/ical_test.go` `TestHostile*`, `reply_test.go` `TestReplyEscapesTextExactly` (each mechanism probed red, #725) |
+| A calendar part is bounded while it is parsed (size, components, properties, depth, parameters, attendees), a RRULE is never expanded, a hostile TZID floats, and a CR/LF in any field cannot become a content line of the REPLY | `internal/ical/ical_test.go` `TestHostile*`, `reply_test.go` `TestReplyEscapesTextExactly` (each mechanism probed red) |
 | `internal/ical` cannot fetch: it imports no network package | `internal/ical/reply_test.go` `TestPackageNeverFetches` |
 | Receiving and reading an invitation never answers it; a refused answer writes nothing; a stranger's CANCEL does not cancel the card | `internal/api/calendar_integration_test.go` |
 | A filename cannot split a response (asserted over the **serialized wire bytes**) | `TestFilenameCannotInjectAHeaderThroughTheRealHandler` |
@@ -853,7 +853,7 @@ document.
 | The sign-in page keeps its stricter hash-pinned CSP | `TestSignInPageKeepsItsOwnStricterCSP` |
 | No inline script; no `innerHTML`/`dangerouslySetInnerHTML` anywhere in `web/` | `TestWebIndexHasNoInlineScript`, `TestWebNeverInjectsHTMLIntoOurOwnDOM` |
 | The message sandbox is `allow-popups allow-popups-to-escape-sandbox allow-scripts` and never `allow-same-origin`; the message CSP `script-src` is the reporter hash only | `TestMessageSandboxIsNotRelaxed` |
-| …and the `<iframe>` **actually receives it**: the only frame in `web/src` outside the #131 preview carries `sandbox={MESSAGE_SANDBOX}` **verbatim** — no concatenation, no template literal, no overriding spread — and the frame count is pinned so the assertion cannot go vacuous | `cmd/mailroom/security_test.go` `TestEveryIframeCarriesTheMessageSandbox` (probed against deletion **and** against `+ " allow-same-origin"`, both of which leave the constant test green — Forgejo #298) |
+| …and the `<iframe>` **actually receives it**: the only frame in `web/src` outside the attachment preview carries `sandbox={MESSAGE_SANDBOX}` **verbatim** — no concatenation, no template literal, no overriding spread — and the frame count is pinned so the assertion cannot go vacuous | `cmd/mailroom/security_test.go` `TestEveryIframeCarriesTheMessageSandbox` (probed against deletion **and** against `+ " allow-same-origin"`, both of which leave the constant test green) |
 | Event handlers are stripped by their **own** rule, not only by the attribute allowlist — asserted with `onclick` temporarily *on* the allowlist, so the backstop cannot be what removes it | `internal/api/sanitize_test.go` `TestEventHandlersAreStrippedByTheirOwnRule` |
 | No key on the attribute allowlist begins with `on` | `TestNoEventHandlerIsOnTheAttributeAllowlist` |
 | Every scoping bidi control (`U+202A`–`U+202E`, `U+2066`–`U+2069`) is removed from sender-authored chrome text, LRM/RLM are **kept**, and a confusable display name makes the list row show the real address | `web/src/core/hostileText.test.ts` (including the assertion that a no-`@` lookalike is **not** caught, so widening the rule is a decision) |
@@ -874,8 +874,8 @@ document.
    If you cannot keep all three, do not ship the change. Never add any script
    source to the message CSP beyond the reporter's own sha256.
    *Note the shape of the rule:* the sandbox is asserted **twice**, as the value
-   of the constant and as the attribute the `<iframe>` receives, because until
-   #298 only the first was — and deleting the attribute, or writing
+   of the constant and as the attribute the `<iframe>` receives, because at first
+   only the first was — and deleting the attribute, or writing
    `MESSAGE_SANDBOX + " allow-same-origin"`, left Go, `tsc` and every vitest green
    while the message frame ran same-origin. **A constant nobody checks the use of
    is a comment.**
@@ -906,7 +906,7 @@ document.
    For CSS that means adding to `cssAllowedProperties`, and only for a property
    that **cannot name an external resource**: no `<url>`, no `<image>`, no script
    hook. Never re-introduce a *denylist* of dangerous CSS constructs, and never
-   assert a CSS property with `strings.Contains` — #297 is the whole story of why
+   assert a CSS property with `strings.Contains` — the CSS tokenizer's history is the whole story of why
    (§2.3), and its test was green for two releases because it shared the code's
    string model.
 8. When you add a route that returns bytes, decide its `Content-Type`, set
@@ -928,7 +928,7 @@ document.
     pointed at an address a stranger chose. A user's own browser opening a link they
     clicked is a different thing, and is the only shape allowed here.
 11. **Assert that a security control can FAIL.** Three assertions written for the
-   preview (#131) passed while proving nothing: `contentDocument` is null for any
+   preview passed while proving nothing: `contentDocument` is null for any
    PDF-typed resource whether or not it is sandboxed, `alert()` is silently dropped
    in a sandboxed document so a dialog counter never fires, and a frame that failed
    to load executes nothing for the trivial reason that it loaded nothing. Each was

@@ -1,6 +1,6 @@
 # ADR-016: Web Push — VAPID key derived from the master key; sends authorized per-user via RLS
 
-**Status:** Accepted (design for Web Push, Forgejo #42)
+**Status:** Accepted (design for Web Push)
 
 ## Context
 
@@ -49,7 +49,7 @@ Consequences:
 
 The push sender is invoked **per-user from the sync fan-out**, which already
 carries the `userID` at every layer (Supervisor → Runner → `syncAccount`), proven
-by the #43 `HealthRecorder`. A `PushNotifier` seam (a direct clone of
+by the `HealthRecorder`. A `PushNotifier` seam (a direct clone of
 `WithHealthRecorder`) fires from `syncAccount`'s success tail when
 `MessagesIngested > 0`, and its store implementation opens
 `Store.UserTx(ctx, userID, …)` to read that user's `push_subscriptions` under
@@ -65,7 +65,7 @@ Consequences:
 ## Scope notes
 
 - **Triage-aware ("important-only") is deferred to its signal.** No per-message
-  importance exists before the ML tier (#33); `push_subscriptions.important_only`
+  importance exists before the ML tier; `push_subscriptions.important_only`
   is future-proofing. For now a push fires on any new **inbox** mail.
 
   ⚠ **Correction, 2026-09-18:** that last sentence was never what the code does.
@@ -79,9 +79,9 @@ Consequences:
   archived on arrival does not notify (`pushCount`, same file). A pass that
   brought only muted replies sends no push at all.
 
-  **Amended, 2026-10-17 (v1.89.0, #59): triage-aware push is built, and its
+  **Amended, 2026-10-17 (v1.89.0): triage-aware push is built, and its
   default deliberately deviates from spec §12.** The spec says "only
-  *important* mail pushes by default". Decided (#59):
+  *important* mail pushes by default". Decided:
   push stays **every message until the user picks a mode**, because a
   silent change from "everything" to "only what the model ranks high" on the
   day of an upgrade would look like lost mail. So:

@@ -1,7 +1,7 @@
 # ADR-023: Topic categorisation is rules plus abstention; the per-label learner is retained, unpromoted, behind a measured gate
 
-**Status:** Accepted (Forgejo #169, #156; measured on a real corpus and
-deployed in v1.30.0/v1.30.1). **Amended by ADR-032** (#714): these
+**Status:** Accepted (measured on a real corpus and
+deployed in v1.30.0/v1.30.1). **Amended by ADR-032** (#28): these
 measurements came from a mailbox with little history, not a long-used
 daily mailbox; for KNOWN senders, learned placement now files mail from the
 user's own filings. Everything here about unseen senders and the per-label
@@ -16,13 +16,13 @@ learner stands.
 
 ## Context
 
-The v1.6.0 epic (#156) assumed a learned per-label classifier would carry the
+The v1.6.0 classification epic assumed a learned per-label classifier would carry the
 long tail that rules could not: *"label a couple of messages and have Mailroom
 start doing it for you."* The rule half worked immediately — 66 induced rules at
 zero collateral, nearly all keyed on the delivery alias. The learned half was
 measured three times over five weeks and never worked.
 
-**The first two rounds of numbers were artifacts.** #220 found four defects in
+**The first two rounds of numbers were artifacts.** An audit found four defects in
 the evaluation the whole epic had been judged on, one of which made sender
 memorisation a *fixed point of the training procedure* — so the conclusion
 "structural features don't generalise" had never actually been tested. Fixing
@@ -37,15 +37,15 @@ coexisting with unusable precision is why AUC was the wrong question.
 
 ### The argument that closed it, rather than a fourth round of numbers
 
-A tension was left open on #169 and #156: the tab probe (#219) measured that the
+A tension was left open by the learner work and the epic: the tab probe measured that the
 hard residue has **no function-level discriminator** — what separates the classes
 is *which stream a known brand used* (`email.venmo.com` marketing vs `venmo.com`
-notifications) — while #169's own reshape says to **exclude identity features
+notifications) — while the learner's own reshape says to **exclude identity features
 entirely**. A learner denied identity, asked to beat the deterministic layer on
 an identity-shaped residual, looked set up to fail, and its failure would then
 read as a fourth verdict on "structure doesn't generalise".
 
-Settled by argument (#169, 2026-08-05):
+Settled by argument:
 
 1. **The objection is a category error.** Identity features cannot help on an
    **unseen** sender at all — the feature value is novel and the model has no
@@ -54,13 +54,13 @@ Settled by argument (#169, 2026-08-05):
    collateral. So the exclusion costs nothing on the population that matters,
    and the learner is not handicapped by it. `labelModelFeatures` already said
    this in its own comment.
-2. **The two residues are different objects.** #219's is the FUNCTION axis (which
-   tab); #169's learner works the TOPIC axis (which label). Importing one as
+2. **The two residues are different objects.** The tab probe's is the FUNCTION axis (which
+   tab); the learner works the TOPIC axis (which label). Importing one as
    evidence about the other muddles them. Dropping the tab probe as an argument
-   here changes nothing, because #169 holds its own better-aimed measurement.
+   here changes nothing, because the learner work holds its own better-aimed measurement.
 3. **The honest middle case was already measured and points the wrong way.**
    Sender *morphology* — computed from identity but not of it — does generalise.
-   #219 measured the generic version: `bulk_stream_subdomain` fires on a larger share of
+   The tab probe measured the generic version: `bulk_stream_subdomain` fires on a larger share of
    Updates than of Promotions, i.e. **anti-correlated**, because
    `s.shop.example`, `mail.vendor.example` and `email.vendor-alt.example` wear the same
    costume while carrying notifications. Only "for THIS brand, this stream means
@@ -84,15 +84,15 @@ Four parts:
    little.
 2. **The diagnostic and the decision are one calculation.** `train-labels
    --folds N` prints the verdict `--apply` would reach, because it *is* that
-   verdict — #155's `Rule/preview` precedent, where a preview that can disagree
+   verdict — the `Rule/preview` precedent, where a preview that can disagree
    with the engine is worse than none.
 3. **The spec's "label suggestions" commitment is delivered by the rule
-   inducer**, not the model (#242). Measured on a real corpus: **most
+   inducer**, not the model. Measured on a real corpus: **most
    unlabelled messages would receive a rule-derived suggestion, none
    ambiguous between two labels**, with the rest reaching nothing because their senders
    have never been filed — which is abstention working, not a gap to tune.
 4. **`internal/kind` weights and thresholds stay untouched**, and the AUC floor
-   is deleted rather than moved: #169's "do not move the floor; it was never the
+   is deleted rather than moved: the learner work's "do not move the floor; it was never the
    binding constraint" stands, and this is not a retuning of it.
 
 ### What the gate says on the real corpus
@@ -114,13 +114,13 @@ would have promoted it.
 - **The epic's goal is met by a different mechanism than planned**, and that is
   delivery rather than abandonment: rules do topic categorisation at zero
   collateral, and the tail that rules cannot reach needs a semantic
-  representation (embeddings, #67/#241, 2.x), not a better optimiser over the
+  representation (embeddings, #8/#22, 2.x), not a better optimiser over the
   present feature space.
 - **A gate that refuses everything today is still worth having.** What it
   replaces said *yes* for a reason that was noise, and it was reachable by one
   flag (`train-labels --apply`). Nothing promoted before because nobody ran the
   command, not because the bar held.
-- **#156's acceptance test passes for an unseen sender by abstention**, which the
+- **The epic's acceptance test passes for an unseen sender by abstention**, which the
   criterion explicitly permits ("or be surfaced for manual classification"), and
   the gate is what keeps it passing. It is now executable
   (`internal/ml/acceptance_test.go`) rather than prose that drifted out of two
@@ -133,8 +133,8 @@ would have promoted it.
 - **Naive Bayes, the hard-negative pool, and per-label thresholds from CV are
   closed as tuning** inside a feature space that has been measured on an audited
   harness. Reopening any of them needs a new *signal*, not a new optimiser.
-- **#170's classifier-feedback half is moot**: it was blocked on a promoted model
-  that this decision says should not exist, and #219 already routes corrections
+- **The classifier-feedback work is moot**: it was blocked on a promoted model
+  that this decision says should not exist, and the tab work already routes corrections
   to the label→tab mapping and `Rule/tighten`.
 - **This decision is reversible on evidence.** The gate is the mechanism: give it
   a corpus where a label's interval bottom clears the bar over ten-plus senders
@@ -155,7 +155,7 @@ senders promotes (60/60, interval bottom 0.940); evidence separable only by
 sender is refused with the gate's own reason. Forcing the check off turns the
 first red; forcing it never to pass turns the second red.
 
-`internal/ml/acceptance_test.go` states #156's acceptance test as three cases,
+`internal/ml/acceptance_test.go` states the epic's acceptance test as three cases,
 both probed into failure: asserting the *rule* that fired rather than only the
 tab (the residue rule also answers Updates, so a tab-only assertion could not
 fail), and an adversarial single-sender fixture (with identity restored the
@@ -170,11 +170,5 @@ reaches.
 
 ## References
 
-- **#156** — the epic, its acceptance test, and its invariants
-- **#169** — the learner, its three rounds of measurement, and the argument above
-- **#220** — the four evaluation defects; precision-at-threshold; the gate this
-  ADR implements
-- **#219 / ADR-021 / ADR-022** — the function-vs-topic split and the tab axis
-- **#242** — label suggestions sourced from the rule inducer
-- **#222** — deterministic scoring, without which cross-validation could not
-  carry a promotion decision
+- **ADR-021 / ADR-022** — the function-vs-topic split and the tab axis
+- **ADR-032** — learned placement for known senders

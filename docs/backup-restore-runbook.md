@@ -81,7 +81,7 @@ choice** — cannot see the mail.
 
 ⚠ **This section used to say that such a dump silently emits empty `COPY` blocks
 and exits 0. That is wrong, and it teaches you to distrust the wrong thing.**
-Measured on PostgreSQL 18 (#351; `scripts/backup.sh` measured the same on 16 and
+Measured on PostgreSQL 18 (`scripts/backup.sh` measured the same on 16 and
 has said so all along):
 
 ```
@@ -128,7 +128,7 @@ age-keygen -y backup-identity.txt > backup-recipients.txt    # public — safe t
 ```
 
 ⚠ **`backup.sh` needs raw container names, not service names, and they depend
-on the Compose project (#544).** Docker Compose names every container
+on the Compose project.** Docker Compose names every container
 `<project>-<service>-1`. `deploy/compose.yml` sets `name: mailroom-deploy`, so
 the plain `docker compose -f deploy/compose.yml up -d` command
 `deploy/README.md` gives produces `mailroom-deploy-postgres-1`,
@@ -166,10 +166,10 @@ means. **Do this before you rebuild anything.**
 
 ## 3a. Running it unattended: retention, and the signal that goes red
 
-⚠ **As of v1.70.0 nothing in this repository schedules a backup, and on the test
-instance no artifact had ever been produced.** Verified rather than assumed
-(#539): no crontab, nothing in `/etc/cron.d`, no mailroom timer among those the
-host runs, and zero `.age` files anywhere under the deploy user's home. The
+⚠ **As of v1.70.0 nothing in this repository schedules a backup, so an instance
+set up from this repository alone produces no backups at all.** Check rather than
+assume: look for a crontab entry, a file in `/etc/cron.d` or a systemd timer that
+runs `scripts/backup.sh`, and for recent `.age` artifacts. The
 scheduled caller belongs in the host's configuration — it needs Docker access
 and a BYPASSRLS DSN that should not live in the compose environment — so what
 this repository provides is the other half: bounded retention, and a check that
@@ -212,7 +212,7 @@ Retention is not what gives you "a backup" — it is what gives you "a backup fr
 before the thing that went wrong."
 
 **Sizing:** measure your own mailbox rather than trusting a number quoted here —
-the census tool (`/mailroom-census`, #529) reports per-folder counts and bytes.
+the census tool (`/mailroom-census`) reports per-folder counts and bytes.
 An artifact is roughly the blob store's size plus a small Postgres dump (the
 search index is deliberately excluded — it is rebuildable). Choose `KEEP`
 against the volume you actually have, and against the true cost above: `KEEP`
@@ -259,12 +259,12 @@ anyone; two consecutive ones do.
 
 Both halves are proven in CI rather than asserted — `backup-freshness.sh
 --self-test` and `backup-retain.sh --self-test` run on every push, each with a
-positive control, because #539's acceptance criteria ask for an alert that "has
+positive control, because the acceptance criteria ask for an alert that "has
 been proven to fire when backups stop".
 
 ### What still has to live on the host
 
-Not in this repository, and left to the deployment's own automation (#545):
+Not in this repository, and left to the deployment's own automation:
 
 - the timer or unit that calls `backup.sh`, with its environment;
 - the superuser DSN, kept out of the compose environment;
@@ -273,8 +273,7 @@ Not in this repository, and left to the deployment's own automation (#545):
   a raw-volume snapshot that loses the schema-version manifest;
 - wiring `backup-freshness.sh` to whatever actually pages someone.
 
-⚠ One trap for whoever writes that, now closed rather than merely noted
-(#633): `backup.sh` seals the artifact by running `age` **inside a throwaway
+⚠ One trap for whoever writes that, now closed rather than merely noted: `backup.sh` seals the artifact by running `age` **inside a throwaway
 container**, named by `MAILROOM_AGE_IMAGE`.
 
 - **Leave `MAILROOM_AGE_IMAGE` unset and the script derives it from the blob
@@ -302,7 +301,7 @@ the pinned path needs no network at all, with a negative control (plain
 `alpine:3.20`, which has no `age`) that proves the same check can fail.
 
 ⚠ **`backup.sh` stages a PLAINTEXT copy of everything it backs up, on the
-HOST, for the duration of the run (#634).** `WORK="$DIR/.backup-tmp.$$"`,
+HOST, for the duration of the run.** `WORK="$DIR/.backup-tmp.$$"`,
 where `$DIR` is the checkout `backup.sh` itself runs from (the parent of
 `scripts/`) — **not** `MAILROOM_BACKUP_OUT`'s directory, which may be
 somewhere else entirely. Under it, `payload/` holds the unencrypted
@@ -404,14 +403,14 @@ that, you have the wrong key; you have not lost the blob store.
 **The PGP root** — install at `MAILROOM_PGP_ROOT_KEY_FILE` (default
 `/run/secrets/mailroom_pgp_root_key`).
 
-⚠ **This step did not exist until #351, and its absence is unrecoverable.** The
+⚠ **This step was added late, and its absence is unrecoverable.** The
 crypto process unseals stored PGP keys **lazily, on first use**, so for a long
 time a wrong or freshly generated root produced no error at boot, no error at
 login, and a perfectly healthy-looking instance. It surfaced the first time
 somebody signed or decrypted, possibly months later, when every stored private
 key was already unopenable and `pgp-export-wrapped` could not help either.
 
-**Since migration 00055 (#525) the crypto service refuses to start on the wrong
+**Since migration 00055 the crypto service refuses to start on the wrong
 root — provided the database you restored had recorded one.** The first time the
 crypto process boots against a database it stores a one-way check value of its
 root in `app.pgp_root_check`, and every boot after compares against it. That
@@ -480,7 +479,7 @@ sh scripts/restore-drill.sh --self-test  # prove the drill can FAIL, then that i
 sh scripts/restore-drill.sh --artifact … --identity … --master-key … --pgp-root …
 ```
 
-It runs weekly in CI (`.forgejo/workflows/restore-drill.yml`) in **fixture** mode:
+It runs weekly in CI (`.github/workflows/restore-drill.yml`) in **fixture** mode:
 it builds a real Mailroom (real migrations via `cmd/mailroom-migrate`, real
 envelope-encrypted mail via `internal/ingest`), takes a real backup with
 `scripts/backup.sh`, **destroys the source**, and restores the artifact into a
@@ -503,14 +502,14 @@ It proves the restore is **alive**, not merely present:
    and indexed;
 8. the **second escrowed root is present, well-formed, is not the master key
    again, matches this database's own recorded check value if it has one**
-   (`app.pgp_root_check`, migration 00055, #525), **and actually unseals every
+   (`app.pgp_root_check`, migration 00055), **and actually unseals every
    PGP private key this user has stored** (ADR-024). Steps 1–7 all turn on one
    secret, and every one of them passes without this one — so a drill that
    stopped at 7 would print a clean bill of health over precisely the hole it
    cannot see.
 
-   PGP keys persist in `app.user_keys` (sealed in `private_key_ct`) since
-   Forgejo #47 increment 3, so step 8 opens every one it finds and checks the
+   PGP keys persist in `app.user_keys` (sealed in `private_key_ct`), so
+   step 8 opens every one it finds and checks the
    opened key's fingerprint against the stored column — opening to
    plausible-looking bytes is not proof, a fingerprint match is. A mismatched
    check value is always a **hard failure**, checked *before* any key is
@@ -527,14 +526,14 @@ It proves the restore is **alive**, not merely present:
    collapsing every case into one OK: **N keys unsealed and
    fingerprint-verified** is the strongest result and always attempted when
    there is anything to unseal, whether or not the check value matched too.
-   With **0 keys stored**, there is nothing to unseal, but since #551 that is
+   With **0 keys stored**, there is nothing to unseal, but that is
    no longer automatically *unproven*: if this database recorded a check value
    and it matches, the root is still **proven** to be the one the database was
    built with — a narrower claim than "opens a key", worded as one, but a real
    pass. Only when the check value is **absent** (the backup predates
    migration 00055, or its crypto process — real or, in a fixture, `seed`
    standing in for one — has never booted) *and* there are 0 keys to unseal is
-   the leg reported *unproven*, exactly as before #551.
+   the leg reported *unproven*, exactly as before the check value existed.
 
 ### A drill that cannot fail is not a drill
 
@@ -559,7 +558,7 @@ exists, because whoever holds the master key can then derive every PGP private
 key. Nothing at runtime reports it. The drill is the only thing that looks.
 
 `wrong-pgp-root` is the one whose fixture actually has stored keys to test
-against, but since #551 it no longer needs them to fail: it is caught by the
+against, but it no longer needs them to fail: it is caught by the
 check-value comparison (`app.pgp_root_check`) before any key is opened at
 all, the same way `no-pgp-root` and `same-root` are caught by presence and
 equality checks alone. All three now share that shape — a secret that is
@@ -582,7 +581,7 @@ mode where the mail is synthetic.
 Everything above runs the drill in **fixture** mode: it builds its own world,
 backs it up, destroys it, and restores that. That proves the code path against
 the current schema. It says nothing about *your* artifact, and until v1.70.0 the
-drill had **never once been pointed at a real backup** (#540).
+drill had **never once been pointed at a real backup**.
 
 ```sh
 sh scripts/restore-drill.sh \
@@ -612,8 +611,7 @@ drilling recovers an artifact whose recipient key is gone.
 
 ### Measured — the first real-artifact drill
 
-The drill was run against a small test instance (a few thousand messages, a
-hundred-odd megabytes of artifact). Its phases, in order:
+The drill was run against a small test instance. Its phases, in order:
 
 | phase | scales with |
 |---|---|

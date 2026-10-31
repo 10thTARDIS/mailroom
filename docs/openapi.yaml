@@ -9,7 +9,7 @@ openapi: 3.1.0
 # It is deliberately conservative — a property that the server does not emit is
 # NOT listed here. Large objects (notably Email) are documented as a labelled
 # SUBSET of the commonly-used properties; the RFC is the full reference for the
-# rest. The `.forgejo/workflows/ci.yml` `openapi-lint` job validates this file on
+# rest. The `.github/workflows/ci.yml` `openapi-lint` job validates this file on
 # every PR.
 #
 # Portability (CLAUDE.md): no operator-identifying hosts/domains appear here; all

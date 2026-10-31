@@ -1,6 +1,6 @@
 # ADR-044: MCP tools — standard Streamable HTTP, stateless, keys only, a thin client of the JMAP gate
 
-**Status:** Accepted (Forgejo #49, v1.95 increment "M"; spec §13a). Builds on
+**Status:** Accepted (v1.95 increment "M"; spec §13a). Builds on
 ADR-042, which it does not widen.
 
 ## Context
@@ -10,7 +10,7 @@ JMAP dispatcher's key gate (scope table, account restriction, rate and budget,
 confirm-mode holds, audit, anomaly rules). Its consequences section binds the MCP
 tools to be a thin client of that gate with no second enforcement path.
 
-Decisions on #49 add **no lock-in**: standard MCP and
+The decisions add **no lock-in**: standard MCP and
 a standard `Authorization: Bearer` header, no client-specific extensions, any
 MCP-capable client with any model; stdio-only clients through a generic bridge;
 CI drives the endpoint with the MCP SDK's own client. Named clients are
@@ -85,11 +85,11 @@ The names are a public contract (clients and prompts refer to them):
 `search_mail`, `read_message`, `list_mailboxes`, `list_labels`, `apply_label`,
 `remove_label`, `mark_read`, `mark_unread`, `archive`, `move_to_mailbox`,
 `list_areas`, `move_to_area`, `draft_new`, `draft_reply`, `send_draft`,
-`delete_message`, `find_contacts`, `get_contact`, `get_pending`, and since
-#872 `draft_update` and `draft_discard` (ADR-045). `docs/mcp.md` lists each
+`delete_message`, `find_contacts`, `get_contact`, `get_pending`, and, since
+v1.95.0, `draft_update` and `draft_discard` (ADR-045). `docs/mcp.md` lists each
 tool's methods and scopes.
 
-- **Areas (amended for #49, increment K2).** M shipped without them,
+- **Areas (amended, increment K2).** M shipped without them,
   because ADR-042's table refused every `Area/*` method to keys. K2 opened
   `Area/get` (ADR-042 §3a), and the tools follow: `list_areas` (Area/get),
   `move_to_area` (Area/get, Email/get, and an Email/set update setting
@@ -109,7 +109,7 @@ tool's methods and scopes.
   capped at 64 KiB with `truncated`, and attachments by name, type and size,
   never content. `draft_new`/`draft_reply` attach nothing; their body is
   Markdown, sent as plain text plus a rendering, and their wording follows the
-  key's send mode (amended for #872, ADR-045).
+  key's send mode (amended for ADR-045).
   `send_draft` needs an explicit draft id, and the gate sends only drafts the key
   wrote. `delete_message` is the soft delete.
 
@@ -124,14 +124,14 @@ tool's methods and scopes.
   (except newline and tab), explicit directional formatting characters, and all
   other Unicode format characters (zero-width characters, BOM, soft hyphen,
   tags). The predicate is the one `store.cleanContactName` applies to learned
-  names (#831), restated in `internal/mcp` because the store's version is
+  names, restated in `internal/mcp` because the store's version is
   unexported and single-line. Both also strip the rest of Unicode's
   Default_Ignorable_Code_Point set that is not Cf (Hangul fillers such as
   U+3164, variation selectors, the combining grapheme joiner), from the
   standard library's Other_Default_Ignorable_Code_Point and Variation_Selector
-  tables (amended after the #853 review; `CleanLearnedContactName` and the
+  tables (amended after a review; `CleanLearnedContactName` and the
   `contact-names-clean` classifier gained the same set).
-- **Hidden HTML is dropped** (amended after the #853 review). Text a person
+- **Hidden HTML is dropped** (amended after a review). Text a person
   never sees but a model reads is an injection channel, and the server's
   sanitiser keeps the harmless-to-a-browser markup that hides it. The
   HTML-to-text converter drops the whole subtree of an element with `hidden`,
@@ -172,5 +172,5 @@ tool's methods and scopes.
 
 ## References
 
-spec §13a · ADR-042 · ADR-009 · Forgejo #49 · `internal/mcp`,
+spec §13a · ADR-042 · ADR-009 · `internal/mcp`,
 `internal/api/mcp_bridge.go`, `docs/mcp.md`

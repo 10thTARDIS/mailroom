@@ -1,4 +1,4 @@
-# tantivy-go search spike (ADR-006 / Forgejo #2)
+# tantivy-go search spike (ADR-006)
 
 Throwaway spike proving out embedded Tantivy via `anyproto/tantivy-go` behind a
 Mailroom-owned `Index`/`Searcher` interface. **Findings and the PASS/FAIL
