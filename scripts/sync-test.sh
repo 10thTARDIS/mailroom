@@ -9,7 +9,7 @@
 # container on the same docker network against it.
 #
 # CI wiring (not done by this script Ã¢â¬â orchestrator to add to
-# .forgejo/workflows/ci.yml):
+# .github/workflows/ci.yml):
 #
 #   sync-tests:
 #     runs-on: ubuntu-latest
@@ -21,7 +21,7 @@
 # Everything goes through the Docker API only (docker create/cp/exec,
 # container-to-container networking) Ã¢â¬â no published ports, no bind mounts,
 # no host toolchain. Same shape as scripts/integration-test.sh and
-# scripts/migrate-check.sh, for the same reason: the Forgejo runner executes
+# scripts/migrate-check.sh, for the same reason: the CI runner executes
 # jobs in containers with a mounted docker socket, so host-port mappings and
 # host paths do not resolve from inside a job. This works identically on the
 # runner, Linux hosts, and Git Bash on Windows.

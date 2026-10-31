@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
 # Mailroom backup retention — bounded local history beside the latest artifact
-# (Forgejo #539).
+# (#539).
 #
 # scripts/backup.sh writes ONE path, $MAILROOM_BACKUP_OUT, and every previous
 # caller wants exactly that: restore-drill.sh takes a throwaway fixture backup

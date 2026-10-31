@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
 # Mailroom backup — produce ONE encrypted, off-box-able artifact of the RESTORE
-# UNIT (spec §11, ADR-005, Forgejo #40).
+# UNIT (spec §11, ADR-005, #40).
 #
 # The restore unit is: PostgreSQL + the blob store + the wrapped key store.
 #

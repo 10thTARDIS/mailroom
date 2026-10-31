@@ -464,10 +464,11 @@ unchanged on a host whose app port is answering the whole LAN beside the proxy
 
 ### Released versions are published by CI — prefer these
 
-Pushing a `vX.Y.Z` tag builds the release image and pushes it to the Forgejo
-instance's own container registry, as `<forgejo-host>/<owner>/mailroom:X.Y.Z`
-(the host and owner are derived from the Actions context, so nothing here
-encodes a particular deployment). Pull that tag and set `MAILROOM_IMAGE` to it.
+Pushing a `vX.Y.Z` tag builds the release image and publishes it to the GitHub
+Container Registry as `ghcr.io/10thtardis/mailroom:X.Y.Z`. The package is
+public, so pulling it needs no registry login. Pull that tag, pin it by digest
+(`ghcr.io/10thtardis/mailroom:X.Y.Z@sha256:...`, printed by the publish job and
+shown on the package page), and set `MAILROOM_IMAGE` to it.
 
 Three properties worth knowing, because they are what makes a published image
 better than one built on the host:
@@ -481,13 +482,12 @@ better than one built on the host:
   the built image and matching it against the tag. An image reporting
   `0.0.0-dev` can never be published.
 
-Publishing needs a repo Actions secret `REGISTRY_TOKEN` with `write:package`
-scope. **Until it exists the job skips the push and stays green**, warning
-rather than failing every release on a missing credential; creating the secret
-activates publishing with no code change.
+Publishing uses the workflow's own `GITHUB_TOKEN` (`packages: write` on the
+publish job only); there is no registry secret to create.
 
-There is deliberately **no moving tag** (no `:latest`, no `:stable`). The
-deployment pins an exact version, so the running version is a reviewable line in
+A final release is also tagged `:latest` as a convenience; a pre-release never
+moves it. **Never use `:latest` as a deployment pin.** Deploy an exact version
+(ideally by digest) so the running version is a reviewable line in
 configuration and a rollback names a specific artifact.
 
 ### Building locally

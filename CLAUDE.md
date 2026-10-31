@@ -89,7 +89,7 @@ other legitimate write path.
 - Tests that need a database are build-tagged `integration` and run against
   the docker-compose Postgres (`scripts/integration-test.sh`); unit tests
   must pass with no database present.
-- Work is tracked in issues and milestones; commits reference issues.
+- Work is tracked in GitHub issues and milestones; commits reference issues. CI runs on GitHub Actions (`.github/workflows/`).
 
 ## Measurement & verification discipline
 

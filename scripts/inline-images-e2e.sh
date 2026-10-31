@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
-# Inline (cid:) images, proven end to end against the REAL image (Forgejo #99),
+# Inline (cid:) images, proven end to end against the REAL image (#99),
 # WITHOUT re-opening the remote-content hole (#39, spec §11). Sibling of
 # scripts/hostile-content-e2e.sh and companion to docs/hostile-content.md §2.8.
 #

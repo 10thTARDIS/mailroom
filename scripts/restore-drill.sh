@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# THE RESTORE DRILL (spec §11, ADR-005, Forgejo #40).
+# THE RESTORE DRILL (spec §11, ADR-005, #40).
 #
 #   "A backup that hasn't restored is a hypothesis."
 #
@@ -77,7 +77,7 @@
 # Each MUST exit non-zero. `--self-test` runs all ten, then a clean run.
 #
 # Everything goes through the Docker API only — docker cp + docker exec, no bind
-# mounts, no published ports — because the Forgejo runner executes jobs inside
+# mounts, no published ports — because the CI runner executes jobs inside
 # containers with a socket-mounted Docker, where host paths and host ports do not
 # resolve. Same shape as scripts/integration-test.sh and scripts/tantivy-test.sh.
 set -eu

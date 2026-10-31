@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# Live ClamAV verification (Forgejo #394, ADR-027 increment 3).
+# Live ClamAV verification (#394, ADR-027 increment 3).
 #
 # Runs the `clamav`-tagged tests in internal/clamd against a REAL clamd, in the
 # configuration ADR-027 Â§5a requires. Same container-only shape as
 # scripts/pgp-interop-test.sh and integration-test.sh, and for the same reason:
-# Forgejo runner jobs are themselves containers with a socket-mounted Docker, so
+# CI runner jobs are themselves containers with a socket-mounted Docker, so
 # host paths and host ports do not resolve from inside one.
 #
 # â  WHY THE CONFIGURATION IS PART OF THE TEST, NOT AN ASSUMPTION.

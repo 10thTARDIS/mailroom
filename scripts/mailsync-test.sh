@@ -22,7 +22,7 @@
 # does reap nothing; and a message a truncated FETCH silently dropped really is
 # found again and ingested, instead of being lost forever.
 #
-# CI wiring (orchestrator to add to .forgejo/workflows/ci.yml):
+# CI wiring (orchestrator to add to .github/workflows/ci.yml):
 #
 #   mailsync-tests:
 #     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@
 # Everything goes through the Docker API only (docker create/cp/exec,
 # container-to-container networking) â no published ports, no bind mounts, no
 # host toolchain. Same shape and same reason as scripts/integration-test.sh and
-# scripts/sync-test.sh: the Forgejo runner executes jobs in containers with a
+# scripts/sync-test.sh: the CI runner executes jobs in containers with a
 # mounted docker socket, so host-port mappings and host paths do not resolve from
 # inside a job. Works identically on the runner, on Linux, and in Git Bash on
 # Windows.

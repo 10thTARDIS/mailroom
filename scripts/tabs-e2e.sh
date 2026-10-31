@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
 # The category-tab JMAP surface, proven over REAL HTTP against the real image
-# (Forgejo #228, #219; spec §8).
+# (#228, #219; spec §8).
 #
 # WHY THIS EXISTS AT ALL. #228's checklist ends with "exercise the JMAP methods
 # over HTTP at least once" — and that item is not busywork, it is #159 by name.
@@ -29,7 +29,7 @@
 #
 # Everything is container-to-container: no published ports, no host toolchain, no
 # bind mounts of source. Same shape as gate-e2e.sh and hostile-content-e2e.sh, so
-# it runs identically on the Forgejo runner, on Linux, and in Git Bash.
+# it runs identically on the CI runner, on Linux, and in Git Bash.
 #
 # Usage:  scripts/tabs-e2e.sh
 #         MAILROOM_IMAGE=mailroom:test scripts/tabs-e2e.sh
@@ -138,7 +138,7 @@ wait_for postgres 60 "$PG" \
   docker exec "$PG" pg_isready -h 127.0.0.1 -U postgres -d mailroom -q
 
 echo "--- schema + roles"
-# docker cp + docker exec, NEVER a host bind mount. The Forgejo runner executes
+# docker cp + docker exec, NEVER a host bind mount. The CI runner executes
 # each job INSIDE a container with a socket-mounted Docker, so `-v "$(pwd)/db:…"`
 # is resolved against the DAEMON's filesystem, where the checkout does not exist.
 # It therefore works locally and fails ONLY on CI — which is exactly how this

@@ -4,7 +4,7 @@
 #
 # Runs the `sievelive`-tagged tests in internal/sieve against a REAL Dovecot
 # Pigeonhole ManageSieve server. Same container-only shape as
-# scripts/clamav-test.sh and for the same reason: Forgejo runner jobs are
+# scripts/clamav-test.sh and for the same reason: CI runner jobs are
 # themselves containers with a socket-mounted Docker, so host paths and host
 # ports do not resolve from inside one.
 #

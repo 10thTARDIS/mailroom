@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-only
 # Proxied remote images, proven end to end in a real browser, against the REAL
-# image, behind a REAL OIDC login (Forgejo #667). Sibling of
+# image, behind a REAL OIDC login (#667). Sibling of
 # scripts/inline-images-e2e.sh and scripts/gate-e2e.sh; it exists because the gap
 # BETWEEN those two is where #667 lived.
 #

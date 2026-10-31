@@ -13,8 +13,7 @@ keys behind a separate crypto process. It runs as a Docker Compose stack.
 
 **Status: 1.x, shipping.** The current release is **v1.88.0**. Every
 release is tagged, recorded in [CHANGELOG.md](CHANGELOG.md), and published as
-a Forgejo release. The [wiki](../../wiki/Home) documents each feature against
-the code; [docs/mailroom-spec.md](docs/mailroom-spec.md) is the authoritative
+a GitHub release. [docs/mailroom-spec.md](docs/mailroom-spec.md) is the authoritative
 specification.
 
 ## What it does
@@ -25,22 +24,22 @@ specification.
   deleted in another client, UIDVALIDITY changes, silently truncated fetches).
   An ingest-only mode observes a mailbox without ever writing to it. Bulk
   import of mbox, maildir and Google Takeout archives.
-  [Mail accounts](../../wiki/Mail-Accounts), [Sync engine](../../wiki/Sync-Engine)
+  Mail accounts, Sync engine
 - **The desk.** The inbox arranged into **areas** (built from category tabs
   and labels), split by **the line**, a learned priority score you can move,
   into what needs you now and per-area drawers that can auto-archive. Starred
   mail collects in the in-tray. A day-one wizard turns a folder-sorted mailbox
   into a desk without silently moving anything.
-  [The desk](../../wiki/The-Desk), [Day-one setup](../../wiki/Day-One-Setup)
+  The desk, Day-one setup
 - **Sorting.** **Move to area** for any selection, or everything from one
   sender, with one Undo. **Learned placement** files a sender's new mail where
   you have filed it before, only for authenticated senders, behind a
   correction gate. Deterministic rules with a preview before you save, and
   "apply to existing mail". Rule suggestions induced from your own filing.
   Snooze, pin and mute.
-  [Moving mail](../../wiki/Moving-Mail-Between-Areas),
-  [Learned placement](../../wiki/Learned-Placement),
-  [Rules](../../wiki/Rules-and-Suggestions)
+  Moving mail,
+  Learned placement,
+  Rules
 - **Search.** Per-user Tantivy indexes with typed operators (`from:`, `to:`,
   `subject:`, `label:`, `area:`, `list:`, `filename:`, `larger:`, `is:`,
   `has:pdf`, relative dates like `newer_than:7d`), `OR` and brackets, search
@@ -48,39 +47,39 @@ specification.
   as you type, ordered newest first or by best match; an options form writes
   the query for you; contacts and areas are suggested; and saved searches
   work as smart folders.
-  [Search](../../wiki/Search)
+  Search
 - **Reading safely.** HTML sanitised on the server and rendered in a
   sandboxed frame; remote images blocked by default and, when allowed, fetched
   through your own server; tracking pixels suppressed; sender-authentication
   notices and spoofing warnings; attachments previewed in a viewer and scanned
   with ClamAV, with quarantine and release.
-  [Remote content](../../wiki/Remote-Content-and-Privacy),
-  [Attachments](../../wiki/Attachments), [Malware scanning](../../wiki/Malware-Scanning)
+  Remote content,
+  Attachments, Malware scanning
 - **Writing.** Rich text, plain text or Markdown; alias-aware From with
   server-side validation; Reply, Reply all and Forward; autosaved drafts;
   Undo Send, Send later and Send & archive; signatures and templates; an
   Outbox; bounce (DSN) tracking; PGP signing, WKD key publishing and key
   discovery; contact autocomplete.
-  [Composing and sending](../../wiki/Composing-and-Sending),
-  [PGP](../../wiki/PGP-and-Encryption)
+  Composing and sending,
+  PGP
 - **The web app.** Responsive from phone to desktop, installable as a PWA,
   keyboard-first with a command palette, light and dark themes, Web Push
   notifications, and accessibility checked in CI with axe-core and the
   browser's accessibility tree.
-  [Settings and keyboard](../../wiki/Settings-and-Keyboard)
+  Settings and keyboard
 - **Running it.** OIDC sign-in, with every unauthenticated route closed and
   tested; per-user isolation enforced by row-level security and a required
   negative-test suite; backups with a scripted restore drill; Prometheus
   metrics; per-user export and hard delete; an operator CLI whose writing
   commands report before they act.
-  [Deployment](../../wiki/Deployment), [Security model](../../wiki/Security-Model),
-  [Admin CLI](../../wiki/Admin-CLI-Reference)
+  Deployment, Security model,
+  Admin CLI
 
 ## What is planned
 
-[Feature status](../../wiki/Feature-Status) marks every feature-matrix row
+Feature status marks every feature-matrix row
 implemented, partial or planned, from the code, and the
-[Roadmap](../../wiki/Roadmap) summarises the open issues. In short:
+Roadmap summarises the open issues. In short:
 
 - **Next in 1.x:** PGP encryption and decryption;
   calendar invitations answered from the message; server-side filter editing
@@ -106,8 +105,8 @@ cp .env.example .env      # set OIDC, the operator, and MAILROOM_IMAGE to a rele
 docker compose -f compose.yml up -d
 ```
 
-Pin `MAILROOM_IMAGE` to an exact release (`<registry>/<owner>/mailroom:X.Y.Z`);
-there is no moving tag. The server runs non-root on a read-only root
+Pin `MAILROOM_IMAGE` to an exact release (`ghcr.io/10thtardis/mailroom:X.Y.Z`);
+`:latest` is never a pin. The server runs non-root on a read-only root
 filesystem and refuses to start without a usable authentication path.
 
 ## Development
@@ -130,8 +129,8 @@ CI runs these and more on every push, with `golangci-lint`, `govulncheck` and
 the web build. One invariant holds the design together: **every mutation of a
 JMAP-visible object appends a `change_log` row in the same transaction**,
 enforced by the store layer and its tests. See
-[Development and testing](../../wiki/Development-and-Testing) and
-[Architecture](../../wiki/Architecture).
+Development and testing and
+Architecture.
 
 To let users connect Gmail and Outlook accounts, see the operator guide
 [docs/oauth-providers.md](docs/oauth-providers.md).

@@ -1,6 +1,7 @@
 .git
 .gitignore
 .forgejo
+.github
 
 # Docs, ADRs, dev scratch — not needed inside the build context's image, but
 # still readable by the builder stage for docs-referencing code, so we only

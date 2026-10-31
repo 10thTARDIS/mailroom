@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-only
-# Mailroom backup freshness — THE SIGNAL THAT IS ALLOWED TO GO RED (Forgejo #539).
+# Mailroom backup freshness — THE SIGNAL THAT IS ALLOWED TO GO RED (#539).
 #
 # scripts/backup.sh produces a sound, self-verifying artifact. Nothing watches
 # whether it ever runs again. This is that watcher: one exit code, pollable by
@@ -160,7 +160,7 @@ write_prom() {
 }
 
 # --- self-test ---------------------------------------------------------------
-# CI runs this (see .forgejo/workflows/ci.yml), because "the alert fires when
+# CI runs this (see .github/workflows/ci.yml), because "the alert fires when
 # backups stop" is a claim that has to be demonstrated, not asserted. #539's
 # acceptance criteria say so explicitly.
 ST_FAILS=0
