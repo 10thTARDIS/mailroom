@@ -1,0 +1,2768 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* Mailroom design system (spec docs/mailroom-spec.md §12).
+ *
+ * The binding rules, and how they are met:
+ *
+ *   NO TRANSPARENCIES. Every surface in this file is a SOLID colour. There is no
+ *   rgba() fill, no opacity on a content surface, no backdrop-filter, no
+ *   translucent scrim. Dialogs (compose, palette, sheets) are opaque panels that
+ *   sit on an elevation shadow — the one place alpha appears is in `box-shadow`,
+ *   which is an elevation cue, not a surface, and §12 explicitly allows
+ *   borrowing elevation cues from Material.
+ *
+ *   GMAIL-LIKE. Left rail of views, dense list, reading pane, docked compose.
+ *
+ *   LIGHT + DARK, system-follow AND manual: <html data-theme="light|dark"> is set
+ *   by app/prefs.ts (system → matchMedia, manual → the settings menu).
+ *
+ *   DENSITY: <html data-density="comfortable|cozy|compact"> drives --row-pad.
+ *
+ *   RESPONSIVE: three panes ≥1100px, two ≥760px, one below — never overlapping.
+ *
+ *   ACCESSIBILITY: a visible focus ring everywhere, a skip link, hit targets of
+ *   at least 32–36px, prefers-contrast:more strengthens borders and text, and
+ *   prefers-reduced-motion removes the (already minimal) motion.
+ *
+ * EVERY CUSTOM PROPERTY THIS FILE READS IS DEFINED IN ./tokens.css (#376), which
+ * main.tsx imports before this file — the :root sizing tokens, the three density
+ * blocks, and the two `html[data-theme="…"]` palettes all moved there, along with
+ * the settled semantic tones and identity colours (#372 pass 2) and the
+ * machine-checked contrast pairs. scripts/check-tokens.mjs fails the build (run
+ * from `npm run build`) on a token used here with no definition there, a token
+ * redefined outside tokens.css, a theme missing a token the other one has, or a
+ * text/background pair below WCAG AA — see that file's header for the incident
+ * that made "a stylesheet uses six tokens, four of them undefined, and nothing
+ * errors" worth building a check for instead of trusting a comment.
+ */
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 1rem;
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  padding: 8px 12px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+}
+.skip-link:focus { left: 8px; top: 8px; }
+
+/* ---- shell -------------------------------------------------------------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--nav-w) minmax(0, 1fr);
+}
+
+.content {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg);
+}
+
+/* WHERE THE SKIP LINK LANDS, VISIBLY (#447). `.content` is `<main id="messages"
+   tabIndex={-1}>` on every route, and the skip link focuses it — but a focus
+   move onto an element with no focus style is a focus move a sighted keyboard
+   user cannot see, which makes the skip link feel like it did nothing. The edge
+   is drawn INSIDE the box (a negative offset), so it cannot be clipped by the
+   scroll container it sits in. `:focus-visible` rather than `:focus`: the only
+   way here is the keyboard (the skip link is off-screen until focused), and a
+   ring after a click on a pane would be noise. */
+.content:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Reading-pane layouts (#61). Scoped to >=1100px ON PURPOSE: below that the
+   responsive rules further down collapse to one pane at a time, and these
+   selectors are MORE SPECIFIC than those, so without this media query they
+   would win the cascade regardless of source order and defeat the collapse.
+   The middle `auto` track is the splitter itself. */
+@media (min-width: 1100px) {
+  html[data-pane-layout="vertical"] .app[data-pane="thread"] .content {
+    grid-template-columns: var(--pane-split, 380px) auto minmax(0, 1fr);
+  }
+
+  html[data-pane-layout="horizontal"] .app[data-pane="thread"] .content {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--pane-split, 320px) auto minmax(0, 1fr);
+  }
+
+  /* No reading pane: opening a message replaces the list outright, which is
+     the same shape the narrow breakpoint already uses. */
+  html[data-pane-layout="off"] .app[data-pane="thread"] .content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* Both selectors carry the full `.app[data-pane="thread"]` prefix on purpose.
+     The splitter's show rule below is `.app[data-pane="thread"] .pane-splitter`
+     — specificity (0,3,0) — so a shorter hide rule here scores (0,2,1) and
+     LOSES, leaving a 9px divider dividing nothing in the no-pane layout.
+     Specificity, not source order, decides this one. */
+  html[data-pane-layout="off"] .app[data-pane="thread"] .list-pane,
+  html[data-pane-layout="off"] .app[data-pane="thread"] .pane-splitter {
+    display: none;
+  }
+}
+
+.app[data-pane="thread"] .content {
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+}
+
+/* ---- the pane splitter -------------------------------------------------- */
+
+/* Hidden unless a reading pane is actually beside the list: with no thread open
+   there is nothing to divide, and at narrow widths the panes never coexist. */
+.pane-splitter { display: none; }
+
+@media (min-width: 1100px) {
+  .app[data-pane="thread"] .pane-splitter {
+    display: block;
+    background: var(--border);
+    /* The hit area is deliberately larger than the 1px line it draws: a
+       one-pixel drag target is a usability failure, and Fitts's law does not
+       care how tidy the divider looks. */
+    background-clip: content-box;
+    touch-action: none;
+  }
+  html[data-pane-layout="vertical"] .app[data-pane="thread"] .pane-splitter {
+    width: 9px;
+    padding: 0 4px;
+    cursor: col-resize;
+  }
+  html[data-pane-layout="horizontal"] .app[data-pane="thread"] .pane-splitter {
+    height: 9px;
+    padding: 4px 0;
+    cursor: row-resize;
+  }
+  .pane-splitter:hover,
+  .pane-splitter:focus-visible {
+    background-color: var(--accent);
+  }
+  /* The list already draws its own edge; with a splitter present that would
+     read as two adjacent lines. */
+  html[data-pane-layout="vertical"] .app[data-pane="thread"] .list-pane {
+    border-right: 0;
+  }
+  html[data-pane-layout="horizontal"] .app[data-pane="thread"] .list-pane {
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  /* THE DOCKED SPLITTER (#617): between the list and a composer or attachment
+     viewer holding the reading pane's column (ui/Shell.tsx renders it; compose.css
+     and viewer.css give it the workspace's `auto` track). Vertical only, because
+     only there is the list's track `--pane-split`; the horizontal layout and the
+     760–1100px band dock beside a fixed 320–420px track with nothing to drag.
+     One rule for both surfaces, so they cannot drift apart. */
+  html[data-pane-layout="vertical"] .app[data-compose="pane"] .pane-splitter-docked,
+  html[data-pane-layout="vertical"] .app[data-viewer="pane"] .pane-splitter-docked {
+    display: block;
+    grid-area: 1 / 3;
+    width: 9px;
+    padding: 0 4px;
+    cursor: col-resize;
+    background: var(--border);
+    background-clip: content-box;
+    touch-action: none;
+  }
+  /* One divider, as beside a thread: the list's edge and the panel's edge would
+     otherwise draw two more lines either side of the splitter's. */
+  html[data-pane-layout="vertical"] .app[data-compose="pane"] .list-pane,
+  html[data-pane-layout="vertical"] .app[data-viewer="pane"] .list-pane {
+    border-right: 0;
+  }
+  html[data-pane-layout="vertical"] .app[data-compose="pane"] .compose-pane,
+  html[data-pane-layout="vertical"] .app[data-viewer="pane"] .viewer-pane {
+    border-left: 0;
+  }
+}
+
+/* While a drag is in flight, kill selection everywhere: without this the
+   gesture paints a text selection across the message list. */
+body.is-splitting,
+body.is-splitting * {
+  user-select: none !important;
+}
+
+/* ---- topbar ------------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.brand { font-weight: 600; font-size: 1.1429rem; }
+
+.nav-toggle { display: none; }
+
+/* `min-width: 0` IS WHAT KEEPS THE TOP BAR ON A PHONE (#798). A flex item's
+   default `min-width: auto` will not shrink below its content: the input's
+   intrinsic width plus ▾, and with a query also ☆ and ✕. The box therefore
+   pushed ⟳ + ⚙ past the right edge, 32 px with an empty box and 108 px with a
+   query at 375 px in WebKit, and the WHOLE PAGE panned sideways on iOS. The input
+   (`.search-input`, min-width 0) is what gives way now. On a desktop the box is
+   at its 720 px cap with room to spare, so nothing there moves. */
+.search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 720px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+}
+
+.search-input {
+  flex: 1;
+  border: 0;
+  background: var(--bg-raised);
+  color: var(--fg);
+  padding: 8px;
+  font: inherit;
+  min-width: 0;
+}
+.search-input:focus { outline: none; }
+.search:focus-within { border-color: var(--accent); }
+
+/* Search suggestions (#57). Anchored to the box, which therefore has to be a
+   positioning context — hence `position: relative` above. Solid, never translucent
+   (spec §12), and above the list but below any modal. */
+.search { position: relative; }
+.search-suggestions {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.search-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.search-option:hover,
+.search-option.is-active { background: var(--bg-selected); }
+.search-option-label { font-weight: 600; }
+.search-option-detail { color: var(--fg-muted); font-size: 0.8571rem; }
+.search-option-kind { margin-left: auto; color: var(--fg-muted); font-size: 0.7857rem; }
+.search-save {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 21;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+.search-save .text-input { flex: 1 1 200px; }
+.nav-item-icon { width: 12px; text-align: center; color: var(--fg-muted); }
+/* Drag-and-drop filing (#62). Only a target that would actually change something
+   lights up x2dx2d canDrop refuses the rest, so the cursor says no before the drop. */
+.nav-item.is-drop-target {
+  background: var(--bg-selected);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.message-row[draggable="true"] { cursor: grab; }
+.search-suggestions-foot {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* The search-options form (#724): in the page, under the box, never a dialog.
+   Wider than the box when there is room (the box can be narrow), right-aligned
+   to it so it stays on screen beside the topbar's actions. Solid, like every
+   other popover here. */
+.search-options {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 22;
+  width: min(40rem, calc(100vw - 16px));
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+.search-options-title { margin: 0 0 10px; font-size: 1rem; font-weight: 600; }
+.search-options-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+.search-options-field { min-width: 0; }
+.search-options-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.search-options-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Newest first / Best match (#724), above a search's results. */
+.search-sort {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.search-sort-option {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.search-sort-option[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+  font-weight: 600;
+}
+.search-sort-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* THE PHONE (#724): the box is too narrow to hang the form from, so the form
+   spans the screen just under it (SearchBox measures the box's bottom edge into
+   an inline `top`), one field per row. */
+@media (max-width: 759px) {
+  .search-options {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(100dvh - 96px);
+  }
+  .search-options-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.topbar-actions { display: flex; align-items: center; gap: 6px; }
+
+.pill {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  white-space: nowrap;
+}
+
+.banner {
+  padding: 8px 16px;
+  font-size: 0.9286rem;
+  border-bottom: 1px solid var(--border);
+}
+.banner-warn { background: var(--warn-bg); color: var(--warn-fg); }
+.banner-error { background: var(--error-bg); color: var(--error-fg); }
+/* Agent requests waiting for approval (#49): the sentence and its link on one
+   wrapping line, the shape of the desk's key-expiry banner. The region around
+   it is always present (a live region must exist before its text changes) and
+   takes no space while empty. */
+.pending-banner-region { flex: 0 0 auto; }
+.pending-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.pending-banner p { margin: 0; flex: 1 1 240px; min-width: 0; }
+.pending-banner .link-button { color: inherit; text-decoration: underline; }
+/* Mail-provider sign-in (#52): the result the provider came back with, and
+   the reminder that an account needs signing in again. Same wrapping shape as
+   the banner above; each region is always present and empty while silent. */
+.oauth-result-region,
+.reconnect-banner-region { flex: 0 0 auto; }
+.oauth-result,
+.reconnect-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.oauth-result p,
+.reconnect-banner p { margin: 0; flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.oauth-result-actions,
+.reconnect-banner-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.oauth-result .link-button,
+.reconnect-banner .link-button { color: inherit; text-decoration: underline; }
+.oauth-result.is-ok { background: var(--bg-sunken); color: var(--fg); }
+
+/* ---- sidebar ------------------------------------------------------------ */
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--bg-sunken);
+  padding: 12px 8px 24px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.compose-button {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+}
+
+.nav-heading {
+  margin: 18px 8px 6px;
+  font-size: 0.7857rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+
+.nav-list { list-style: none; margin: 0; padding: 0; }
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 2.5714rem;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-item:hover { background: var(--bg-hover); }
+.nav-item[aria-current="page"] { background: var(--bg-selected); font-weight: 600; }
+.nav-item-muted { color: var(--fg-muted); }
+.nav-item-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-badge { font-size: 0.8571rem; font-weight: 600; color: var(--fg-muted); }
+
+/* SELECTIVE SYNC (#62). The rail still SAYS which folders are frozen; the pause /
+   resume CONTROL moved to Settings → Accounts in #374, and its styles went with it
+   rather than being left here as rules nothing can match. What stays is the row
+   shape and the two ways a paused folder reads as paused: the muted name and the
+   `frozen` tag below. */
+.nav-row { display: flex; align-items: center; gap: 4px; }
+.nav-row .nav-item { flex: 1; min-width: 0; }
+.nav-row.is-not-syncing .nav-item-label { color: var(--fg-muted); }
+.nav-frozen {
+  flex: none;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+.label-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  flex: none;
+}
+
+.sidebar-footer {
+  margin: 20px 10px 0;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---- message list ------------------------------------------------------- */
+
+.list-pane {
+  /* Declared here rather than on .tab-strip: a custom property inherits DOWN,
+     not sideways, and .list-toolbar is the strip's SIBLING. */
+  --tab-strip-h: 2.4rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  /* Rows lay themselves out from the LIST's width, not the viewport's, so they
+     stay readable when the reading pane shrinks the list on a wide screen. */
+  container-type: inline-size;
+}
+
+.list-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+
+.list-count, .selection-count { font-size: 0.8571rem; color: var(--fg-muted); }
+
+.select-all-banner {
+  padding: 8px 12px;
+  background: var(--bg-selected);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+
+.messages { list-style: none; margin: 0; padding: 0; }
+
+/* A pinned row carries a leading accent edge (#51). A pinned message sorts to
+   the top of the list, which on its own is indistinguishable from "this arrived
+   most recently" — the marker is what says the position was CHOSEN. It is an
+   edge rather than a colour wash so it survives both themes and reads at a
+   glance without competing with the unread cue. */
+.message-row.is-pinned {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.message-row {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-read);
+}
+.message-row.is-unread { background: var(--bg-unread); }
+/* Unread must be UNMISTAKABLE, and by SHAPE + weight, not colour alone (the
+   background tint is deliberately faint). An accent dot before the sender is the
+   primary cue; the bold sender/subject (below) reinforces it. This is kept
+   DISTINCT from the OPEN row's left accent bar (.is-open, below) so the two
+   states never read as the same thing — a row can be both. */
+.message-row.is-unread .sender::before {
+  content: "";
+  display: inline-block;
+  width: 0.5714em;
+  height: 0.5714em;
+  margin-right: 0.5em;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.message-row:hover { background: var(--bg-hover); }
+.message-row.is-selected { background: var(--bg-selected); }
+/* THE EXTENT OF A BATCH GROUP (#183). A group of one gets no header, so without
+   this the headerless rows that follow a group read as more of it — "2 messages
+   arrived at luciteria@" sitting above four rows, two of them unrelated. The
+   rail says which rows the header above is talking about, and the closing border
+   says where it stops.
+
+   Quieter than the header's accent rail, and declared BEFORE is-open/is-cursor so
+   those still win: this is structure, not state, and it must never look like the
+   row is selected or focused. */
+.message-row.is-grouped { box-shadow: inset 3px 0 0 var(--border-strong); }
+.message-row.is-group-last { border-bottom: 1px solid var(--border-strong); }
+
+.message-row.is-open { box-shadow: inset 3px 0 0 var(--accent); }
+.message-row.is-cursor { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Default: a NARROW list (e.g. the reading pane is open). Two lines — sender and
+ * the meta/time on top, the subject on its own line below — so the subject is
+ * never squeezed to a few characters as it was on one crammed line. */
+.message-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "sender meta"
+    "subject subject";
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  width: 100%;
+  padding: var(--row-pad) 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.sender   { grid-area: sender; }
+.subject  { grid-area: subject; }
+.preview  { grid-area: preview; } /* its own column; only shown on the wide layout */
+.row-meta { grid-area: meta; }
+
+.sender, .subject, .preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* BIDI ISOLATION FOR EVERY PIECE OF SENDER-AUTHORED TEXT WE RENDER IN OUR OWN
+   CHROME (Forgejo #307, docs/hostile-content.md §2.3b).
+
+   U+202E RIGHT-TO-LEFT OVERRIDE and its family do not reorder themselves — they
+   reorder everything that FOLLOWS them in the same bidi paragraph, until a
+   matching pop or the end of the paragraph. So a display name is not merely
+   scrambled by one: it rewrites its NEIGHBOURS. The reading pane's
+   `.message-from` and `.message-address` are two spans in one line box, i.e. one
+   paragraph, which is exactly the shape that leaks; so are the "To:" label and
+   the names after it, and so are `.rule-preview-samples`' from/subject pairs.
+
+   `.attachment-name` is a span for exactly that reason: an attachment chip is
+   "📎 name size" in a single line box, so a filename carrying an override
+   would reorder the SIZE rendered beside it, not just itself.
+
+   `unicode-bidi: isolate` makes each of these its own bidi paragraph, so whatever
+   is inside can never reach outside it.
+
+   THIS IS ONE OF TWO HALVES AND NEITHER IS SUFFICIENT. core/hostileText.ts strips
+   the controls before render, which is what keeps the text INSIDE the box from
+   being scrambled and what covers the places CSS cannot reach at all — an
+   aria-label, a `title`, an iframe's accessible name. This rule is what keeps the
+   guarantee if a future component renders one of these classes without going
+   through that module. Several of these boxes happen to be grid or flex items
+   today, which already blockifies them into separate paragraphs — that is a
+   property of the current LAYOUT, not of the markup, and one refactor to an
+   inline row would silently take it away. Stating it costs nothing. */
+.sender, .subject, .preview,
+.message-from, .message-address, .message-meta, .message-preview,
+.thread-subject, .attachment-name,
+.rule-preview-samples .from, .rule-preview-samples .subject {
+  unicode-bidi: isolate;
+}
+.is-unread .sender, .is-unread .subject { font-weight: 700; }
+/* Read rows recede so the unread contrast is obvious: normal weight (default)
+   plus a muted sender/subject. The dot + bold above are the positive cue; this
+   is the negative one. */
+.is-read .sender, .is-read .subject { color: var(--fg-muted); }
+.subject { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.preview { color: var(--fg-muted); display: none; }
+
+/* A WIDE list (single-pane, no reading pane): everything on one line —
+ * sender | subject | preview | meta — with the preview shown. Driven by the
+ * LIST'S width (container query), so it switches on pane state, not just
+ * viewport size.
+ *
+ * ⚠ `40em` RATHER THAN `560px`, AND THE SUBJECT TRACK IS `auto` (#514). Both
+ * changes are the desk's redrawn single line, brought here so the two lists are
+ * one product rather than two opinions about a row.
+ *
+ * The threshold is in `em` because a container query's `em` is the CONTAINER's
+ * font size: at the largest text step the same pixel width holds fewer
+ * characters, so the one-line layout should give way sooner. 40em IS 560px at
+ * the default size, so nothing moves for anyone who never opens the control.
+ *
+ * The tracks were `minmax(0,1fr) minmax(0,1fr)` — subject and preview splitting
+ * the middle down the centre, which is exactly the complaint this issue exists
+ * for: half the row was reserved for the snippet whatever the subject needed.
+ * `auto` for the subject and `minmax(0,1fr)` for the preview inverts that. Grid
+ * sizes non-flexible tracks up to their growth limit BEFORE it expands an `fr`,
+ * so the subject takes as much as its own text wants and the snippet gets what
+ * is left; and because `.subject` is `overflow: hidden` its minimum is zero, so
+ * when the subject alone cannot fit it ellipses rather than pushing the row
+ * wide. That is the same rule the desk's flexbox states as `0 0 auto` beside
+ * `1 1 0` — two layout systems, one behaviour. */
+@container (min-width: 40em) {
+  html:not([data-row-layout="multiLine"]) .message-main {
+    grid-template-columns: minmax(9em, 22%) auto minmax(0, 1fr) auto;
+    grid-template-areas: "sender subject preview meta";
+    row-gap: 0;
+  }
+  html:not([data-row-layout="multiLine"]) .message-main .preview { display: block; }
+  /* The same generated separator the desk uses, with the same `:not(:empty)`
+     guard against a dangling dash on a message with no preview text — and the
+     same NON-BREAKING leading space, for the same reason (desk.css spells it
+     out): a plain leading space is stripped at the start of the snippet's own
+     box, and the dash ends up welded to the subject. */
+  html:not([data-row-layout="multiLine"]) .message-main .preview:not(:empty)::before {
+    content: "\00a0– ";
+  }
+}
+
+/* ---- the multi-line row (#514) ------------------------------------------
+ *
+ * THREE LINES, THE SAME DOM — the desk's rule, applied to the ordinary message
+ * list so that All mail, Sent, a folder, a label, a search and the
+ * needs-a-category queue all obey the one preference. Nothing here changes an
+ * element, a role or an accessible name; only the grid areas move.
+ *
+ * These rows are NOT virtualised, so they may take their own height — but the
+ * empty third line still keeps its space (`min-height` below), because a list
+ * where some rows are three lines tall and others two reads as a rendering
+ * fault rather than as a fact about the mail. */
+html[data-row-layout="multiLine"] .message-main {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "sender meta"
+    "subject subject"
+    "preview preview";
+  row-gap: 2px;
+}
+
+html[data-row-layout="multiLine"] .message-main .preview {
+  display: block;
+  min-height: 1.45em;
+}
+
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  white-space: nowrap;
+}
+
+/* Tabular numerals, for the reason .desk-time carries them (#514): a column of
+   dates whose digits do not line up reads as a ragged edge on every row. */
+.row-meta time {
+  font-variant-numeric: tabular-nums;
+}
+
+.tags { display: flex; gap: 4px; }
+.tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+}
+.tag-draft { color: var(--danger); border-color: var(--danger); }
+/* "Returns Tue 8:00 AM" (#51). Accent-coloured rather than neutral like a label
+   chip: it is a statement about the FUTURE of this row, not a category it sits
+   in, and it is the only reason a snoozed message is visible where it is. */
+.tag-snoozed { color: var(--accent); border-color: var(--accent); }
+/* "Came back 9:00 AM" (#152). Quieter than the snoozed chip: that one is about
+   something that will happen, this one explains something that already did, and
+   it stops being shown after a day. */
+.tag-returned { color: var(--fg-muted); border-color: var(--accent); }
+/* "archived in Mailroom" (#446). The PLAIN tag treatment — no accent, no danger —
+   because it is neither a warning nor something about to happen: it explains, on
+   an All-mail row, why a message is off the desk without anybody having filed it,
+   and NOTHING MOVED on the server to make it so. The words carry the whole
+   meaning; the chip is only what separates them from the subject line. */
+.tag-desk-archived { color: var(--fg-muted); border-color: var(--border-strong); }
+
+/* The Priority view's bucket headers (#154). A list row, not a heading element:
+   it labels a group inside an existing list rather than starting a new section,
+   and role=presentation keeps it out of the row count assistive tech reports. */
+.list-bucket {
+  padding: 6px 12px 2px;
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+/* Why a message ranked where it did. Quiet by default — it is diagnostic, and a
+   score shouted at the top of every message would be noise. */
+.priority-panel { margin: 0 0 12px; }
+.priority-summary { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.priority-reasons {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-left: 3px solid var(--border-strong);
+  font-size: 0.9286rem;
+}
+.priority-score { margin: 0 0 6px; color: var(--fg-muted); }
+.priority-reasons ul { list-style: none; margin: 0; padding: 0; }
+.priority-reason { display: flex; gap: 8px; justify-content: space-between; padding: 2px 0; }
+.priority-reason-dir { color: var(--fg-muted); font-size: 0.8571rem; }
+/* Direction is carried by the WORD ("raises"/"lowers"), not by colour alone —
+   colour is the redundant cue, not the only one. */
+.priority-reason.is-up .priority-reason-dir { color: var(--accent); }
+.priority-reason.is-down .priority-reason-dir { color: var(--danger); }
+
+/* ---------------------------------------------------------------------------
+   The needs-a-category queue (#176)
+   ---------------------------------------------------------------------------
+   The batch-triage group header. Louder than the priority bucket divider on
+   purpose: that one LABELS a group the reader is scrolling past, while this one
+   ASKS them something and carries the buttons that answer it. A question styled
+   like a section heading is a question people scroll over. */
+.queue-group {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+}
+.queue-group-question { margin: 0; font-weight: 600; }
+/* "from 64 different senders" — the homogeneity signal. Quiet, and not styled as
+   a warning: a mixed group is a fact to weigh, not an error to fix. */
+.queue-group-mixed { margin: 0; font-size: 0.8571rem; color: var(--fg-muted); flex-basis: 100%; order: 1; }
+.queue-group-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Answered: the header STAYS and reports what happened, so the blast radius is
+   in the group's own space rather than in a toast that has already gone. The
+   accent rail drops to neutral — it is no longer asking. */
+.queue-group-done { border-left-color: var(--border-strong); }
+.queue-group-rule { margin: 0; font-size: 0.9286rem; color: var(--fg-muted); flex-basis: 100%; }
+
+/* The per-row suggestion strip: what was considered, how sure, and why. Sits
+   under the preview on its own line rather than in the meta row, because the
+   meta row is where a message's OWN facts live (date, attachment, labels) and
+   this is the system talking about it. */
+.suggestion-strip {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  font-size: 0.8571rem;
+}
+/* Dashed, unlike an applied label's solid chip: a suggestion is NOT a weak
+   label, and the difference has to be visible without reading the text. */
+.tag-suggested {
+  border-style: dashed;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.suggestion-confidence { margin-left: 6px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.suggestion-reasons { color: var(--fg-muted); }
+
+/* The reading-pane panel. Shares the priority panel's inset-rule treatment so
+   the two read as the same kind of thing — the system explaining itself — while
+   the accent rail marks this one as still awaiting an answer. */
+.suggestion-panel {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-left: 3px solid var(--accent);
+  font-size: 0.9286rem;
+}
+.suggestion-question { margin: 0 0 6px; font-weight: 600; }
+.suggestion-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.suggestion-item { padding: 4px 0; }
+.suggestion-item + .suggestion-item { border-top: 1px solid var(--border); }
+.suggestion-name { font-weight: 600; }
+.suggestion-reason-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.suggestion-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* An empty queue is an achievement, so it gets a headline rather than the same
+   grey one-liner every other empty list uses. */
+.queue-empty { padding: 32px 16px; text-align: center; }
+.queue-empty-headline { margin: 0 0 6px; font-size: 1.1429rem; font-weight: 600; }
+
+.pending-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
+.star {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 1.1429rem;
+  line-height: 1;
+  padding: 6px;
+  cursor: pointer;
+  min-width: 32px;
+  min-height: 32px;
+}
+.star.is-on { color: var(--star); }
+
+.load-more { margin: 12px auto; }
+
+.empty { padding: 24px 16px; color: var(--fg-muted); text-align: center; }
+.empty.error { color: var(--error-fg); background: var(--error-bg); }
+
+mark { background: var(--mark-bg); color: var(--mark-fg); padding: 0 1px; }
+
+/* ---- thread pane -------------------------------------------------------- */
+
+.thread-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+/* FOCUSED READING PUTS FOCUS HERE (#447, ui/ThreadPane.tsx): with the list
+   `display: none` behind it, focus has to land somewhere, and the pane itself is
+   where it lands. Inset, so the pane's own scrollbar cannot clip it. */
+.thread-pane:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.thread-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+
+/* THE SQUEEZED ROW (#803): ui/pane/PaneToolbar.tsx measured that the full row
+   does not fit its pane and moved Reply all and Mute into More. If even the
+   remaining buttons are wider than the pane (a very narrow split, the largest
+   text size), they truncate with an ellipsis rather than push the pane
+   sideways, the same rule the phone's row has (desk.css, #798). This is NOT
+   applied to the full row: a row whose buttons quietly shrink never overflows,
+   so it could never be seen to need squeezing. */
+.thread-toolbar.is-squeezed > .button,
+.thread-toolbar.is-squeezed > .pane-more {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.thread-toolbar.is-squeezed .button {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The measure cap keeps long plain-text bodies readable, but it must be
+   CENTRED: as a stretch item in the flex column it otherwise pins to the left
+   and leaves a wide pane with all its dead space on one side, which is what
+   made the reading pane look like it did not fit its content (#130). The cap
+   is wide enough for the ~600px tables newsletters ship without squeezing
+   them; past that, extra width is margin, not measure. */
+.thread-body {
+  padding: 20px 24px 40px;
+  max-width: 1100px;
+  margin-inline: auto;
+  width: 100%;
+}
+.thread-subject { font-size: 1.4286rem; margin: 0 0 4px; }
+.thread-count { margin: 0 0 16px; color: var(--fg-muted); font-size: 0.8571rem; }
+
+.message {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  /* Clips the full-bleed .message-html to the card's rounded corners (#130). */
+  overflow: hidden;
+}
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+/* A muted conversation says so in the pane itself. Muting is easy to forget you
+   did, and "why did this thread go quiet" should never be a mystery. */
+.thread-muted {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+/* The reading pane's counterpart to the row chip (#51): same shape as the mute
+   banner, accent edge because a snooze is a scheduled event rather than a
+   suppression. */
+.thread-snoozed {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+.message-from { font-weight: 600; }
+.message-address { color: var(--fg-muted); margin-left: 6px; overflow-wrap: anywhere; }
+/* The list row's counterpart (#307): the real address, shown beside a display
+   name that is itself address-shaped. Muted and lighter than the name, because it
+   is a disambiguation rather than part of the sender's chosen name — and it must
+   not out-shout the name on the rows where it appears. */
+.sender-address { color: var(--fg-muted); font-weight: 400; }
+.message-meta { margin: 2px 0; color: var(--fg-muted); font-size: 0.9286rem; }
+.message-preview { white-space: pre-wrap; overflow-wrap: anywhere; margin: 10px 0 0; }
+
+/* The plain-text body, rendered as text (nothing can escape from it). */
+.message-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 10px 0 0;
+  font: inherit;
+}
+
+/* The HTML body, rendered in a sandboxed iframe — see ui/messageDocument.ts and
+   docs/hostile-content.md: opaque origin, no scripts, no same-origin privileges,
+   and no remote loads (so no tracking pixels). It gets a plain white surface
+   because it carries its own colours. */
+.message-html {
+  width: 100%;
+  /* Content-fit auto-height (#100). A trusted, hash-pinned reporter inside the
+     opaque-origin frame postMessages its content height out and ThreadPane sets
+     the inline `height` to match (messageDocument.ts / ThreadPane.tsx). Until
+     that first message arrives, `min-height` covers the pre-measure flash;
+     `max-height` is the backstop for the parent's clamp, so a pathological body
+     keeps its own scrollbar past the cap instead of a mile-tall frame. */
+  /* content-box is LOAD-BEARING here (overrides the global `* { border-box }`).
+     The reporter measures document.body.scrollHeight — a CONTENT height — and
+     ThreadPane applies it as the inline `height`. Under border-box that height
+     would include this element's 1px top+bottom border, leaving the content
+     area 2px short of the body it must show, so the frame kept a permanent
+     internal scrollbar and the pane scrolled too — the reported DOUBLE SCROLL.
+     content-box makes the applied height the content area, matching scrollHeight
+     exactly; the border sits outside it and the frame fits its content. */
+  box-sizing: content-box;
+  min-height: 120px;
+  max-height: 20000px;
+  /* FULL BLEED (#130). The message body IS the card's content, so it spans the
+     card edge to edge instead of sitting in a second, narrower box inset inside
+     it — the "pane inside a pane" that was reported. The negative inline
+     margin cancels .message's 16px side padding; the side borders and radius go
+     with it, because the card's own border is now the only frame. Only the
+     top/bottom borders remain, as separators.
+
+     Under content-box, `width` IS the content width, so removing the side
+     borders is what makes `calc(100% + 32px)` land exactly on the card edges
+     rather than overflowing by the 2px they used to add. The vertical borders
+     are untouched, so the #100/#123 auto-height contract above still holds. */
+  width: calc(100% + 32px);
+  margin: 10px -16px 0;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-right: 0;
+  background: #fff;
+}
+
+/* The remote-content banner. It appears only when the SERVER reports that it
+   blocked something (a data-mailroom-blocked marker in the sanitized body), so
+   it is a fact about the message rather than a permanent nag. Solid surface, no
+   transparency (spec §12). */
+.remote-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+/* The "images loaded because you always allow X" line (#202). Quieter than the
+   blocking banner on purpose: the blocking one is asking for a decision, this one
+   is only accounting for one already made — but it is still present, because a pane
+   that silently behaves differently for one sender than another erodes trust in the
+   default. */
+.remote-banner-quiet {
+  border-color: var(--border);
+  background: var(--bg-sunken);
+}
+
+/* The remembered-senders list (#202). The list is half the feature: a grant nobody
+   can see or revoke is the permanent consent the blocking default prevents. */
+.remote-allow-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.remote-allow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.remote-allow-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Domain grants are the broader ones and say so in the list too, not only where
+   they were granted — this is where someone comes back weeks later having
+   forgotten which kind they picked. */
+.remote-allow-kind {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+}
+
+/* Attachment lists (the reading pane, and the compose panel's staged uploads). */
+.attachments {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attachments li { display: flex; align-items: center; gap: 4px; }
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.9286rem;
+}
+a.attachment:hover { background: var(--bg-sunken); }
+.attachment-size { color: var(--fg-muted); }
+
+/* Attachment chips (#131, reshaped in #200).
+   The chip is a BUTTON that opens the preview, styled to match the download <a>
+   it replaced so the row does not change shape — and the ⤓ beside it keeps
+   downloading one click away. A part with no preview keeps the <a>. */
+.attachment-openable { cursor: pointer; text-align: left; font: inherit; }
+.attachment-download {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.attachment-download:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* The withheld-attachment chip (#396/#412). Deliberately NOT an <a> — this part
+   is neither previewable nor downloadable, both would 403, and looking like a
+   link that silently fails is worse than a chip that says plainly what
+   happened. Same footprint as the ordinary chip so the row does not reflow. */
+.attachment-withheld {
+  flex-wrap: wrap;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.attachment-withheld-icon { flex: 0 0 auto; }
+.attachment-withheld-state {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--danger);
+  border-radius: 999px;
+  font-size: 0.7857rem;
+  text-transform: uppercase;
+}
+.attachment-withheld-reason {
+  flex-basis: 100%;
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+/* The Release button carries no `.button` class, so without a background of its
+   own it drew on the browser's default button face: --danger on that grey failed
+   AA in the dark theme. Found the first time the a11y lane drew a withheld chip
+   (#675's held-inline surface). On --bg-raised, the chip's own face, it is 8.0:1
+   light and 6.7:1 dark. */
+.attachment-withheld .button-quiet {
+  border-color: var(--danger);
+  background: var(--bg-raised);
+  color: var(--danger);
+}
+
+/* The release confirmation (#412, ADR-027 §14): "Release anyway" is styled as a
+   warning action, not the ordinary default button, so it does not read as the
+   safe/expected choice in a dialog whose whole point is that it is not. */
+.button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.button-danger:hover { background: var(--warn-bg); }
+
+/* The attachment lightbox that lived here is gone (#449). It was a floating box on
+   a translucent `.modal-backdrop`; the viewer that replaced it is a grid occupant and
+   its rules live in app/viewer.css. Nothing else used these classes — the one
+   consumer was ui/attachmentPreview.tsx's AttachmentLightbox. */
+
+.compose-attachments {
+  margin-top: 10px;
+  border: 1px dashed transparent;
+  border-radius: var(--radius);
+  padding: 6px;
+}
+/* Drag-and-drop attach: the zone lights up while a file hovers over it. */
+.compose-attachments.is-dragover {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+}
+.file-input { font-size: 0.9286rem; }
+.editor-drop-hint { margin: 4px 0 0; }
+
+
+/* ---- the reading pane, reshaped (#375 increment 5) ---------------------- */
+
+/* The More menu. Same shape as the desk's re-file menu (desk.css) on purpose:
+   two dropdowns from two toolbars that looked different would be two things to
+   learn. */
+.pane-more { position: relative; }
+
+.pane-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 12;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+
+.pane-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pane-menu-item:hover { background: var(--bg-hover); }
+/* The toggles (pin, important) say which way they are set without relying on
+   the word alone changing — the same "never one signal" rule the chips follow. */
+.pane-menu-item[aria-pressed="true"] { font-weight: 600; }
+
+/* The labels row: the AREA as a raised chip, everything else outlined. */
+.pane-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.pane-label-area {
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  /* Raised, and deliberately the SELECTED ground: an area is where this message
+     currently sits, which is the same "this one, now" meaning the selected row
+     tone carries. tokens.css already promises fg/bg-selected at 4.5:1. */
+  background: var(--bg-selected);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8571rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pane-label-area:hover { background: var(--bg-hover); }
+
+.pane-label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 10px;
+  /* The label's colour is spent on the OUTLINE and the dot, never on the text:
+     three of the four label tones sit just under 4.5:1 as plain text on the
+     light background (tokens.css @contrast-known-low), and the name is what
+     actually identifies the label. */
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8571rem;
+  cursor: pointer;
+}
+.pane-label-chip:hover { background: var(--bg-hover); }
+
+.pane-label-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.pane-label-add {
+  padding: 2px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.8571rem;
+  cursor: pointer;
+}
+.pane-label-add:hover { background: var(--bg-hover); color: var(--fg); }
+
+/* The sender name is a button now, and it must not look like one until the
+   pointer is on it: the message header is text, and a header full of chrome is
+   a header nobody reads. */
+.message-from-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.message-from-button:hover,
+.message-from-button:focus-visible {
+  text-decoration: underline;
+}
+
+/* The popover itself. FIXED, not absolute: the pane scrolls
+   (`.thread-pane { overflow-y: auto }`) and an absolutely-positioned popover
+   would be clipped by it — the coordinates placePopover computes are viewport
+   coordinates for exactly that reason. */
+.sender-popover {
+  position: fixed;
+  z-index: 30;
+  width: 340px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+  font-size: 0.9286rem;
+}
+
+.sender-popover-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sender-popover-name { font-weight: 600; }
+.sender-popover-address { color: var(--fg-muted); overflow-wrap: anywhere; }
+.sender-popover-alias { color: var(--fg-muted); font-style: italic; }
+.sender-popover-pin { margin-left: auto; }
+
+.sender-popover-section { margin-top: 10px; }
+.sender-popover-section h3 {
+  margin: 0 0 2px;
+  font-size: 0.7857rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.sender-popover-section p { margin: 0 0 2px; }
+
+.sender-popover-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.sender-popover-refile { position: relative; }
+.sender-popover-refile .button { width: 100%; }
+
+/* The block form and the shared count/confirm panel (#59). Solid surfaces,
+   the popover's own section rhythm; the fieldset loses its default frame so it
+   reads as part of the card rather than a box inside it. */
+.sender-block-form fieldset { border: 0; margin: 0; padding: 0; }
+.sender-block-form legend { padding: 0; font-weight: 600; margin-bottom: 2px; }
+.sender-bulk { margin-top: 10px; }
+.sender-bulk p { margin: 0 0 6px; }
+
+/* A folded message in a conversation: ONE line, and it reads as a line rather
+   than as a card, because the point of folding is that the eye skips it. */
+.message-folded {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 16px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-read);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9286rem;
+  text-align: left;
+  cursor: pointer;
+}
+.message-folded:hover { background: var(--bg-hover); }
+.message-folded-from { font-weight: 600; white-space: nowrap; }
+.message-folded-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+}
+.message-folded-time { color: var(--fg-muted); white-space: nowrap; }
+
+/* ---- rich-text compose editor (#46, dependency-free contentEditable) ------ */
+.editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.editor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.editor-mode-toggle { font-size: 0.8571rem; }
+/* Markdown compose (#56): a tick beside the plain/rich toggle, not a third mode. */
+.editor-markdown-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+.editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+.editor-tool {
+  min-width: 30px;
+  min-height: 2rem;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.editor-tool[data-glyph]::before { content: attr(data-glyph); }
+.editor-tool:hover { background: var(--bg-hover); }
+.editor-surface {
+  min-height: 12.8571rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.5;
+  outline: none;
+}
+.editor-surface:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.editor-surface img { max-width: 100%; height: auto; }
+/* Quoted text is TEXT, not a label, so it is not muted: --fg-muted misses AAA
+   (5.9:1), and scripts/a11y-contrast.allow holds only labels to AA — body text
+   is the case where 7:1 is worth having. The indent and the rule already say
+   "quoted"; the colour does not need to. Found when #612's reload surface put a
+   forward's quote under the contrast lane for the first time. */
+.editor-surface blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-strong);
+  color: inherit;
+}
+/* The hidden per-editor image picker (the toolbar button clicks it). */
+.editor-image-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.compose-alias-hint { color: var(--accent); }
+
+.notice {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+/* ---- buttons / inputs --------------------------------------------------- */
+
+.button {
+  min-height: 2.4286rem;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.button:hover { background: var(--bg-hover); }
+.button-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+/* `.button:hover` outranks `.button-primary`, which turned a hovered (or, on a
+   phone, just-tapped) primary button's background pale under its white text:
+   measured on the keys page's "Check for an updated key" (v1.93 C2). */
+.button-primary:hover { background: var(--accent); }
+.button-quiet { border-color: var(--border); }
+.button:disabled { color: var(--fg-muted); cursor: not-allowed; }
+
+.icon-button {
+  min-width: 2.4286rem;
+  min-height: 2.4286rem;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.icon-button:hover { background: var(--bg-hover); }
+
+.link-button {
+  border: 0;
+  background: var(--bg-selected);
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.checkbox { display: inline-flex; align-items: center; gap: 8px; padding: 6px; cursor: pointer; }
+.checkbox input { width: 16px; height: 16px; }
+.checkbox.is-disabled { color: var(--fg-muted); }
+
+.radio { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+
+.text-input, .select, .textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  min-width: 0;
+}
+.textarea { resize: vertical; }
+
+.field { display: block; margin-bottom: 10px; }
+.field-label { display: block; font-size: 0.8571rem; color: var(--fg-muted); margin-bottom: 3px; }
+
+/* ---- recipient autocomplete (contacts, urn:mailroom:contacts) ------------ */
+.recipient-field { position: relative; }
+.recipient-suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.recipient-option {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.recipient-option:hover,
+.recipient-option.is-active { background: var(--bg-selected); }
+.recipient-name { font-weight: 600; }
+.recipient-address { color: var(--fg-muted); font-size: 0.8571rem; }
+.field-row { display: flex; gap: 8px; }
+.field-row .select { max-width: 260px; }
+.field-grow { flex: 1; }
+.hint { margin: 0 0 10px; font-size: 0.8571rem; color: var(--fg-muted); }
+
+.inline-form { display: flex; gap: 6px; padding: 6px 4px; }
+
+/* ---- floating surfaces (solid, elevated — never translucent) ------------- */
+
+.compose {
+  position: fixed;
+  right: 24px;
+  bottom: 0;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: var(--shadow-2);
+  z-index: 10;
+}
+.compose-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 16px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.compose-header h2 { font-size: 1rem; margin: 0; }
+.compose-form { padding: 12px 16px 16px; overflow-y: auto; display: flex; flex-direction: column; }
+.compose-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+.palette {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 12;
+  overflow: hidden;
+}
+.palette-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  font-size: 1.0714rem;
+}
+.palette-input:focus { outline: none; }
+.palette-list { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow-y: auto; }
+.palette-item {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.palette-item.is-active { background: var(--bg-selected); }
+.palette-empty { padding: 12px; color: var(--fg-muted); }
+
+.sheet {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, calc(100vw - 32px));
+  max-height: 70vh;
+  /* On a phone `vh` is the screen with the browser's address bar RETRACTED, so a
+     70vh sheet 12vh down can end under the bar that is showing (#880). `dvh` is
+     the screen as it is right now; browsers without it keep the line above. */
+  max-height: 70dvh;
+  overflow-y: auto;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 12;
+  padding-bottom: 12px;
+}
+.sheet-small { width: min(420px, calc(100vw - 32px)); }
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 10px 16px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+}
+.sheet-header h2 { margin: 0; font-size: 1.0714rem; }
+
+/* Modal backdrop (add-account wizard): a dimmed, click-through-blocking layer
+   under the opaque .sheet. Kept below the sheet's own z-index. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 11;
+}
+.sheet-body { padding: 12px 16px; }
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.field-hint { font-size: 0.8571rem; color: var(--fg-muted); margin: 3px 0 0; }
+.field-set { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin: 10px 0 0; }
+.field-set legend { padding: 0 4px; }
+.field-error { font-size: 0.8571rem; color: var(--error-fg); margin: 6px 0 0; }
+/* Unsubscribe (#58). Quiet until asked: most real mail carries the header,
+   so a loud control would be loud on most of the inbox. */
+.unsubscribe-panel { margin: 8px 0 0; }
+
+/* The invitation card (#725). A raised inset like the priority panel, with an
+   accent edge — a meeting is a scheduled event, the same reading .thread-snoozed
+   gives the accent. A cancelled card keeps its shape and loses the accent: the
+   STATE LINE says "cancelled" in words, and the edge is the redundant cue. */
+.invite-card {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+}
+.invite-cancelled { border-left-color: var(--border-strong); }
+.invite-cancelled .invite-title { text-decoration: line-through; }
+.invite-title { margin: 0 0 6px; font-size: 1.0714rem; font-weight: 600; unicode-bidi: isolate; overflow-wrap: anywhere; }
+.invite-state { margin: 0 0 6px; font-weight: 600; }
+.invite-facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0 0 8px; }
+.invite-facts dt { color: var(--fg-muted); }
+.invite-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.invite-person, .invite-location { unicode-bidi: isolate; }
+.invite-guests, .invite-replied { list-style: none; margin: 0; padding: 0; }
+.invite-partstat { color: var(--fg-muted); }
+.invite-response { margin: 0 0 6px; font-weight: 600; }
+.invite-not-sent { color: var(--danger); }
+.invite-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; }
+.invite-problem { margin: 8px 0 12px; color: var(--fg-muted); font-size: 0.9286rem; }
+@media (max-width: 480px) {
+  .invite-facts { grid-template-columns: 1fr; }
+}
+.unsubscribe-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.unsubscribe-confirm .field-hint { flex: 1 1 100%; margin: 0; }
+/* A checkbox and its label on one line: the label belongs BESIDE the box, not above
+   it, or the pairing is ambiguous when several sit in a column. */
+.field-inline { display: flex; align-items: center; gap: 8px; }
+.field-inline .field-label { margin-bottom: 0; }
+/* Signatures and templates (#56). */
+.sheet-section {
+  font-size: 0.9286rem;
+  margin: 16px 0 0;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sheet-section:first-child { margin-top: 0; }
+.banner-ok {
+  background: var(--bg-sunken);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+
+.shortcut-list { margin: 0; padding: 12px 16px; }
+.shortcut { display: flex; gap: 12px; padding: 5px 0; }
+.shortcut dt { min-width: 170px; }
+.shortcut dd { margin: 0; color: var(--fg-muted); }
+kbd {
+  padding: 2px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8571rem;
+}
+
+.label-list { list-style: none; margin: 0; padding: 8px 12px; }
+.label-choice { width: 100%; }
+
+/* The snooze menu (#51). Each row is "what you meant" on the left and "which
+   instant that is" on the right, because a preset that does not show its
+   resolution is asking to be misread. */
+.snooze-list { list-style: none; margin: 0; padding: 8px 12px; }
+.snooze-choice {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.snooze-choice:hover:not(:disabled),
+.snooze-choice:focus-visible {
+  background: var(--bg-sunken);
+  border-color: var(--border-strong);
+}
+.snooze-choice:disabled { opacity: 0.5; cursor: default; }
+.snooze-choice-when { color: var(--fg-muted); font-size: 0.8571rem; white-space: nowrap; }
+.snooze-current { margin: 0; padding: 0 16px; color: var(--fg-muted); font-size: 0.9286rem; }
+.snooze-unsnooze { margin: 4px 16px 14px; }
+
+.settings { position: relative; }
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 240px;
+  padding: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  z-index: 12;
+}
+.menu-group { border: 0; margin: 0 0 10px; padding: 0; }
+.menu-group legend { font-size: 0.7857rem; text-transform: uppercase; color: var(--fg-muted); padding: 0; }
+.menu-action { width: 100%; text-align: left; margin-top: 4px; }
+.menu-note { margin: 0 0 8px; font-size: 0.8571rem; line-height: 1.4; color: var(--fg-muted); }
+
+.toasts {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 14;
+  max-width: min(520px, calc(100vw - 32px));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+.toast-error { background: var(--error-bg); color: var(--error-fg); border-color: var(--error-fg); }
+.toast-message { flex: 1; }
+
+/* The undo toast (#375 increment 6). Same shape as any other toast — it is not
+   a dialog and must not look like one — plus the countdown between the button
+   and the dismiss. */
+.toast-undo .toast-countdown {
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+  /* Fixed width so the sentence beside it does not shuffle sideways as the
+     number goes 10 → 9: a countdown that nudges the Undo button under the
+     pointer once a second is a countdown that makes you miss. */
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pointer or focus anywhere in here PAUSES the countdown (ui/Toasts.tsx). The
+   outline says the offer is being held rather than running out. */
+.toast-undo:hover,
+.toast-undo:focus-within {
+  border-color: var(--accent);
+}
+
+/* ---- the phone's bottom bar (#375 increment 7) -------------------------- */
+
+/* IT IS A FLEX CHILD OF `.app`, NOT A FIXED OVERLAY, and that is the whole
+   reason nothing on this app ever has to reserve space for it. `.app` is a
+   `100dvh` flex column whose scrolling happens inside `.workspace`, so a final
+   child of it is already pinned to the bottom of the window in the only sense a
+   user can perceive — and because it takes its own space, no list, rail or
+   reading pane needs a compensating `padding-bottom` that would drift out of
+   step with the bar's height the first time the type size changed.
+
+   It is rendered only below 760px (ui/Shell.tsx uses the same breakpoint this
+   file's responsive block does), so there is no `display: none` rule here: on a
+   desktop the element does not exist, which is also five links a screen reader
+   does not walk past.
+
+   `--bottom-bar-h` is an ordinary component-scoped variable, not a design token
+   (tokens.css says where that line is): only two rules read it — the bar's own
+   minimum height and the desk's docked selection toolbar in desk.css, which has
+   to sit exactly above it. One declaration so those two cannot disagree. */
+.app {
+  --bottom-bar-h: 52px;
+}
+
+.bottom-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  min-height: var(--bottom-bar-h);
+  border-top: 1px solid var(--border);
+  background: var(--bg-raised);
+  /* The inset is padding ON the bar, so the taps land above the home indicator
+     while the bar's background still runs to the physical bottom edge. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.bottom-bar-item {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 0.8571rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* Where you are: the accent AND the weight. Colour is never the only channel
+   (tokens.css), and `aria-current="page"` says the same thing to a reader. */
+.bottom-bar-item.is-current {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.bottom-bar-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---- responsive --------------------------------------------------------- */
+
+@media (max-width: 1099px) {
+  /* Two panes: the reading pane REPLACES the list rather than squeezing it. */
+  .app[data-pane="thread"] .content { grid-template-columns: minmax(0, 1fr); }
+  .app[data-pane="thread"] .list-pane { display: none; }
+}
+
+/* THE SEARCH BOX ON A NARROW PHONE (#802). Below 400 px the box's own buttons
+   (options ▾, save ☆, clear ✕, 39 px each) and the bar's ☰ ⟳ ⚙ left the input
+   1 px at 320 px (measured: 0 characters of a typed query visible; 6 at 375).
+   Two changes, both CSS only, so every control stays in the DOM and in the
+   reading order:
+   - Resting: ▾ and ☆ are clipped (visually hidden, still in the accessibility
+     tree and still focusable) until the box has focus, and the buttons and
+     spacing are tighter. What is left on screen is the input and ✕.
+   - Focused: the box takes the bar. ☰ ⟳ ⚙ step aside while focus is in the box
+     (a common phone pattern), and ▾ ☆ ✕ come back, so the options form and
+     saving a search are one tap from a focused box. They return on blur.
+   Tabbing to a clipped button focuses the box's descendant, which is
+   `:focus-within`, so it appears as it receives focus. */
+@media (max-width: 400px) {
+  .topbar { gap: 6px; padding-inline: 8px; }
+  .search { gap: 2px; padding: 2px 4px; }
+  .search-input { padding-inline: 6px; }
+  .topbar .icon-button { min-width: 2rem; padding-inline: 4px; }
+  .search:not(:focus-within) .search-aux {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .topbar:has(.search:focus-within) > .nav-toggle,
+  .topbar:has(.search:focus-within) > .topbar-actions { display: none; }
+}
+
+/* THE PHONE. This number is also `PHONE_QUERY` in app/ui/useMediaQuery.ts and
+   the `@media (max-width: 759px)` block in app/desk.css: the same breakpoint in
+   a language CSS cannot read, because a few of the phone's differences are
+   components that exist or do not (the bottom bar, the in-tray line, the
+   pane's More menu) rather than components that are or are not visible. All
+   three have to move together. */
+@media (max-width: 759px) {
+  /* One pane at a time. The sidebar is a pane, not an overlay: nothing is ever
+   * layered over content, and no scrim is needed (there are no transparencies
+   * in this design). The BOTTOM BAR is not a pane and does not switch with
+   * them — it sits under all three, so the rail is a place one tap gets you out
+   * of (ui/BottomBar.tsx). */
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .app[data-pane="nav"] .sidebar { display: block; }
+  .app[data-pane="nav"] .content { display: none; }
+  .nav-toggle { display: inline-flex; }
+  .brand { display: none; }
+  .compose { right: 0; left: 0; width: 100%; max-height: 90vh; border-radius: 0; }
+
+  /* Room for the query (#798). With `.search` allowed to shrink, the input is
+     what gives way. At 375 px with a query it was down to two visible
+     characters, and WebKit's own clear glyph took half of that, next to our ✕
+     that does the same thing. Tighter bar spacing and no duplicate glyph give
+     the input back about 30 px. Phone only: the desktop bar is unchanged. */
+  .topbar { gap: 8px; padding-inline: 12px; }
+  .search-input::-webkit-search-cancel-button { display: none; -webkit-appearance: none; appearance: none; }
+
+  /* READING ON A PHONE SCROLLS THE DOCUMENT (#798). iOS Safari collapses its
+     address bar and toolbar ONLY when the document scrolls. Measured on
+     v1.92.0: no phone view ever scrolled the document (scrollHeight equal to
+     clientHeight in all 16 runs), because `.app` is a `100dvh` box and the
+     panes scroll inside it. Mail was read with the browser's chrome on screen
+     the whole time.
+
+     SCOPED TO THE READING VIEW, ON PURPOSE. Long reading is where screen height
+     matters, and here the reading pane is alone: the list is `display: none`
+     behind it (the max-width 1099px block above). The desk and the lists keep
+     their own scroller. The virtualised list measures that element
+     (ui/desk/VirtualList.tsx), and cursor-follow, scroll restore and the docked
+     selection toolbar are all built on it. Moving them to the window would
+     change everything at once for the views where the toolbar matters least.
+     For those views `100dvh` stays: the box is sized to the toolbar's current
+     state rather than the larger `100vh` that would hide content under it.
+
+     What follows from letting `.app` grow: the bottom bar is no longer the last
+     row of a fixed-height box, so it sticks to the bottom edge. The pane's own
+     action row (desk.css) sticks just above it. The top bar scrolls away with
+     the content, as the browser's own does. */
+  .app[data-pane="thread"] {
+    height: auto;
+    min-height: 100dvh;
+  }
+  .app[data-pane="thread"] .workspace,
+  .app[data-pane="thread"] .content,
+  .app[data-pane="thread"] .thread-pane {
+    min-height: auto;
+  }
+  .app[data-pane="thread"] .thread-pane {
+    overflow: visible;
+  }
+  .app[data-pane="thread"] .bottom-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+  }
+}
+
+/* An ENHANCEMENT layer over three already-defined tokens, not new token
+   definitions (#376): scripts/check-tokens.mjs deliberately does not treat a
+   theme selector nested inside a media query as a top-level token block, so
+   this stays here rather than in tokens.css — moving it would let these
+   stronger values stand in for the ones tokens.css declares for everyone else,
+   which is the opposite of what "prefers-contrast: more" is supposed to be. */
+@media (prefers-contrast: more) {
+  html[data-theme="light"] { --border: #000000; --border-strong: #000000; --fg-muted: #2c3238; }
+  html[data-theme="dark"] { --border: #ffffff; --border-strong: #ffffff; --fg-muted: #dde1e6; }
+  .message-row { border-bottom-width: 2px; }
+  .button, .text-input, .select, .textarea { border-width: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ---- print (#61) --------------------------------------------------------
+   "Print / export to PDF" is the browser's own print pipeline: every browser's
+   print dialog offers Save-as-PDF, so this needs no dependency, works offline,
+   and produces a real PDF.
+
+   It prints the APP WINDOW, not the message frame's own document, and that is
+   deliberate. The body renders in a sandboxed cross-origin iframe whose token
+   list — "allow-popups allow-popups-to-escape-sandbox allow-scripts" — is
+   pinned by cmd/mailroom/security_test.go, and it carries no allow-modals, so
+   window.print() INSIDE the frame is blocked by the sandbox. Printing the frame
+   directly would mean widening a sandbox that is pinned on purpose, and
+   extending the sha256-pinned reporter script, to gain a print button. Printing
+   the parent gets the same output with no security change at all: the browser
+   still paints the iframe's content into the page.
+
+   Everything that is not the message itself is chrome, and chrome does not
+   belong on paper. */
+@media print {
+  .topbar,
+  .sidebar,
+  .bottom-bar,
+  .pane-topline,
+  .list-pane,
+  .pane-splitter,
+  .thread-toolbar,
+  .select-all-banner,
+  .toasts,
+  .skip-link,
+  .compose {
+    display: none !important;
+  }
+
+  /* The reading pane becomes the page: no scroll container, no height cap, no
+     grid columns reserving space for panes that are no longer rendered. */
+  .app,
+  .workspace,
+  .content,
+  .app[data-pane="thread"] .content {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    grid-template-columns: none !important;
+    grid-template-rows: none !important;
+  }
+
+  .thread-pane {
+    overflow: visible !important;
+  }
+
+  .thread-body {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* The card's frame is screen affordance; on paper it is just a box around
+     the content. The body keeps its own colours (it is the sender's HTML). */
+  .message {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    /* Keep a message from being split across pages where the engine can help
+       it; long bodies still paginate, which is what you want. */
+    break-inside: auto;
+  }
+
+  .message-html {
+    border: 0 !important;
+    max-height: none !important;
+  }
+
+  /* Headers stay: a printed message with no sender or date is not a record. */
+  .message-header,
+  .thread-subject {
+    break-after: avoid;
+  }
+
+  a[href]::after {
+    /* On paper a link's target is invisible unless it is written out. */
+    content: " <" attr(href) ">";
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+}
+
+/* ---- T0 rules editor (#155) --------------------------------------------- */
+
+/* Wider than a plain sheet: a condition tree with three controls per row plus a
+   blast-radius panel does not fit the 420px used for short menus. */
+.sheet-wide { width: min(760px, calc(100vw - 32px)); max-height: 80vh; }
+
+.rule-list-header { padding: 10px 16px 0; }
+.rule-list { list-style: none; margin: 0; padding: 0 8px; }
+.rule-list > li { border-bottom: 1px solid var(--border); }
+.rule-list > li:last-child { border-bottom: 0; }
+/* A disabled rule is dimmed, not hidden: it is still in the evaluation order,
+   and hiding it would make the order it participates in unreadable. */
+.rule-list > li.is-disabled .rule-name,
+.rule-list > li.is-disabled .rule-summary { opacity: 0.55; }
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  flex-wrap: wrap;
+}
+.rule-name { font-weight: 600; }
+.rule-summary { color: var(--fg-muted); font-size: 0.9286rem; flex: 1 1 auto; }
+.rule-row-actions { display: flex; gap: 10px; }
+
+.rule-form { padding: 12px 16px; }
+.rule-form h3 { margin: 16px 0 6px; font-size: 0.9286rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); }
+.rule-form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.rule-form .field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; }
+.rule-form .field-narrow { flex: 0 0 110px; }
+.rule-form .field > span { font-size: 0.8571rem; color: var(--fg-muted); }
+.rule-form-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+/* The condition tree. Each nesting level gets a rule down the left so the
+   boolean structure is visible at a glance — without it, an all-inside-any is
+   indistinguishable from a flat list, which is exactly the misreading that
+   makes someone save a rule that does something else. */
+.rule-group {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 10px;
+  margin: 6px 0;
+}
+.rule-depth-1 { border-left-color: var(--accent); }
+.rule-depth-2, .rule-depth-3 { border-left-color: var(--fg-muted); }
+.rule-group-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.rule-group-body { display: flex; flex-direction: column; gap: 6px; }
+.rule-group-actions { display: flex; gap: 12px; }
+.rule-leaf, .rule-action {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.rule-leaf input[type="text"] { flex: 1 1 160px; min-width: 0; }
+.rule-actions-list { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+/* Blast radius. The bounded case gets the same visual weight as the exact one —
+   a lower bound presented quietly reads as a total. */
+.rule-preview { margin-top: 4px; }
+.rule-preview-result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--surface, var(--bg-sunken));
+  border-left: 3px solid var(--accent);
+  font-size: 0.9286rem;
+}
+.rule-preview-result p { margin: 0 0 4px; }
+.rule-preview-samples { list-style: none; margin: 4px 0 0; padding: 0; }
+.rule-preview-samples li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--fg-muted);
+}
+.rule-preview-samples .from { flex: 0 0 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-preview-samples .subject { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hint.warn { color: var(--warn-fg); background: var(--warn-bg); padding: 2px 6px; border-radius: 3px; display: inline-block; }
+
+/* "Labelled by the rule X" in the reading pane. */
+.label-provenance {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+
+/* The 1–9 accelerator badge in the label menu. */
+.label-key {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+}
+.label-choice { display: flex; align-items: center; gap: 6px; width: 100%; }
+
+/* An enabled rule whose label does not resolve: it evaluates on every message
+   and does nothing (#166). Warn-coloured rather than error-red — the rule is
+   inert, not broken, and it is usually one deleted label away from working. */
+.rule-inert {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 0.8571rem;
+}
+.rule-label-create { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* "misfiled 4" (#170): how many messages the user took this rule's label back
+   off. Deliberately quieter than .rule-inert — an inert rule is doing nothing
+   and needs fixing, whereas a rule with corrections is mostly working and has
+   an over-broad edge. Alarm weight here would push people to delete rules that
+   are one conjunct away from right. */
+.rule-misfiled {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+/* The narrower-rule offer, opened under the rule's own row. Shares the preview's
+   left-rule treatment because it is the same kind of claim — a measured blast
+   radius, not an assertion. */
+.rule-tighten {
+  margin: 6px 0 4px 24px;
+  padding: 8px 10px;
+  background: var(--surface, var(--bg-sunken));
+  border-left: 3px solid var(--accent);
+  font-size: 0.9286rem;
+}
+.rule-tighten h4 { margin: 0 0 6px; font-size: 0.9286rem; }
+.rule-tighten p { margin: 0 0 6px; }
+.rule-tighten-proposal { font-weight: 600; }
+/* What tightening COSTS: correctly labelled mail the narrower rule stops
+   catching. Warn-coloured for the same reason .rule-conflicts is — it is the
+   sentence that should stop an acceptance, not decoration on one. */
+.rule-tighten-drops {
+  padding: 6px 8px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+/* A blast-radius conflict (#156): matched mail the user already filed
+   elsewhere by hand. Given alarm weight, not folded into the count — "matches
+   47" and "3 of which you filed elsewhere" are different facts and only the
+   second is a warning. */
+.rule-conflicts {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+/* "You already have this rule" (#292), raised between the form and its Save
+   button. Warn-weighted like .rule-conflicts because it is the same kind of
+   sentence — the one that should stop the click, not decorate it — and it sits
+   directly above the footer so the primary action inside it is the one under
+   the cursor. */
+.rule-duplicate {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-radius: 3px;
+  font-size: 0.9286rem;
+}
+.rule-duplicate h4 { margin: 0 0 6px; font-size: 0.9286rem; }
+.rule-duplicate p { margin: 0 0 6px; }
+.rule-duplicate-rule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  font-weight: 600;
+}
+.rule-duplicate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Running a saved rule over mail that already arrived (#191). Shares the
+   preview's left-rule treatment because it opens WITH a preview — the blast
+   radius is shown before anything is written, every time. */
+.rule-apply {
+  margin: 6px 0 4px 24px;
+  padding: 8px 10px;
+  background: var(--surface, var(--bg-sunken));
+  border-left: 3px solid var(--accent);
+  font-size: 0.9286rem;
+}
+.rule-apply h4 { margin: 0 0 6px; font-size: 0.9286rem; }
+.rule-apply p { margin: 0 0 6px; }
+.rule-apply-done { font-weight: 600; }
+/* "We left your corrections alone." A promise being kept, and the user has no
+   other way to know it was even considered — so it gets its own line and its
+   own colour rather than joining a tally. */
+.rule-apply-respected {
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent);
+  color: var(--fg-muted);
+}
+
+/* The category-tab strip (#228). Sits above the message list, over the inbox
+   only — a tab narrows the inbox rather than being a folder of its own. */
+.tab-strip {
+  /* flex:0 0 auto so the strip is never stretched or shrunk by the flex column
+     it lives in. Sticky at the top of the scrolling list-pane, ABOVE the
+     toolbar — which is why .list-toolbar gets offset by --tab-strip-h below;
+     both sticking at top:0 would leave the toolbar hidden underneath. */
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: var(--tab-strip-h);
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  overflow-x: auto;
+}
+
+/* The toolbar sits BELOW the strip when there is one. Written as an adjacent
+   sibling so the offset applies only where the strip actually renders — the
+   strip hides itself over non-inbox views and below two enabled tabs. */
+.tab-strip + .list-toolbar {
+  top: var(--tab-strip-h);
+}
+.tab-strip-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.55rem 1rem;
+  white-space: nowrap;
+}
+.tab-strip-tab:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+.tab-strip-tab.is-selected {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.tab-strip-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Arranging the strip, and pointing labels at tabs (#228 settings sheet).
+   Same row shape as .remote-allow, kept separate because these rows carry a
+   sentence of their own rather than a pill. Tokens used here — --border,
+   --fg-muted — are both defined in :root and overridden in the dark block
+   above; a token that is not is simply ignored and the row renders wrong in
+   silence, which is why they are named rather than invented. */
+.tab-settings-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.tab-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+}
+/* The name takes the slack so the note and the move buttons line up down the
+   column, whatever the label is called.
+   ⚠ min-width is a FLOOR, not 0. With `min-width: 0` this collapsed to
+   "Cybersec…" / "Ga…" / "Ne…" beside a dropdown hogging the row — a label
+   picker whose labels cannot be read. The ellipsis is the last resort for a
+   genuinely long name, not the normal case. */
+.tab-setting-label {
+  flex: 1 1 auto;
+  min-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* ⚠ `.select` IS width:100% BY DEFAULT — it is built for stacked form fields
+   (`.field > .select`), where filling the row is right. Dropped into a flex row
+   it takes the whole line and every sibling collapses to its min-width. Undo it
+   here and give the control a bounded share instead. */
+.tab-setting .select {
+  width: auto;
+  flex: 0 1 15rem;
+  min-width: 7rem;
+}
+.tab-setting-note {
+  flex: 1 1 55%;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+.tab-setting-move { flex: 0 0 auto; display: flex; gap: 2px; }
+.tab-setting-move .button-quiet { padding: 2px 8px; line-height: 1.2; }
+/* Below the sheet's narrow width the note wraps under the name rather than
+   squeezing both into unreadable columns. */
+@media (max-width: 520px) {
+  .tab-setting { flex-wrap: wrap; }
+  .tab-setting-note { flex: 1 1 100%; order: 3; }
+}
+
+/* Sender-authentication notice (#55). Deliberately NOT a badge and deliberately
+   only ever a warning: there is no positive counterpart, because increment 0
+   measured that one would fire on nearly all real mail. See ThreadPane's
+   SenderAuthLine and core/senderAuth.ts.
+
+   The two severities are visually distinct because they license different claims.
+   "failed" is the strong one — a check ran and said no. "unauthenticated" and
+   "unverifiable" both mean nobody could tell, which is a caution rather than an
+   accusation, and colouring them identically to a failure would overstate what is
+   known about eleven of the operator's messages. */
+.auth-notice {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 0.9286rem;
+}
+
+/* Mailroom's own DKIM verdict (#776): neutral, bordered, not the warning palette
+   and not a green badge, so it reads as a statement of who checked rather than
+   as the provider's verdict or a caution. Text colour is the normal one. */
+.auth-verified {
+  margin: 10px 0 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.9286rem;
+}
+
+.auth-notice-failed {
+  border-color: var(--danger);
+  /* The colour is a SECOND channel, not the only one: the sentence itself already
+     says a check failed, so a reader who cannot distinguish these hues loses
+     nothing (WCAG 1.4.1 — do not convey meaning by colour alone). */
+  color: var(--danger);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* Sender-domain warnings (#397). A different question from the auth notice
+   above — not "did this authenticate" but "is the domain a lookalike, a
+   punycode label, or a stranger claiming one of your own domains" — so it gets
+   its own class rather than reusing .auth-notice, but reuses the SAME palette:
+   these are the same three severities the auth notice already established
+   (a serious finding, a caution, and a neutral note), and inventing new colours
+   for the same meanings would just make the pane harder to read consistently.
+   See ThreadPane's SenderWarningLines and core/senderWarnings.ts. */
+.sender-warning {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  font-size: 0.9286rem;
+}
+
+/* Encrypted mail (#47 6b). A neutral note when decrypted — it is a fact about
+   the message, not a warning — and the warn palette when it could not be. */
+.encryption-line {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.9286rem;
+}
+.encryption-line-failed {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+/* PGP signature (#47, ADR-039). Every state is a sentence, so the palette only
+   reinforces it: a plain note when it checks out, the warn palette for a
+   signature that does not, a key the reader has not seen, or a changed key. */
+.signature-line {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.9286rem;
+}
+.signature-line-bad,
+.signature-line-unknown,
+.signature-line-changed {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+.signature-line-changed {
+  border-color: var(--danger);
+}
+/* A signature by a key that has since expired (#795): neither the warn palette
+   of a signature that does not check out, nor the plain note of one that does.
+   The sunken background and the dashed edge mark it as a stale fact. */
+.signature-line-expired {
+  background: var(--bg-sunken);
+  color: var(--fg);
+  border-style: dashed;
+}
+.key-change p {
+  margin: 0 0 8px;
+}
+.key-change-keys {
+  margin: 0 0 8px;
+}
+.key-change-keys dt {
+  font-weight: 600;
+}
+.key-change-keys dd {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.key-change-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.key-change-compare {
+  margin-top: 8px;
+}
+.key-change-compare summary {
+  cursor: pointer;
+}
+/* The import-a-key dialog (#47). */
+.import-key label {
+  display: block;
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+.import-key-text {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8571rem;
+}
+.import-key-heading {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+.key-import-action {
+  margin-top: 6px;
+}
+/* In compose the block sits under the switch, outside any pane. */
+.compose-encrypt-note + .key-change {
+  margin: 6px 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+/* selfSpoof: a stranger claiming one of the reader's own domains — the most
+   serious of the three, so it gets the same treatment as auth-notice-failed. */
+.sender-warning-selfSpoof {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+/* punycodeDomain: deliberately the QUIETEST of the three, never the warm warn
+   colour — internationalized domains are ordinary and legitimate, and this is
+   informational rather than a caution. Muted text on the plain surface, same as
+   the pane's other asides (e.g. .remote-banner-aside). */
+.sender-warning-punycodeDomain {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--fg-muted);
+  font-weight: normal;
+}
+
+/* The "N tracking pixels were blocked" aside (#55). It shares the quiet remote
+   banner rather than getting a box of its own: it is a footnote to "images are
+   loading", not a separate event, and on a mailbox where every allowed message
+   carries a beacon a second box would become furniture within a day. */
+.remote-banner-aside {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  flex-basis: 100%;
+}

@@ -1,0 +1,8 @@
+From: Alice Example <alice@example.com>
+To: Sync Tester <sync-tester@example.com>
+Subject: Hello from Alice
+Date: Mon, 01 Jan 2024 10:00:00 +0000
+Message-ID: <inbox-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+This is the first seeded INBOX message for the sync-test harness (issue #4).

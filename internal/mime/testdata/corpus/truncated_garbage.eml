@@ -1,0 +1,1 @@
+This is not a valid email message at all, it has no header field colons whatsoever and no blank line separating headers from a body, just a wall of garbage text meant to exercise the fatal-parse fallback path so that the parser must return a best-effort empty Message plus a non-nil error instead of crashing.

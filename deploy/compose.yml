@@ -1,0 +1,1100 @@
+# Mailroom test-instance deployment stack (Forgejo issue #80, spec §16 ops).
+#
+# ---------------------------------------------------------------------------
+# Schema source of truth: MIGRATIONS, not db/schema.sql (decision for this
+# deployment; see docs/migrations.md, which already says migrations are
+# "applied by mailroom_owner ... never by mailroom_app").
+#
+# Why migrations and not a schema.sql init-mount (like the dev
+# docker-compose.yml at the repo root):
+#   - db/schema.sql and db/migrations/*.sql are proven equal in CI
+#     (scripts/migrate-check.sh diffs them), but they are two *independent*
+#     entry points to the same end state, not a chain — replaying schema.sql
+#     and then goose's migration history against the same database double-
+#     applies non-idempotent DDL (CREATE TYPE, CREATE TABLE, ...) and fails.
+#     Making that combination work requires manually stamping goose's
+#     goose_db_version table to pretend the baseline already ran — an extra
+#     moving part with no upside here.
+#   - Running `mailroom-migrate up` against a genuinely empty database is
+#     goose's normal, intended path (it's exactly what CI's migrate-check
+#     job does) and is what every *future* schema change after this initial
+#     deploy will use too. Using it for the first deploy as well means there
+#     is exactly one operational procedure ("run mailroom-migrate up"),
+#     not two.
+#   - The postgres service below therefore does NOT mount db/schema.sql into
+#     /docker-entrypoint-initdb.d. It only creates the empty `mailroom`
+#     database (POSTGRES_DB). The `migrate` service populates it.
+#
+# ---------------------------------------------------------------------------
+# Role bootstrap (why there are two separate one-shot steps, not one):
+#
+# db/schema.sql / db/migrations create mailroom_owner, mailroom_app and
+# mailroom_admin as NOLOGIN (CLAUDE.md / data-model: the app never connects
+# as the schema owner). A fresh cluster has none of these roles at all yet.
+#
+#   1. role-bootstrap-owner (runs first, as the postgres superuser): creates
+#      mailroom_owner as a LOGIN role with CREATEROLE (needed because the
+#      migration itself CREATEs mailroom_app/mailroom_admin) and grants it
+#      CREATE on the target database/schema.
+#   2. migrate: runs `mailroom-migrate up`, connecting as mailroom_owner.
+#      This is the step that actually creates mailroom_app/mailroom_admin
+#      (as NOLOGIN, per schema.sql) plus every table/RLS policy.
+#   3. role-bootstrap-app (runs after migrate, since mailroom_app doesn't
+#      exist until then): ALTERs mailroom_app to LOGIN with its own
+#      password.
+#   4. mailroom (the server) starts only once step 3 has completed.
+#
+# ⚠ NO DSN IS EVER COMPOSED ONTO DISK (Forgejo #537). Until #537 the two
+# bootstrap steps above glued "host+user+password" into a single connection
+# string with `printf` — unescaped, so a password containing `@`, `:` or `/`
+# produced a DSN that silently parsed wrong — and wrote that string to a
+# plain (non-secret) named volume for `migrate`/`crypto`/`mailroom` to read.
+# That kept a second, permanent plaintext copy of every DB credential on
+# disk for the deployment's whole life, in addition to the Docker secret it
+# was built from.
+#
+# Now the connection URL (MAILROOM_MIGRATE_DATABASE_URL /
+# MAILROOM_DATABASE_URL) carries NO password at all, and each consuming
+# binary reads the password separately from the SAME Docker secret file the
+# bootstrap step used to set that role's password, injecting it into the URL
+# in memory just before connecting (internal/pgdsn.WithPasswordFile). The
+# bootstrap steps below pass the password to psql as a `-v` VARIABLE
+# (`:'pw'`), never spliced into SQL text, so a password containing SQL
+# metacharacters is still safe.
+# ---------------------------------------------------------------------------
+# MEMORY LIMITS (Forgejo #536). Every service below now carries an explicit
+# mem_limit, sized from measurement rather than a guess: cgroup v2
+# memory.peak read from each running container on a small test
+# instance (a small test corpus), for example clamd peaking near 2 GiB
+# against a steady state near 1 GiB and clamav-signatures near 910 MiB.
+# Each limit below is headroom over the measured peak, not the peak
+# itself — see the per-service comment for the reasoning.
+#
+# `mailroom` and `postgres` scale with the size of the mailbox they serve,
+# not with anything fixed in this file — mailroom-census (#529) measures a
+# given production corpus and #545 sizes the deployment VM from it — which is
+# why those two (and every service whose footprint could plausibly outgrow
+# this test corpus) get an environment-overridable default instead of a
+# literal: set the matching MAILROOM_*_MEM_LIMIT in .env for a production
+# deployment rather than editing this file.
+# ---------------------------------------------------------------------------
+# IMAGE PINS (Forgejo #535). `postgres:18` and the ClamAV images below are
+# pinned `tag@sha256:...`, not just `tag`: a tag is a pointer upstream can
+# repoint whenever it likes — and it already has, for both, since this test
+# instance pulled the bytes it is actually running — so a rebuild or a fresh
+# VM must get the SAME bytes that were tested, not whatever the tag currently
+# resolves to. Each digest is the one this instance is running, so the pin is
+# a no-op deploy; the upstream rebuild then arrives as an ordinary Renovate
+# PR someone reviews, instead of silently following the tag. The tag stays
+# next to the digest so the line is still readable and Renovate can bump it.
+# ---------------------------------------------------------------------------
+
+name: mailroom-deploy
+
+services:
+  postgres:
+    image: postgres:18@sha256:1957b2ff3137e4ef7f3bc813e74fff50b1e1ffddc85c8b9d6f14ade972be8687
+    networks: [backend]  # the database is reachable from the app and crypto, and from nowhere else
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: mailroom
+    # pg_stat_statements records, per normalised statement, how often it ran
+    # and how long it took, so a slow screen can be traced to the statement
+    # behind it with one read-only SELECT instead of guesswork (#706: an
+    # Email/set took 1–2 s, and nothing on the host could say which of its
+    # statements was slow). The library loads only at server start, so this
+    # line takes effect on a Postgres restart; role-bootstrap-owner creates
+    # the extension in the database. It stores statement TEXT with every
+    # literal replaced by $n, never the values, so no mail content reaches it.
+    #
+    # ⚠ track_utility=off IS WHAT MAKES THAT LAST SENTENCE TRUE. The $n
+    # normalisation applies to SELECT/INSERT/UPDATE/DELETE only. Utility
+    # statements are recorded VERBATIM, and the two role-bootstrap steps below
+    # run `ALTER ROLE … PASSWORD '<secret>'` on every `up`. With the default
+    # (on), both passwords sat in pg_stat_statements in plain text, readable by
+    # anyone with pg_read_all_stats, and in the stats file on the pgdata
+    # volume. Found on a test instance before this reached a release.
+    # Nothing worth timing here is a utility statement.
+    #
+    # track_io_timing adds read/write times to the same rows and to EXPLAIN
+    # (BUFFERS); its cost is a clock read per I/O, negligible on current
+    # hardware. deploy/README.md §6d shows how to read it.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - pg_stat_statements.track_utility=off
+      - -c
+      - track_io_timing=on
+    secrets:
+      - postgres_password
+    volumes:
+      # ⚠ THE MOUNT POINT IS /var/lib/postgresql, NOT .../data, AND THAT IS A
+      # POSTGRESQL 18 REQUIREMENT RATHER THAN A PREFERENCE.
+      #
+      # The official image changed PGDATA in 18: it is now
+      # /var/lib/postgresql/<major>/docker, so that a data directory is
+      # major-version-scoped and `pg_upgrade --link` can work without crossing a
+      # mount boundary (docker-library/postgres#1259). A volume mounted at the
+      # old .../data path is then an UNUSED mount, and the image refuses to boot
+      # rather than silently writing to a directory that will not persist:
+      #
+      #   Error: ... there appears to be PostgreSQL data in:
+      #            /var/lib/postgresql/data (unused mount/volume)
+      #
+      # ⚠ AND NO TEST IN THIS REPO COULD HAVE CAUGHT IT. Every database job in CI
+      # — schema-apply, migrate-check, the integration suite, every e2e harness,
+      # even the restore drill — builds a THROWAWAY container with no volume
+      # mounted at all, so all of them passed on 18 while the one configuration
+      # that matters, the one with persistent storage, could not start. It failed
+      # on the instance, on the first boot after the upgrade, which is precisely
+      # the place ADR-025 predicted a postgres major would fail and precisely why
+      # that upgrade was done as a deliberate operation instead of a merged
+      # one-line bump.
+      - pgdata:/var/lib/postgresql
+    # scripts/backup.sh no longer shells in and writes a plaintext dump to
+    # /tmp (#634 — it streams pg_dump straight to a host file now), so this
+    # is not covering Mailroom's own backup path any more. It is here for
+    # every OTHER thing that might write a scratch file into this container:
+    # a manual `pg_dump -f /tmp/...`, a debugging session, a future script
+    # that forgets the lesson. A tmpfs never touches a container's writable
+    # layer at all, so it is off whatever disk that layer resolves to —
+    # which, with the containerd image store, is NOT necessarily under
+    # Docker's data root (deploy/README.md §0a). No `read_only: true` here,
+    # unlike mailroom/crypto/clamd: Postgres needs its own writable paths
+    # under /var/lib/postgresql, which stay on the pgdata volume.
+    #
+    # ⚠ `docker cp` CANNOT RETRIEVE A FILE WRITTEN HERE. A tmpfs is a mount, not
+    # part of the container filesystem docker cp walks, so the old two-step
+    # snapshot — `pg_dump -f /tmp/x.dump` then `docker cp <pg>:/tmp/x.dump .` —
+    # now fails at the copy with "Could not find the file", having reported
+    # success for the dump itself. Measured while taking a pre-deploy snapshot
+    # by hand. STREAM instead, which is what backup.sh does (#634) and needs no
+    # scratch file at all:
+    #
+    #   docker exec <pg> pg_dump -U postgres -d mailroom -Fc > snapshot.dump
+    #
+    # It fails loudly rather than quietly: the copy errors and the file is
+    # absent, so a `pg_restore --list | grep -c "TABLE DATA"` check on the
+    # result catches it. Verify every by-hand snapshot that way regardless.
+    tmpfs:
+      - /tmp:size=64m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d mailroom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # Peak usage is mostly page cache Postgres will happily give
+    # back under pressure — the limit is headroom over that, not a page-cache
+    # budget. mem_reservation gives it a floor instead of only a ceiling, so
+    # the daemon isn't the first thing squeezed when other containers compete
+    # for host memory.
+    mem_limit: ${MAILROOM_POSTGRES_MEM_LIMIT:-1g}
+    mem_reservation: ${MAILROOM_POSTGRES_MEM_RESERVATION:-256m}
+    restart: unless-stopped
+    # ⚠ Docker's default json-file driver NEVER rotates (#351). The sync loop
+    # logs two INFO lines per user every 30s even when nothing is due, and
+    # these logs share a filesystem with pgdata, blobs and the search index —
+    # so unbounded logs eventually stop Postgres, which PANICs when full.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # One-shot: create the LOGIN mailroom_owner role that `migrate` connects
+  # as. Idempotent (safe to re-run: ALTERs if the role already exists, e.g.
+  # after `docker compose up` is re-run without wiping the postgres volume).
+  role-bootstrap-owner:
+    image: postgres:18@sha256:1957b2ff3137e4ef7f3bc813e74fff50b1e1ffddc85c8b9d6f14ade972be8687
+    networks: [backend]  # talks only to postgres
+    # Runs as `postgres` (#537): it used to run as the image's default
+    # (root) user because it needed write access to a fresh named volume it
+    # composed a DSN onto, which a freshly created volume owns root:root.
+    # There is no such volume any more (see the header comment) — this step
+    # only talks to Postgres and reads two read-only secret files — so it
+    # runs as the same non-root user the postgres image itself uses, which
+    # is the least this container could plausibly need. cap_drop +
+    # no-new-privileges below still apply.
+    user: postgres
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        psql -h postgres -U postgres -d mailroom -v ON_ERROR_STOP=1 -v pw="$$(cat /run/secrets/mailroom_owner_password)" <<'SQL'
+        SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mailroom_owner') AS owner_exists \gset
+        \if :owner_exists
+          ALTER ROLE mailroom_owner LOGIN PASSWORD :'pw' CREATEROLE;
+        \else
+          CREATE ROLE mailroom_owner LOGIN PASSWORD :'pw' CREATEROLE;
+        \endif
+        GRANT ALL ON SCHEMA public TO mailroom_owner;
+        GRANT ALL ON DATABASE mailroom TO mailroom_owner;
+        -- Statement timing (see the postgres service's `command`). Created
+        -- here, as the superuser, because pg_stat_statements is not a
+        -- trusted extension and `migrate` connects as mailroom_owner. It is
+        -- not part of the schema: nothing in Mailroom reads it, and a
+        -- database without it works exactly the same.
+        CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+        SQL
+    secrets:
+      - postgres_password
+      - mailroom_owner_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    # A single one-shot psql script; nothing here scales with the corpus, so
+    # unlike the long-running services below there is no env override.
+    mem_limit: 128m
+    pids_limit: 64
+
+  # One-shot: mailroom_owner DSN -> `goose up` (db/migrations/*.sql). This is
+  # the step that actually creates the schema, mailroom_app/mailroom_admin,
+  # RLS policies, etc. (see the header comment above).
+  migrate:
+    image: ${MAILROOM_IMAGE:-mailroom:test}
+    networks: [backend]  # talks only to postgres
+    entrypoint: ["/mailroom-migrate"]
+    command: ["up"]
+    environment:
+      # No password here (#537): mailroom-migrate reads one separately from
+      # MAILROOM_MIGRATE_DATABASE_PASSWORD_FILE below and assembles the two
+      # in memory (internal/pgdsn).
+      MAILROOM_MIGRATE_DATABASE_URL: postgres://mailroom_owner@postgres:5432/mailroom?sslmode=disable
+      MAILROOM_MIGRATE_DATABASE_PASSWORD_FILE: /run/secrets/mailroom_owner_password
+    secrets:
+      - mailroom_owner_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      role-bootstrap-owner:
+        condition: service_completed_successfully
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    # goose applying db/migrations/*.sql; a one-shot like the bootstrap steps
+    # around it, fixed rather than env-overridable for the same reason.
+    mem_limit: 256m
+    pids_limit: 64
+
+  # One-shot: mailroom_app doesn't exist until `migrate` has run, so its
+  # LOGIN bootstrap happens after, not alongside, role-bootstrap-owner.
+  role-bootstrap-app:
+    image: postgres:18@sha256:1957b2ff3137e4ef7f3bc813e74fff50b1e1ffddc85c8b9d6f14ade972be8687
+    networks: [backend]  # talks only to postgres
+    # See role-bootstrap-owner above for why this runs as `postgres` (#537).
+    user: postgres
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        psql -h postgres -U postgres -d mailroom -v ON_ERROR_STOP=1 -v pw="$$(cat /run/secrets/mailroom_app_password)" <<'SQL'
+        ALTER ROLE mailroom_app LOGIN PASSWORD :'pw';
+        SQL
+    secrets:
+      - postgres_password
+      - mailroom_app_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    # A single ALTER ROLE; same reasoning as role-bootstrap-owner above.
+    mem_limit: 128m
+    pids_limit: 64
+
+  # The crypto process (ADR-024): the ONLY holder of PGP private keys.
+  #
+  # It is a separate service, not a goroutine in the server, and it is given a
+  # secret the server does not have. That second point is the whole design. If
+  # PGP keys were sealed under the master key, the server — which holds the
+  # master key — could re-derive them, and this container would be isolation
+  # theatre: an attacker with RCE in the server would still walk away with the
+  # identity keys. So note what is NOT in this service's `secrets:` list below:
+  # mailroom_master_key. Adding it would quietly collapse two roots into one.
+  #
+  # Equally, note what is not in the SERVER's list: mailroom_pgp_root_key.
+  #
+  # ⚠ You must create ./secrets/mailroom_pgp_root_key.txt before `up`.
+  #
+  # This said a missing secret file is "a compose-level error, not a per-service
+  # one", so the whole stack refuses to start. MEASURED ON Docker 29.5.3 /
+  # Compose 5.1.4, that is wrong: `docker compose config` exits 0, and the
+  # daemon CREATES the absent path as a DIRECTORY — on the host under
+  # ./secrets/, and bind-mounted as a directory at /run/secrets/<name>. Only
+  # THIS service then fails, when crypto.ReadKeyFile hits "is a directory"; the
+  # rest of the stack comes up around it. Still fail-closed, but later and under
+  # a misleading error — and you are left with a directory where the file goes,
+  # so the obvious `openssl rand ... > secrets/…txt` fails until you rmdir it.
+  #
+  # deploy/README.md §2 has the one-liner. And once it
+  # exists, it must be ESCROWED: see docs/key-escrow.md. Losing it loses every
+  # message ever encrypted to these keys, irreversibly and silently — the
+  # mailbox restores, opens and works, and only the encrypted mail is gone.
+  #
+  # Keys are PERSISTED in app.user_keys under RLS, sealed under the root above
+  # (increment 3 of Forgejo #47), so they survive a restart. Since increment 5
+  # the mail path calls this service: the server asks it to sign outgoing mail
+  # for identities with a bound key, at submit time.
+  #
+  # ⚠ That makes this service load-bearing for SENDING, but only for users who
+  # have a key. If it is down, they cannot send; everyone else is unaffected,
+  # and mail delivery and reading are unaffected for everybody.
+  crypto:
+    image: ${MAILROOM_IMAGE:-mailroom:test}
+    networks: [backend]  # THE POINT OF THIS SPLIT — holds the PGP root, needs the DB, must never reach the internet
+    entrypoint: ["/mailroom-crypto"]
+    environment:
+      MAILROOM_PGP_ROOT_KEY_FILE: /run/secrets/mailroom_pgp_root_key
+      MAILROOM_PGP_SOCKET: /run/mailroom-crypto/crypto.sock
+      # Keys live in app.user_keys under RLS, so this process needs the
+      # database too — as mailroom_app, exactly like the server, through the
+      # same Store.UserTx and the same policies. The database is NOT the
+      # boundary: the server can read private_key_ct and gets ciphertext it
+      # cannot open, because it does not have the root above.
+      #
+      # ⚠ There is no in-memory fallback. An unset DSN fails startup rather
+      # than quietly running a process that loses keys on restart and drops the
+      # database half of cross-user isolation while reporting itself healthy.
+      #
+      # No password here (#537): the URL is deliberately bare, and
+      # MAILROOM_DATABASE_PASSWORD_FILE below supplies mailroom_app's
+      # password separately, assembled in memory (internal/pgdsn).
+      MAILROOM_DATABASE_URL: postgres://mailroom_app@postgres:5432/mailroom?sslmode=disable
+      MAILROOM_DATABASE_PASSWORD_FILE: /run/secrets/mailroom_app_password
+      MAILROOM_LOG_LEVEL: ${MAILROOM_LOG_LEVEL:-info}
+      MAILROOM_LOG_FORMAT: ${MAILROOM_LOG_FORMAT:-json}
+    volumes:
+      # The Unix socket. There is no port, and no network listener exists in
+      # the binary at all. Shared with `mailroom`, which needs it from the key
+      # publication increment onward — `mailroom-admin pgp-generate` and friends
+      # run inside that container and are how a key comes to exist at all.
+      - crypto-socket:/run/mailroom-crypto
+    secrets:
+      - mailroom_pgp_root_key
+      - mailroom_app_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # mailroom_app must exist and be able to log in before this can connect.
+      #
+      # ⚠ THIS EDGE ALSO ORDERS IT AFTER `migrate`, and since #525 that is
+      # load-bearing: role-bootstrap-app itself waits for migrate, and this
+      # process now reads app.pgp_root_check BEFORE it listens, refusing to start
+      # if it cannot. Replacing this with a bare postgres dependency would let a
+      # first deploy boot crypto against a schema that lacks the table.
+      role-bootstrap-app:
+        condition: service_completed_successfully
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # Peak usage is small — this process signs/decrypts one message at a
+    # time and holds no mailbox state. The limit is headroom over that, not
+    # the observed floor.
+    # 384m since decrypt on open (#47 6b, ADR-037): one decrypt holds the
+    # request, ciphertext, plaintext (capped at 32 MiB) and response at once,
+    # and two may run together. 128m fit key operations, not message bodies.
+    mem_limit: ${MAILROOM_CRYPTO_MEM_LIMIT:-384m}
+    # ⚠ Docker's default json-file driver NEVER rotates (#351). The sync loop
+    # logs two INFO lines per user every 30s even when nothing is due, and
+    # these logs share a filesystem with pgdata, blobs and the search index —
+    # so unbounded logs eventually stop Postgres, which PANICs when full.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      # Dials the socket and speaks the protocol. Nothing in a minimal image can
+      # do that with a shell one-liner, and installing something that could
+      # would add surface to the one container that should have least.
+      #
+      # ⚠ A socket that answers also means the PGP root was verified (#525): the
+      # process compares it with the value app.pgp_root_check recorded for this
+      # database and exits BEFORE listening on a mismatch. So a crypto container
+      # that keeps restarting and never turns healthy, with "PGP ROOT MISMATCH"
+      # in its log, has been given the wrong root — install the escrowed one
+      # (docs/backup-restore-runbook.md, step 5). Mail keeps flowing meanwhile:
+      # `mailroom` does not wait on this service's health.
+      test: ["CMD", "/mailroom-crypto", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # ATTACHMENT SCANNING (ADR-027 §10, Forgejo #394). TWO containers, and the
+  # split is the security design rather than tidiness.
+  #
+  # clamd parses hostile input for a living. It is the container most likely to
+  # be wrong, so it gets NO NETWORK AT ALL — but a scanner whose signatures stop
+  # updating silently rots into a scanner that approves everything (§5c), and
+  # freshclam needs the internet. Those two facts are irreconcilable in one
+  # container, so they are two.
+  #
+  #   clamav-signatures  has network, holds NO mail, only writes the DB volume
+  #   clamd              has NO network, reads that volume, sees mail
+  #
+  # That downgrades "a compromised scanner exfiltrates every attachment" to
+  # "a compromised scanner lies about verdicts" (§10b).
+  clamav-signatures:
+    image: ${MAILROOM_CLAMAV_IMAGE:-clamav/clamav:1.5.4@sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d}
+    # freshclam ONLY. No scanning daemon here: this container has egress, and
+    # the whole point is that the thing with egress never sees an attachment.
+    #
+    # ⚠ THE ENTRYPOINT IS freshclam DIRECTLY, NOT THE IMAGE'S /init. Measured on
+    # a BRAND-NEW volume (#641 — every earlier measurement here, including the
+    # capability ladder this block used to document, was against a volume that
+    # already had freshclam.dat, which hid the bug): /init starts freshclam as
+    # root, root creates freshclam.dat before dropping to `DatabaseOwner
+    # clamav`, and a fresh volume's `clamav:clamav drwxr-sr-x` root refuses that
+    # write without CAP_DAC_OVERRIDE — which none of CHOWN/FOWNER/SETUID/SETGID
+    # grant. /init then backgrounds via `tail -f /dev/null` regardless, so the
+    # container reports healthy with no updater ever running. Separately,
+    # /init's freshclam invocation passes `--checks="${FRESHCLAM_CHECKS:-1}"`,
+    # which silently overrode our freshclam.conf's `Checks 12` down to once a
+    # day whenever that env var was unset — i.e. always, since nothing here
+    # sets it.
+    #
+    # Running freshclam itself as the image's unprivileged `clamav` user from
+    # the start (below) sidesteps both: there is no root-then-drop step to fail.
+    # ⚠ `--checks=12` ON THE COMMAND LINE IS WHAT GOVERNS: a flag overrides
+    # the config file, which is exactly how /init's --checks=1 beat our
+    # `Checks 12`. It is on the command line so `docker top` shows the number
+    # actually in force; freshclam.conf keeps the same value for anyone who
+    # runs freshclam by hand. Change it HERE. No capabilities are needed at all: the
+    # volume is already owned by this uid, so no chown/setuid/setgid ever
+    # happens. CLAMAV_NO_CLAMD/CLAMAV_NO_MILTERD are gone too — those are
+    # /init's own knobs and freshclam never reads them.
+    user: clamav:clamav
+    entrypoint: ["freshclam"]
+    command:
+      - "--config-file=/etc/clamav/freshclam.conf"
+      - "--daemon"
+      - "--foreground"
+      - "--stdout"
+      - "--checks=12"
+    volumes:
+      # ⚠ A NAMED VOLUME, NOT AN ANONYMOUS ONE (§10c). The signature DB is
+      # ~300 MB and the CDN rate-limits repeated full downloads per IP. An
+      # anonymous volume means every `up` re-downloads it and can lock
+      # freshclam out for hours — which feeds §5c's fail-open directly: a
+      # scanner with stale signatures reports clean and looks healthy.
+      - clamav-db:/var/lib/clamav
+      # ⚠ OUR OWN freshclam.conf, and it is load-bearing rather than tuning: the
+      # image's default writes a log file that `cap_drop: ALL` makes
+      # unwritable, which crash-looped this container on the first real deploy.
+      # The file explains the whole chain.
+      - ./freshclam.conf:/etc/clamav/freshclam.conf:ro
+    networks: [egress]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # Measured peak 910 MiB — larger than "downloads a file and writes it"
+    # would suggest, because freshclam's default TestDatabases loads the new
+    # signature DB to verify it before publishing: a clamd-sized load, not
+    # freshclam's own footprint. Unchanged by the entrypoint rewrite above:
+    # it is the same freshclam binary doing the same work.
+    mem_limit: ${MAILROOM_CLAMAV_SIGNATURES_MEM_LIMIT:-2g}
+    healthcheck:
+      # ⚠ THIS IS A SIGNAL, NOT A GATE (#641). Two ways this container can look
+      # up while doing nothing: /init's `tail -f /dev/null` fallback above (no
+      # process at all), and a freshclam that is running but whose CDN fetches
+      # have been failing quietly for days (a process present, a database going
+      # stale). Both are checked: a freshclam process must exist, AND one of
+      # daily.cld/daily.cvd must have been written within the last 3 days —
+      # the same MaxDatabaseAge judgment as internal/clamd.Version.Stale.
+      #
+      # ⚠ NOTHING MAY depends_on THIS SERVICE'S HEALTH. A CDN outage or a
+      # transient network blip must not stop mail flowing — clamd already has
+      # its own signatures and keeps scanning against them; see the package
+      # comment on internal/rescan for why a frozen database degrades loudly
+      # rather than paging anyone. This check exists purely to be scraped
+      # and alerted on, alongside /metrics' signature gauges
+      # (mailroom_scanner_signature_published_timestamp_seconds).
+      test: ["CMD-SHELL", "pgrep -x freshclam >/dev/null && find /var/lib/clamav -maxdepth 1 -name 'daily.c?d' -mtime -3 | grep -q ."]
+      interval: 30s
+      timeout: 10s
+      # Generous: a cold start on a brand-new volume is a ~300 MB first
+      # download, same as clamd's own start_period reasoning below.
+      start_period: 10m
+      retries: 5
+
+  clamd:
+    image: ${MAILROOM_CLAMAV_IMAGE:-clamav/clamav:1.5.4@sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d}
+    # ⚠ NO NETWORK AT ALL. Not an internal network — none. Unlike `crypto`,
+    # which needs the database and therefore got `internal: true` (#385), this
+    # process needs nothing off-box: it is reached over a unix socket and reads
+    # its signatures from a volume. network_mode: none is the right tool HERE
+    # and the wrong one there, which is why both appear in this file.
+    network_mode: none
+    environment:
+      # No freshclam: this container cannot reach the internet, and a freshclam
+      # failing every hour would fill the log with noise that hides real
+      # problems. clamav-signatures owns updates.
+      CLAMAV_NO_FRESHCLAMD: "true"
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      # ⚠ READ-WRITE, AND THAT IS FORCED BY THE IMAGE, NOT A CHOICE. Mounted
+      # :ro, clamav/clamav's entrypoint dies at startup:
+      #
+      #     chown: /var/lib/clamav/daily.cld: Read-only file system
+      #
+      # It chowns the database directory unconditionally before starting clamd,
+      # so a read-only mount is a scanner that never starts. Measured, not
+      # predicted — it would have been dead on arrival at first deploy.
+      #
+      # The isolation that matters is unaffected: this container still has NO
+      # network, so the worst a compromised clamd gains is the ability to
+      # corrupt signatures it could already lie about.
+      - clamav-db:/var/lib/clamav
+      - clamd-socket:/run/clamav
+      # ⚠ The socket must NOT live in /tmp. The image defaults LocalSocket to
+      # /tmp/clamd.sock, and /tmp is a tmpfs here (below) so the socket would
+      # be invisible to every other container. Moved explicitly.
+      - ./clamd.conf:/etc/clamav/clamd.conf:ro
+    # ⚠ read_only + tmpfs (§10c): clamd decompresses archive members to disk
+    # while scanning, and those are DELETED, NOT SHREDDED. On a tmpfs they never
+    # touch the host's storage at all. LeaveTemporaryFiles is off in clamd.conf.
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /run/lock
+    cap_drop: ["ALL"]
+    # ⚠ CHOWN is the ONE capability this image cannot start without: its
+    # entrypoint chowns the database directory and exits 1 on failure. Measured
+    # by ladder — ALL-dropped fails, +CHOWN starts. Nothing else is needed.
+    cap_add: ["CHOWN"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # A signature RELOAD doubles clamd's ANONYMOUS memory: ConcurrentDatabaseReload
+    # (on by default) builds the new engine while the old one keeps scanning.
+    # Measured (#536): anon 991 MiB -> 1,989 MiB during `clamdscan --reload`,
+    # page cache only ~113 MiB. PLUS the /tmp tmpfs below (size=512m) is charged
+    # to this SAME memory cgroup — clamd writes INSTREAM data and decompressed
+    # archive members there (StreamMaxLength 100M, MaxScanSize 400M in
+    # clamd.conf) — so the ceiling must clear ~2 GiB of reload + 512 MiB of tmpfs.
+    #
+    # ⚠ TOO TIGHT IS NOT SELF-HEALING. Capped at 1400m, the reload survived only
+    # by SWAPPING 830 MiB; with swap disabled the same reload was OOM-killed and
+    # clamd was left running but unresponsive, so `restart: unless-stopped` never
+    # fires and fail-closed scanning keeps mail sync paused until a human
+    # restarts this container. It surfaces at the next signature update, hours
+    # after the limit was set. Never below ~2.5 GiB; deploy/README.md §6c.
+    mem_limit: ${MAILROOM_CLAMD_MEM_LIMIT:-3500m}
+    healthcheck:
+      # Speaks the protocol rather than checking the process exists — a clamd
+      # with no signature database starts, listens, and answers nothing useful.
+      # ⚠ clamdscan --ping, NOT nc. Measured: the nc in clamav/clamav has no
+      # -U flag, so a unix-socket healthcheck written with it can never pass —
+      # the scanner would be permanently unhealthy while working perfectly.
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      # Generous: a cold start waits for clamav-signatures to populate the
+      # volume, which is a multi-minute download.
+      start_period: 10m
+      retries: 5
+
+  mailroom:
+    image: ${MAILROOM_IMAGE:-mailroom:test}
+    networks: [backend, egress]  # the one service that legitimately needs outbound: IMAP/SMTP, OIDC, the image proxy, web push, WKD
+    environment:
+      # No password here (#537): the URL is deliberately bare, and
+      # MAILROOM_DATABASE_PASSWORD_FILE below supplies mailroom_app's
+      # password separately, assembled in memory (internal/pgdsn).
+      MAILROOM_DATABASE_URL: postgres://mailroom_app@postgres:5432/mailroom?sslmode=disable
+      MAILROOM_DATABASE_PASSWORD_FILE: /run/secrets/mailroom_app_password
+      MAILROOM_MASTER_KEY_FILE: /run/secrets/mailroom_master_key
+      MAILROOM_LISTEN_ADDR: ":8080"
+      # Fixed, not passed through: the Dockerfile always builds the web
+      # client to this exact path, so there is nothing a deployment-level
+      # override could usefully point at instead.
+      MAILROOM_WEB_ROOT: /srv/web
+      MAILROOM_LOG_LEVEL: ${MAILROOM_LOG_LEVEL:-info}
+      MAILROOM_LOG_FORMAT: ${MAILROOM_LOG_FORMAT:-json}
+
+      # --- Authentication --------------------------------------------------
+      # OIDC IS THE DEFAULT AND THE ONLY PATH FIT FOR REAL MAIL. Set all five
+      # variables below (in a .env next to this file) and the server stands up
+      # a full login gate: an anonymous visitor reaches the sign-in page and
+      # the health probes, and NOTHING else — /jmap, /jmap/session,
+      # /jmap/download, /jmap/upload and /jmap/eventsource all answer 401, and
+      # the web client is never served without a session.
+      #
+      # Everything here defaults to empty on purpose: `docker compose up` with
+      # no choice made fails fast with "no auth path configured", which is the
+      # correct outcome — YOU decide how this instance authenticates. So does a
+      # PARTIALLY filled OIDC block: a typo'd variable is a hard config error,
+      # never a silent fall-through to the open escape hatch below.
+      #
+      # See deploy/README.md §4.
+      # ⚠ THE TWO SECRETS IN THIS BLOCK ARE FILES, NOT ENVIRONMENT VARIABLES,
+      # AND THAT IS THE POINT (#351). The issuer, client id and redirect URL
+      # below are not secret and stay in .env; the client secret and the session
+      # key are, and an environment variable is readable by anything that can
+      # run `docker inspect` or read /proc/<pid>/environ — including any process
+      # that lands inside the container. MAILROOM_SESSION_KEY is the SOLE HMAC
+      # key for session cookies, so reading it is enough to mint a valid session
+      # for any user ULID, without touching the database or the login flow.
+      #
+      # Both files must EXIST before the first `docker compose up`. Leave them
+      # EMPTY if you are not using OIDC — empty resolves exactly as unset did.
+      #
+      # ⚠ ABSENT is not the same as empty, and it does NOT stop compose, which
+      # is what this said until it was measured (Docker 29.5.3 / Compose 5.1.4):
+      # `docker compose config` exits 0 and the daemon CREATES the missing path
+      # as a DIRECTORY, both on the host and at /run/secrets/<name>. The result
+      # is still fail-closed — resolveSecret's os.ReadFile returns "is a
+      # directory" and config.Load refuses to boot — but the error names the
+      # wrong problem, and you are left with a directory where the file goes.
+      # See deploy/README.md §2.
+      #
+      # ⚠ Upgrading from a deployment that had these in .env: move the values
+      # into the two files. The variables are no longer read, and leaving them
+      # in .env does not work — but it also cannot go unnoticed, because a set
+      # OIDC block with an empty client secret or session key is a hard config
+      # error at boot ("OIDC is partially configured"), never a fall-through.
+      MAILROOM_OIDC_ISSUER: ${MAILROOM_OIDC_ISSUER:-}
+      MAILROOM_OIDC_CLIENT_ID: ${MAILROOM_OIDC_CLIENT_ID:-}
+      MAILROOM_OIDC_CLIENT_SECRET_FILE: /run/secrets/mailroom_oidc_client_secret
+      MAILROOM_OIDC_REDIRECT_URL: ${MAILROOM_OIDC_REDIRECT_URL:-}
+      MAILROOM_SESSION_KEY_FILE: /run/secrets/mailroom_session_key
+
+      # --- Connect Gmail / Outlook by signing in (OAuth, optional) ---------
+      # Your OWN OAuth client at each provider (deploy/README.md, "Signing in
+      # to Gmail and Outlook"). A provider is offered only when BOTH its id
+      # and secret are set; one without the other refuses to boot. Leave all
+      # of these empty to keep the feature off.
+      #
+      # The secrets are read from a FILE: point the _FILE variable at a path
+      # inside the container (mount it with a `secrets:` entry in a
+      # compose.override.yml). These are deliberately NOT in the secrets: list
+      # above, because a listed secret file that does not exist stops the
+      # whole stack — and most instances will never configure OAuth.
+      MAILROOM_OAUTH_GOOGLE_CLIENT_ID: ${MAILROOM_OAUTH_GOOGLE_CLIENT_ID:-}
+      MAILROOM_OAUTH_GOOGLE_CLIENT_SECRET_FILE: ${MAILROOM_OAUTH_GOOGLE_CLIENT_SECRET_FILE:-}
+      MAILROOM_OAUTH_MICROSOFT_CLIENT_ID: ${MAILROOM_OAUTH_MICROSOFT_CLIENT_ID:-}
+      MAILROOM_OAUTH_MICROSOFT_CLIENT_SECRET_FILE: ${MAILROOM_OAUTH_MICROSOFT_CLIENT_SECRET_FILE:-}
+      MAILROOM_OAUTH_MICROSOFT_TENANT: ${MAILROOM_OAUTH_MICROSOFT_TENANT:-}
+      # The origin browsers reach this server at; the callback URLs are built
+      # from it. Defaults to the origin of MAILROOM_OIDC_REDIRECT_URL.
+      MAILROOM_PUBLIC_URL: ${MAILROOM_PUBLIC_URL:-}
+
+      # --- Dev-auth: the INSECURE escape hatch ------------------------------
+      #
+      #   ┌──────────────────────────────────────────────────────────────────┐
+      #   │  Setting MAILROOM_DEV_AUTH_SUBJECT turns authentication OFF.     │
+      #   │  Not "weakens" — OFF. There is no login, no session and no       │
+      #   │  cookie: every request that reaches this port, from anyone, is   │
+      #   │  the operator, and reads and writes their mail. The server logs  │
+      #   │  a banner saying so for as long as it runs, and the sign-in page │
+      #   │  says so too.                                                    │
+      #   │                                                                  │
+      #   │  It exists ONLY to exercise the stack before you have a provider │
+      #   │  wired up. THE MOMENT REAL MAIL IS ON THIS INSTANCE, USE OIDC.   │
+      #   │  Never leave it on anything an untrusted network can reach.      │
+      #   └──────────────────────────────────────────────────────────────────┘
+      #
+      # Honored only when the OIDC block above is ENTIRELY absent.
+      MAILROOM_DEV_AUTH_SUBJECT: ${MAILROOM_DEV_AUTH_SUBJECT:-}
+      MAILROOM_DEV_AUTH_EMAIL: ${MAILROOM_DEV_AUTH_EMAIL:-}
+      # Required alongside the subject since #351 — the subject alone no longer
+      # selects dev-auth, because "OIDC is absent" is the default state of an
+      # unedited config rather than a decision to run without authentication.
+      MAILROOM_DEV_AUTH_I_UNDERSTAND: ${MAILROOM_DEV_AUTH_I_UNDERSTAND:-}
+
+      # --- Operator ------------------------------------------------------
+      # OPTIONAL: an identity provisioned (get-or-create) at BOOT so the
+      # declared accounts file has an owner. Under dev-auth the dev-auth
+      # subject/email above take this role instead.
+      #
+      # NOT a login allowlist. Under OIDC the access gate is your provider's
+      # application binding plus the mailroom-admin group claim — any identity
+      # that clears it is auto-provisioned on login regardless of this value.
+      # Getting the subject wrong is worse than leaving it unset — see
+      # deploy/README.md §4 for what actually happens and how to find the
+      # right value instead of guessing.
+      MAILROOM_OPERATOR_SUBJECT: ${MAILROOM_OPERATOR_SUBJECT:-}
+      MAILROOM_OPERATOR_EMAIL: ${MAILROOM_OPERATOR_EMAIL:-}
+
+      # --- Mail ----------------------------------------------------------
+      # Declared IMAP/SMTP accounts, reconciled idempotently at boot (a name
+      # that already exists is left alone). A file of `{"accounts": []}` means
+      # "none" — accounts can also be added later with /mailroom-admin.
+      MAILROOM_ACCOUNTS_FILE: /run/secrets/mailroom_accounts
+      # Widens the egress guard on every account connection (validation, IMAP
+      # sync, SMTP submission) to permit a private/loopback/link-local IMAP or
+      # SMTP host (#527, #625). Off by default — see deploy/.env.example
+      # before turning it on.
+      MAILROOM_ALLOW_PRIVATE_ACCOUNT_HOSTS: ${MAILROOM_ALLOW_PRIVATE_ACCOUNT_HOSTS:-}
+      MAILROOM_SYNC_INTERVAL: ${MAILROOM_SYNC_INTERVAL:-5m}
+      # The reverse proxies whose X-Forwarded-For names a signed-in device's
+      # address (#937). Empty trusts none. See deploy/.env.example.
+      MAILROOM_TRUSTED_PROXIES: ${MAILROOM_TRUSTED_PROXIES:-}
+      # Advanced sync tuning (mailroom#103). Safe defaults; rarely need
+      # changing. See deploy/.env.example for what each one does.
+      MAILROOM_SYNC_MAX_BACKOFF: ${MAILROOM_SYNC_MAX_BACKOFF:-}
+      MAILROOM_IMAP_IDLE: ${MAILROOM_IMAP_IDLE:-}
+      MAILROOM_IMAP_IDLE_TIMEOUT: ${MAILROOM_IMAP_IDLE_TIMEOUT:-}
+      MAILROOM_IMAP_POOL: ${MAILROOM_IMAP_POOL:-}
+      MAILROOM_IMAP_POOL_IDLE_TIMEOUT: ${MAILROOM_IMAP_POOL_IDLE_TIMEOUT:-}
+      # UID SEARCHes per minute for ONE account (#638). One per mailbox that
+      # comes up for reconciliation, so an account with hundreds of folders can
+      # ask for hundreds in a pass; Migadu answers at most 60/min per ACCOUNT
+      # and refuses the rest. The default is 30 rather than 60 because the same
+      # budget also pays for sending your changes back to the server and for
+      # your other mail clients. "0" disables pacing. See deploy/.env.example.
+      MAILROOM_IMAP_SEARCH_RATE: ${MAILROOM_IMAP_SEARCH_RATE:-30}
+      # Gmail's daily download budget (MB) and label-sweep interval (#52).
+      # Empty = the built-in defaults (2000, 6h). See deploy/.env.example.
+      MAILROOM_GMAIL_DAILY_DOWNLOAD_MB: ${MAILROOM_GMAIL_DAILY_DOWNLOAD_MB:-}
+      MAILROOM_GMAIL_LABEL_SWEEP_INTERVAL: ${MAILROOM_GMAIL_LABEL_SWEEP_INTERVAL:-}
+      # Flag sweep for servers without CONDSTORE (ADR-046 §12). Empty = the
+      # built-in defaults (5m, 500, 6h). See deploy/.env.example.
+      MAILROOM_FLAG_SWEEP_INTERVAL: ${MAILROOM_FLAG_SWEEP_INTERVAL:-}
+      MAILROOM_FLAG_SWEEP_WINDOW: ${MAILROOM_FLAG_SWEEP_WINDOW:-}
+      MAILROOM_FLAG_SWEEP_FULL_INTERVAL: ${MAILROOM_FLAG_SWEEP_FULL_INTERVAL:-}
+      # Remote images proxied through the server rather than fetched by the
+      # reader's browser (ADR-026). Default ON. See deploy/.env.example.
+      MAILROOM_IMAGE_PROXY: ${MAILROOM_IMAGE_PROXY:-}
+      # With the proxy on, images from senders you allow are also fetched when
+      # mail ARRIVES (#922), so signed links that expire still show weeks
+      # later, and kept while the message is kept. Default ON; the window
+      # (empty = 168h) stops a first sync of old mail fetching all of it, and
+      # the per-user ceiling on kept images (empty = 16 GiB, negative = no
+      # limit) pauses the prefetch without ever deleting what is kept.
+      # See deploy/.env.example.
+      MAILROOM_IMAGE_PROXY_PREFETCH: ${MAILROOM_IMAGE_PROXY_PREFETCH:-}
+      MAILROOM_IMAGE_PROXY_PREFETCH_MAX_AGE: ${MAILROOM_IMAGE_PROXY_PREFETCH_MAX_AGE:-}
+      MAILROOM_IMAGE_PROXY_PREFETCH_MAX_BYTES: ${MAILROOM_IMAGE_PROXY_PREFETCH_MAX_BYTES:-}
+      MAILROOM_BLOB_ROOT: /var/lib/mailroom/blobs
+      MAILROOM_SEARCH_ROOT: /var/lib/mailroom/search
+      # How often the indexer drains the change log when idle, and an
+      # opt-out that disables the index and search API entirely. See
+      # deploy/.env.example.
+      MAILROOM_INDEX_INTERVAL: ${MAILROOM_INDEX_INTERVAL:-}
+      MAILROOM_SEARCH_DISABLED: ${MAILROOM_SEARCH_DISABLED:-}
+      # How often each mailbox's provenance is reconciled against the server's
+      # live UID set (#86) — i.e. how quickly mail you deleted in another IMAP
+      # client disappears here. "0" disables the reaper, at the cost of that
+      # mail never leaving its Mailroom folder at all.
+      MAILROOM_REAP_INTERVAL: ${MAILROOM_REAP_INTERVAL:-1h}
+      # ⚠ DESTRUCTIVE DEFAULTS (ADR-009) — read deploy/.env.example before
+      # changing these. Trash dwell time, the sweep that hard-deletes past
+      # it, and how far back change-log history is kept before it is
+      # compacted away.
+      MAILROOM_TRASH_RETENTION: ${MAILROOM_TRASH_RETENTION:-}
+      MAILROOM_PURGE_INTERVAL: ${MAILROOM_PURGE_INTERVAL:-}
+      MAILROOM_CHANGE_LOG_RETENTION: ${MAILROOM_CHANGE_LOG_RETENTION:-}
+
+      # --- Public key publication (WKD, #48) --------------------------------
+      # The mail domain whose keys this instance publishes. UNSET DISABLES IT,
+      # which is the right default: the direct method carries no domain in the
+      # request path, so a server that guessed would answer for domains it has
+      # no business answering for.
+      #
+      # ⚠ Setting this is HALF the job. The other half is DNS you own, and
+      # getting it half-right is worse than not doing it: clients MUST try
+      # `openpgpkey.<domain>` FIRST, so a subdomain that exists but does not
+      # serve keys correctly breaks EVERY lookup — including the ones the
+      # direct method would have answered. Absent or fully correct.
+      MAILROOM_WKD_DOMAIN: ${MAILROOM_WKD_DOMAIN:-}
+
+      # Where the crypto process listens.
+      #
+      # ⚠ SETTING THIS TURNS ON OUTGOING SIGNING (#47 increment 5). Any identity
+      # with a bound PGP key now has its mail signed at SUBMIT time, and the
+      # stored message IS the signed message — the Sent copy, the blob and the
+      # bytes the recipient received are one object. An identity with no bound
+      # key is unaffected and its mail goes out exactly as before.
+      #
+      # ⚠ The consequence to know before setting it: while the crypto process is
+      # down, a user WITH a bound key cannot send. There is deliberately no
+      # fallback (ADR-024) — signing in the app would be the boundary deleting
+      # itself under load — so the send fails loudly instead of producing mail
+      # carrying a signature nobody can verify. Users without keys are unaffected.
+      #
+      # It is also what `mailroom-admin pgp-*` talks to, which is how a key comes
+      # to exist at all.
+      MAILROOM_PGP_SOCKET: /run/mailroom-crypto/crypto.sock
+
+      # --- Attachment scanning (ADR-027, #394) ------------------------------
+      # The sealed clamd sidecar above, reached over its socket. Unset this and
+      # attachments are never scanned: rows stay 'unscanned', which the
+      # attachment report counts as its own state rather than folding into
+      # "clean".
+      #
+      # ⚠ THE CONSEQUENCE TO KNOW BEFORE SETTING IT — and it is the same shape
+      # as the crypto socket above, one line larger. Scanning is FAIL-CLOSED: if
+      # clamd does not answer, sync PAUSES for every account. Mail is left on the
+      # provider, cursors are withheld, and the expunge reaper is skipped, so
+      # nothing is lost and the next pass picks it all up. But mail stops
+      # arriving until the scanner is back, and account health says so.
+      #
+      # That is deliberate (ADR-027 §4c): the alternative is a verdict column
+      # that says "checked" about mail nothing checked. Note the asymmetry with
+      # `depends_on`, which is deliberately absent — a per-ingest refusal is
+      # recoverable, a container that will not start is not.
+      #
+      # ⚠ A COLD START PAUSES SYNC BRIEFLY, BUT NOT FOR THE REASON THE FIRST
+      # DRAFT GAVE. It said clamav-signatures must download ~300 MB "before
+      # clamd can answer anything". Measured on a real first deploy:
+      # the clamav/clamav image SHIPS a signature database
+      # (main.cvd 63, daily.cvd 28108), clamd loaded it and was serving about
+      # 70 seconds after container start, and freshclam only fetched an
+      # incremental update. The pause is that ~70 s of loading, not a download.
+      #
+      # The named volume below still matters for the reason §10c gives — it
+      # stops LATER recreates re-fetching — but "the first sync waits for a
+      # 300 MB download" was wrong about this image.
+      MAILROOM_CLAMD_SOCKET: /run/clamav/clamd.sock
+      # Largest attachment sent to the scanner; must match the daemon's own
+      # StreamMaxLength (clamd.conf below). See deploy/.env.example.
+      MAILROOM_CLAMD_MAX_BYTES: ${MAILROOM_CLAMD_MAX_BYTES:-}
+
+      # --- Sender authentication (#414, #625) -------------------------------
+      # Which Authentication-Results authserv-id(s) to believe: your mail
+      # provider's. Both the reading pane's sender-authentication notice and
+      # the self-spoof warning read only headers stamped with one of these.
+      # Empty (the default) trusts none: the notice then shows nothing at all,
+      # rather than believing a header the sender could have written. See
+      # deploy/.env.example for how to find the value.
+      MAILROOM_AUTHSERV_IDS: ${MAILROOM_AUTHSERV_IDS:-}
+
+      # --- Local DKIM check (#776, ADR-036) ---------------------------------
+      # Default on: mail that arrives with no trusted Authentication-Results
+      # has its DKIM signatures verified at ingest. 0/false/no/off disables.
+      MAILROOM_LOCAL_DKIM: ${MAILROOM_LOCAL_DKIM:-}
+
+      # --- Ingest-only mode (ADR-028 §2, #521) ------------------------------
+      # Instance-wide writeback kill switch: with this on, nothing Mailroom
+      # does is ever written back to the IMAP server, regardless of any
+      # per-account setting. See deploy/.env.example.
+      MAILROOM_WRITEBACK_DISABLED: ${MAILROOM_WRITEBACK_DISABLED:-}
+
+      # --- Send --------------------------------------------------------------
+      MAILROOM_UNDO_SEND_WINDOW: ${MAILROOM_UNDO_SEND_WINDOW:-}
+
+      # --- Rate limits (spec §10) ---------------------------------------------
+      # Per-user API limit, and the separate budget for the anonymous WKD key
+      # surface (#264). See deploy/.env.example for the defaults.
+      MAILROOM_RATE_LIMIT_RPS: ${MAILROOM_RATE_LIMIT_RPS:-}
+      MAILROOM_RATE_LIMIT_BURST: ${MAILROOM_RATE_LIMIT_BURST:-}
+      MAILROOM_WKD_RATE_LIMIT_RPS: ${MAILROOM_WKD_RATE_LIMIT_RPS:-}
+      MAILROOM_WKD_RATE_LIMIT_BURST: ${MAILROOM_WKD_RATE_LIMIT_BURST:-}
+    volumes:
+      # The crypto process's socket. Read-write because connecting to a Unix
+      # socket requires write permission on it. Both containers run as the same
+      # uid, which is what makes the 0600 socket reachable at all — the access
+      # control here is the filesystem's, not the protocol's.
+      - crypto-socket:/run/mailroom-crypto
+      # The scanner's socket (ADR-027, #394).
+      #
+      # ⚠ IT WAS ON THE `crypto` SERVICE, NOT THIS ONE. The container that scans
+      # had no socket at all and the container that had one never scans, so the
+      # scanner could never be reached — and with fail-closed ingest that is not
+      # a quiet degradation, it is mail stopping at the first pass after deploy.
+      #
+      # ⚠ `:ro` IS CORRECT HERE, AND THE COMMENT FOUR LINES UP IS WHY THAT NEEDED
+      # CHECKING. It says a socket must be mounted read-write "because connecting
+      # to a Unix socket requires write permission on it". Measured against a
+      # 0666 socket in a named volume: a `:ro` mount dials fine —
+      # the write permission that matters is the socket INODE's mode, which a
+      # read-only mount does not change. So this stays read-only, which is the
+      # tighter grant and the honest one; nothing here ever writes to that
+      # directory. The crypto mount above is left alone: it is 0600 and
+      # same-uid, a case this probe did not cover, and loosening a working
+      # security boundary on an untested inference is exactly the wrong trade.
+      #
+      # ⚠ NO depends_on on clamd: blocking the app on a multi-minute signature
+      # download would make a broken scanner take the whole server down. The
+      # per-ingest refusal is the recoverable failure (§10c).
+      - clamd-socket:/run/clamav:ro
+      # Encrypted mail blobs (ADR-004). A real volume, not the container's
+      # read-only root filesystem: this is the one thing the server writes to
+      # disk. The image pre-creates the directory owned by the runtime user so
+      # a fresh volume inherits that ownership (see the Dockerfile).
+      - blobs:/var/lib/mailroom/blobs
+      # The Tantivy search index (spec §7). It MUST be a volume for the same
+      # reason blobs must: the root filesystem is read_only, so without this the
+      # indexer cannot create its per-user directory and search silently
+      # degrades to "disabled" on a server that otherwise looks healthy.
+      #
+      # It is a CACHE — rebuildable from Postgres, and deliberately NOT in the
+      # backup set. It does hold the plaintext of every message, though, so the
+      # host volume wants at-rest encryption (Tantivy has none of its own).
+      - search:/var/lib/mailroom/search
+    secrets:
+      - mailroom_master_key
+      - mailroom_app_password
+      - mailroom_accounts
+      - mailroom_session_key
+      - mailroom_oidc_client_secret
+    ports:
+      - "${MAILROOM_HTTP_BIND:-127.0.0.1}:${MAILROOM_HTTP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      role-bootstrap-app:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # A small corpus needs only a fraction of this. Like postgres
+    # above, this scales with the mailbox(es) synced (#529/#545), which is
+    # why it is env-overridable rather than a literal.
+    mem_limit: ${MAILROOM_SERVER_MEM_LIMIT:-1g}
+    # ⚠ Docker's default json-file driver NEVER rotates (#351). The sync loop
+    # logs two INFO lines per user every 30s even when nothing is due, and
+    # these logs share a filesystem with pgdata, blobs and the search index —
+    # so unbounded logs eventually stop Postgres, which PANICs when full.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+# ⚠ THESE FILES MUST STAY READABLE BY "OTHER". DO NOT `chmod 600` THEM.
+# (Forgejo #312 — measured on a live instance, not predicted.)
+#
+# Compose's non-swarm `file:` secrets are a plain BIND MOUNT: the file appears
+# inside the container with its host uid and mode unchanged. The containers run
+# as uid 100 / gid 101; these files are owned by the host account that deploys
+# them. So the container reads them SOLELY through the world-read bit, and
+# `chmod 600` makes the master key and the PGP root unreadable to the app and
+# crypto processes — a fail-closed outage that arrives at the next restart
+# rather than at the moment of the change. Measured both ways: 0644 reads, 0600
+# is `Permission denied`.
+#
+# The `uid:`/`gid:`/`mode:` options on a secret do NOT help — they are
+# swarm-only and are silently ignored here.
+#
+# Chowning to the container's uid is a trap too, and worth naming because it is
+# the obvious next idea: those ids belong to unrelated system accounts on a
+# normal host (uid 100 and gid 101 are commonly `dhcpcd` and a group that has
+# real members), so it hands the crypto roots to a group instead of protecting
+# them.
+#
+# WHAT TO DO INSTEAD: protect the DIRECTORY. `chmod 700 ./secrets` denies every
+# other local account traversal while the Docker daemon, which is root, mounts
+# through it regardless. That is the control; the file modes are not.
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  mailroom_owner_password:
+    file: ./secrets/mailroom_owner_password.txt
+  mailroom_app_password:
+    file: ./secrets/mailroom_app_password.txt
+  mailroom_master_key:
+    file: ./secrets/mailroom_master_key.txt
+  # The crypto process's INDEPENDENT root secret (ADR-024). A second root, not a
+  # second copy of the first: it is mounted into the `crypto` service and
+  # nowhere else, and it must be escrowed separately (docs/key-escrow.md).
+  mailroom_pgp_root_key:
+    file: ./secrets/mailroom_pgp_root_key.txt
+  # The declared IMAP/SMTP accounts. A secret rather than environment
+  # variables because it carries mail passwords: it lands at
+  # /run/secrets/mailroom_accounts and never shows up in `docker inspect` or the
+  # process environment. deploy/README.md step 2 creates it (`{"accounts": []}`
+  # if you have none yet).
+  #
+  # ⚠ This said "mode 0444 inside the container" until #312. It is not: the file
+  # arrives with the HOST's mode and owner, verbatim — 0644 owned by the
+  # deploying account, on the instance it was observed on. Compose does not
+  # normalise it. See the note above the `secrets:` key.
+  mailroom_accounts:
+    file: ./secrets/accounts.json
+  # The HMAC key for session cookies. A file rather than an environment variable
+  # because it is the ONLY thing standing between reading the container's
+  # environment and minting a session for any user ULID (#351) — no database
+  # access and no login required. Rotating it invalidates every live session,
+  # which is the intended emergency response and nothing worse than a re-login.
+  #
+  # Must exist even with no OIDC (a missing secret file stops the whole stack);
+  # an EMPTY file resolves exactly as an unset variable did, so the dev-auth
+  # path is unaffected.
+  mailroom_session_key:
+    file: ./secrets/mailroom_session_key.txt
+  # The OIDC client secret. Same reasoning, and it belongs beside the session
+  # key rather than in .env with the issuer and client id, which are not secret.
+  mailroom_oidc_client_secret:
+    file: ./secrets/mailroom_oidc_client_secret.txt
+
+# ---------------------------------------------------------------------------
+# NETWORKS (Forgejo #385)
+#
+# Until this block existed there was no network configuration at all, so every
+# container sat on Compose's default bridge with UNRESTRICTED OUTBOUND INTERNET
+# ACCESS. That was worst for `crypto`, which is hardened in every other respect
+# — read-only root, all capabilities dropped, no-new-privileges, no published
+# port, reachable only over a unix socket — while holding both halves of the
+# PGP secret: the root key (a Docker secret) and database access to the sealed
+# private keys in app.user_keys. Root plus sealed keys is everything, and
+# ADR-024's whole premise is that this process is a separate trust domain that
+# survives an RCE in the server. An exfiltration path off the host is precisely
+# what that boundary exists to deny.
+#
+# ⚠ `network_mode: none` IS THE WRONG TOOL HERE, though it is the obvious one.
+# crypto reads the sealed keys from Postgres (MAILROOM_DATABASE_URL), so it
+# genuinely needs a network — just not one with a way out. `internal: true` is
+# that: Docker attaches no gateway to the bridge, so containers on it resolve
+# and reach each other normally and have no route off the host.
+#
+# ⚠ THIS NARROWS THE BLAST RADIUS; IT DOES NOT REMOVE IT. `mailroom` must reach
+# the internet — IMAP and SMTP to the provider, the OIDC issuer, the image
+# proxy's fetches, web push, WKD lookups — so it sits on BOTH networks and is
+# still able to talk out. The claim being made here is narrower and worth
+# stating exactly: postgres and crypto have no business reaching the internet,
+# and after this they cannot.
+#
+# Image pulls are unaffected: those are performed by the host's Docker daemon,
+# not from inside a container's network namespace.
+networks:
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  pgdata:
+  # The encrypted mail-blob store (spec §9/ADR-004): ciphertext only, never
+  # plaintext, and the only thing the otherwise read-only server writes.
+  blobs:
+  # The per-user Tantivy indexes (spec §7). A disposable cache: never back it
+  # up (a restored-but-stale index is worse than no index — it is rebuilt from
+  # Postgres on demand), but DO put it on an at-rest-encrypted volume, because
+  # it holds the plaintext of every message.
+  search:
+  # Carries ONE file: the crypto process's Unix socket (ADR-024). Never back it
+  # up and never bind-mount it to the host — it is a rendezvous point, not
+  # storage, and it holds nothing across a restart.
+  # The ClamAV signature database, ~300 MB. ⚠ NAMED, not anonymous (ADR-027
+  # §10c): the CDN rate-limits repeated full downloads per IP, so an anonymous
+  # volume means every `up` re-downloads and can lock freshclam out for hours —
+  # producing a scanner with stale signatures that still reports clean.
+  clamav-db:
+  # The socket clamd listens on. Its only route in: the scanner has no network.
+  clamd-socket:
+  crypto-socket:

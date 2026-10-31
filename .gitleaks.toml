@@ -1,0 +1,67 @@
+# gitleaks configuration.
+#
+# We keep the full default ruleset and add a DELIBERATELY NARROW allowlist for a
+# handful of throwaway credentials that only ever configure the ephemeral e2e
+# harnesses (a mock OIDC provider and a local Dovecot brought up and torn down
+# inside a single test run). No production or operator secret is committed to
+# this repo (see CLAUDE.md portability rule) — these are fixed test constants a
+# secret scanner flags on entropy/shape alone.
+#
+# The allowlist matches specific literal values, NOT whole files, so a real
+# secret accidentally added to any script would still be caught. Verified by
+# probe, not by inspection: planting `sk_live_…` two lines below the RFC vectors
+# below is still reported, while the vectors themselves are not.
+#
+# ⚠ A scanner run from outside this repo may or may not honour this file, and
+# that is answerable: gitleaks finds 3 secrets with this allowlist disabled (a
+# hex test key in internal/pgpkeyd, the RFC vector below, and the historical
+# session key in scripts/gate-e2e.sh) and 1 with it enabled. If a future finding
+# contradicts that, re-run the comparison before assuming the config is at
+# fault.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Throwaway test-harness credentials (mock OIDC + local Dovecot); never production secrets."
+regexTarget = "match"
+regexes = [
+  # Historical fixed test session key in scripts/gate-e2e.sh (now generated at
+  # runtime via `openssl rand`; this literal remains only in git history).
+  '''0123456789abcdef0123456789abcdef''',
+  # mock-oauth2-server client secret — a constant shared with the mock provider's
+  # own JSON config, meaningful only to the disposable test container.
+  '''mailroom-secret''',
+
+  # RFC 8291 §5's published test vectors (Forgejo #104). internal/webpush's
+  # encrypt_test.go pins the Message Encryption for Web Push worked example so
+  # the implementation is checked against the RFC's own numbers rather than
+  # against itself — the derived content-encryption key and nonce ARE the test.
+  #
+  # rfcAuth is the one the scanner actually flags (generic-api-key, entropy
+  # 4.10, first committed 2026-07-13). The rest are listed because they are the
+  # same class — key material printed in a public standards document — and a
+  # future ruleset that flags one has no reason not to flag its neighbours.
+  #
+  # ⚠ THE COST WAS NEVER THE FINDING ITSELF. It is that a standing false
+  # positive teaches everyone to skim the report, and the next finding is real.
+  # Open since 2026-07-13.
+  #
+  # Anyone can read these in the RFC; they authenticate nothing.
+  '''BTBZMqHH6r4Tts7J_aSIgg''',                                                                    # rfcAuth
+  '''q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94''',                                               # rfcUAPrivate
+  '''yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw''',                                               # rfcASPrivate
+  '''BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4''',   # rfcUAPublic
+  '''BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8''',   # rfcASPublic
+  '''DGv6ra1nlYgDCS1FRnbzlw''',                                                                    # rfcSalt
+  '''oIhVW04MRdy2XN9CiKLxTg''',                                                                    # rfcCEK
+  '''4h_95klXJ5E_qnoN''',                                                                          # rfcNonce
+
+  # Three generic-api-key findings reported by #104 on 2026-10-13, each read at
+  # the commit it names (v1.81.1). Two are the admin tests' deliberately fake
+  # passwords, which exist so a test can assert the value never reaches output;
+  # the prefix is the marker. The third is not a value at all: a doc comment
+  # whose test name is followed by "internal/pgpkeyd" scored as a key on shape.
+  '''S3cret-Marker-[a-z]+''',
+  '''TestVerifyRootLogsNoKeyMaterial: internal/pgpkeyd''',
+]

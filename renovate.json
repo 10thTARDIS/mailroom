@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommitTypeAll(chore)"
+  ],
+  "schedule": ["before 6am on monday"],
+  "timezone": "America/Chicago",
+  "prConcurrentLimit": 5,
+  "labels": ["dependencies"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "go modules"
+    },
+    {
+      "matchManagers": ["npm"],
+      "groupName": "web dependencies"
+    },
+    {
+      "description": "golangci-lint is pinned in .forgejo/workflows/ci.yml (see the comment there, and #315). It is the LINTER, so an upgrade can turn the tree red without a single line of ours changing — which is why it must arrive as its own PR that can be read, rather than grouped with unrelated Go modules or landing silently as @latest.",
+      "matchManagers": ["gomod", "custom.regex"],
+      "matchPackageNames": ["github.com/golangci/golangci-lint/v2"],
+      "groupName": "golangci-lint",
+      "labels": ["dependencies", "tooling"]
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Keep the pinned golangci-lint in the CI workflow up to date. It is installed with `go install ...@vX.Y.Z` rather than declared in go.mod, so no standard manager can see it — without this the pin would simply rot, which is the failure mode that replaces the one #315 fixed.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.forgejo/workflows/.+\\.yml$/"],
+      "matchStrings": [
+        "go install github\\.com/golangci/golangci-lint/v2/cmd/golangci-lint@(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "depNameTemplate": "github.com/golangci/golangci-lint/v2",
+      "datasourceTemplate": "go"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  }
+}

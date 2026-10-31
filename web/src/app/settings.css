@@ -1,0 +1,1073 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* THE SETTINGS PAGE (#374 increment 2). Loaded after desk.css, last of the four,
+   so it can lean on the shared component classes in styles.css (.sheet, .button,
+   .field, .menu-group, .remote-allow-list) and on the desk's idiom rather than
+   restating either.
+
+   NO NEW DESIGN TOKENS. tokens.css is the one inventory (#376) and the build
+   refuses a definition anywhere else; every colour below is an existing token,
+   which is also why both themes work with no second palette here.
+
+   THE IDIOM IS THE DESK'S, deliberately: words, not glyphs. A row heading is a
+   heading that happens to be a button (the same trick .desk-heading-button plays
+   and for the same reason — the whole heading is the target, and at rest it must
+   read as a heading rather than as a control), the state line is one muted line of
+   facts, and nothing prints a key legend. The shortcuts sheet is where keys are
+   written down. */
+
+/* ---- the page ----------------------------------------------------------- */
+
+/* Wider and taller than the ordinary .sheet: twelve rows, each with three lines
+   of chrome, do not fit in 640×70vh, and a settings page that scrolled in a
+   narrow column would hide the row a search just found. Still an OVERLAY — the
+   list underneath keeps its scroll position and its selection, so this is never a
+   full-screen cover. */
+.settings-page {
+  width: min(760px, calc(100vw - 32px));
+  max-height: 84vh;
+  top: 6vh;
+}
+
+.settings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The search field spans the page: it filters all twelve rows, and a control that
+   sat in a column would look like it belonged to the row beside it. */
+.settings-search {
+  padding: 12px 16px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-search .field {
+  margin-bottom: 8px;
+}
+
+.settings-search .text-input {
+  width: 100%;
+}
+
+.settings-rows {
+  padding: 4px 0 0;
+}
+
+/* ---- one row ------------------------------------------------------------ */
+
+.setting {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting:last-child {
+  border-bottom: 0;
+}
+
+/* An open row is marked on its leading edge rather than by a fill, so the row's
+   own facts keep the same background they had while it was closed — the state line
+   must not appear to change meaning when the row opens. */
+.setting.is-open {
+  background: var(--bg-sunken);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.setting-heading {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.setting-heading-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.setting-heading-button:hover .setting-name {
+  text-decoration: underline;
+}
+
+.setting-heading-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.setting-caret {
+  flex: 0 0 auto;
+  width: 10px;
+  font-size: 0.7143rem;
+  color: var(--fg-muted);
+}
+
+/* ---- the scope words and the state line --------------------------------- */
+
+/* Both sit under the heading and both are muted, but they are NOT the same line:
+   the scope says who a setting applies to and never changes, the state line says
+   what it currently is and changes constantly. Two lines, so a reader learns
+   which is which once. */
+.setting-scope,
+.setting-state {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  font-size: 0.8571rem;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+.setting-scope {
+  letter-spacing: 0.04em;
+}
+
+.setting-scope-word {
+  /* A dotted underline, because there is a sentence behind each word (its title).
+     Not a link colour: it does not navigate. */
+  border-bottom: 1px dotted var(--border-strong);
+  cursor: help;
+}
+
+.setting-sep {
+  color: var(--border-strong);
+}
+
+/* A fact that is a PROBLEM. A tone on top of words that already say so, never
+   instead of them. */
+.setting-fact.is-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ---- the body ----------------------------------------------------------- */
+
+.setting-body {
+  padding: 8px 0 4px 18px;
+}
+
+/* `hidden` on a collapsed row: belt and braces. The component renders no children
+   while collapsed, so this only matters for the frame itself — but a body that
+   could be reached by a find-in-page while its row is folded would be a second way
+   to see controls the user has not opened. */
+.setting-body[hidden] {
+  display: none;
+}
+
+.setting-more {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.setting-more-body {
+  margin-top: 8px;
+}
+
+/* The footer sentence under Appearance: the scope, spelled out in full. Quiet,
+   because it says the same thing every time it appears. */
+.setting-footer {
+  margin: 12px 0 0;
+  font-size: 0.8571rem;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+/* `changed` + its reset, inside the control's own legend. Small caps-ish and
+   muted: it is an annotation on the control, not a control of its own — the reset
+   beside it is the control. */
+.setting-changed {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: 8px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.setting-changed-word {
+  font-size: 0.7857rem;
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+/* ---- identities as a precedence ----------------------------------------- */
+
+.setting-group {
+  margin-top: 10px;
+}
+
+.setting-group-name {
+  margin: 0;
+  font-size: 0.8571rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* Numbered, because the order IS the content: this list says which address a
+   reply goes out as, and an unnumbered list of the same rows would read as a set. */
+.setting-precedence {
+  margin: 4px 0 0;
+  padding-left: 22px;
+}
+
+.setting-precedence-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.setting-precedence-address {
+  font-weight: 600;
+}
+
+/* A reason word that is a problem — a disabled identity cannot send at all. */
+.remote-allow-kind.is-warn {
+  color: var(--warn-fg);
+}
+
+/* ---- keys --------------------------------------------------------------- */
+
+/* Monospaced and never wrapped mid-group: a fingerprint exists to be compared
+   character by character against another copy, and a break inside a group of four
+   is how two people reading it aloud lose their place. */
+.setting-fingerprint {
+  font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.8571rem;
+  word-spacing: 2px;
+  /* Wraps BETWEEN groups (they are separated by spaces), never inside one. */
+  overflow-wrap: normal;
+}
+
+/* The management page (#796). Each key is a card: what it is, its facts, then
+   the verbs its state allows. Everything wraps at phone width. */
+.keys-page h4 {
+  margin: 14px 0 4px;
+  font-size: 1rem;
+}
+.setting-done:empty {
+  display: none;
+}
+.setting-done {
+  margin: 4px 0 8px;
+  font-weight: 600;
+}
+.own-key-list,
+.correspondent-key-list,
+.key-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.own-key,
+.correspondent-key {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.own-key p,
+.correspondent-key p {
+  margin: 2px 0;
+}
+.own-key-heading {
+  margin: 0 0 4px;
+  font-size: 0.9286rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.own-key-facts .is-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.key-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+.key-chips .remote-allow-kind {
+  overflow-wrap: anywhere;
+}
+.own-key-bind,
+.own-key-publish,
+.own-key-actions,
+.correspondent-key-import-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.own-key-bind .select {
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+.own-key-bind .field-label {
+  flex: 0 0 auto;
+}
+.own-key-publish .field-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.key-url {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.correspondent-key-name {
+  overflow-wrap: anywhere;
+}
+.correspondent-key-import {
+  margin-top: 12px;
+}
+.correspondent-key-import-row .text-input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+/* The key dialogs (generate, import, extend, back up, retire, revoke), in a
+   portal over the settings page (settings/keys/KeyDialog.tsx says why): the
+   backdrop and the sheet stack above the page, which is itself a z-index 12
+   sheet. */
+.key-portal .modal-backdrop {
+  z-index: 20;
+}
+.key-portal .sheet {
+  z-index: 21;
+}
+.key-dialog {
+  top: 6vh;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.key-dialog .field-label {
+  display: block;
+  margin: 10px 0 4px;
+}
+.key-dialog .text-input,
+.key-dialog .select,
+.key-dialog .import-key-text {
+  width: 100%;
+  box-sizing: border-box;
+}
+.key-fieldset {
+  margin: 10px 0 0;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.key-radio,
+.key-checkbox {
+  display: block;
+  margin: 4px 0;
+}
+.key-checkbox {
+  margin-top: 10px;
+}
+.key-revoke-fingerprint .setting-fingerprint {
+  display: block;
+}
+.key-revoke-submit[aria-disabled="true"],
+.key-replace-submit[aria-disabled="true"],
+.key-submit[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* v1.93 final scope (#812 #813 #815 #817 #818). A user ID is someone's text of
+   any length: one line, cut with an ellipsis, the whole value in the title. */
+.key-uid {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.key-uids {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  font-size: 0.9286rem;
+  color: var(--fg-muted);
+}
+.key-uids .is-revoked {
+  text-decoration: line-through;
+}
+.own-key-used,
+.own-key-replaced {
+  overflow-wrap: anywhere;
+}
+.key-not-listed {
+  overflow-wrap: anywhere;
+}
+.key-date-result,
+.key-date-utc {
+  margin: 4px 0 0;
+}
+.key-date-input {
+  max-width: 100%;
+}
+.key-replace-stolen {
+  margin-top: 8px;
+}
+.key-history {
+  margin: 12px 0 0;
+}
+.key-history-heading {
+  margin: 0;
+  font-size: 0.9286rem;
+}
+.key-history-toggle {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.key-history-body {
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+.key-events {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+.key-events li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+.key-refresh-result:empty {
+  display: none;
+}
+.correspondent-key .key-change {
+  margin-top: 8px;
+}
+
+/* ---- accounts (#374 increment 3) ---------------------------------------- */
+
+/* The list of accounts. Rows rather than a table: three of the four things on a
+   row are optional (the status word and the age are omitted until measured), and a
+   table with holes in it reads as missing data rather than as data not yet taken. */
+.setting-account-list {
+  margin: 4px 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.setting-account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+/* The whole name-and-dot pair is one target, so the dot is not a 8px click zone
+   beside the thing you meant to press. */
+.setting-account-open {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.setting-account-name {
+  font-weight: 600;
+}
+
+.setting-back {
+  display: inline-block;
+  margin-bottom: 6px;
+}
+
+/* The colour picker. The swatches are BUTTONS with names in their labels, so this
+   is only their appearance — nothing here is the carrier of a fact. */
+.setting-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.setting-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* The current one is marked by a RING, not by the colour it already is: a swatch
+   cannot indicate its own selectedness with its own fill. */
+.setting-swatch.is-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.setting-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The dot beside the current value, so the hex has something to mean. */
+.setting-swatch-current {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  vertical-align: baseline;
+}
+
+.setting-color-input {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.setting-folder-name {
+  font-weight: 600;
+}
+
+/* The credentials form, inside the Server fieldset rather than in a dialog: it is
+   about the fields printed above it and a modal would cover them. */
+.setting-subform {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+/* ---- areas and drawers (#374 increment 3) -------------------------------- */
+
+/* One card per area, boxed — because a card holds five controls and a refusal
+   banner, and without an edge it is impossible to tell which area a control
+   belongs to. */
+.setting-area-card {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+/* The card a deep link named (`#/settings/areas/<id>`). The same leading-edge mark
+   an open row carries, for the same reason: it says "this one" without changing the
+   card's background, so nothing on it appears to mean something different. */
+.setting-area-card.is-current {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.setting-area-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.setting-area-name {
+  font-weight: 600;
+}
+
+/* The tabs and the labels are two rows of checkboxes, wrapped: five tabs fit on a
+   line and a label list does not, and forcing either into a column would make the
+   commonest edit a scroll. */
+.setting-feed-tabs,
+.setting-feed-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 2px 0 4px;
+}
+
+/* `sweep off` — a fact that makes every period beside it conditional, so it takes
+   the same warn tone the state line's version does. */
+.setting-sweep-off {
+  color: var(--warn-fg);
+}
+
+.setting-new-area {
+  margin: 10px 0;
+}
+
+/* ---- numbers ------------------------------------------------------------ */
+
+/* Day counts and the threshold are two or four characters. A full-width field for
+   `30` invites the reader to look for what else belongs in it. */
+.setting-days-input,
+.setting-line-input {
+  width: 6em;
+}
+
+/* ⚠ `.select` IS width:100% BY DEFAULT (styles.css says so). Dropped into these
+   inline rows it would push its neighbours off the line. */
+.setting-area-card .select,
+.setting-body .field-inline .select,
+.remote-allow .select {
+  width: auto;
+  min-width: 10em;
+}
+
+/* ---- narrow screens ----------------------------------------------------- */
+
+/* The page fills the screen on a phone rather than floating: at this width a
+   centred card with margins is mostly margin, and the rows are already one column. */
+@media (max-width: 560px) {
+  .settings-page {
+    top: 0;
+    left: 0;
+    transform: none;
+    width: 100vw;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* ---- text size and rows (#514) ------------------------------------------ */
+
+/* THE SLIDER IS A TRACK WITH FIVE MARKS AND NO THUMB TO DRAG, and that is the
+   honest drawing of what it is: a five-stop range whose stops are named words
+   sitting directly underneath it. It carries the keyboard (one tab stop,
+   arrows, Home/End) and the announcement (`aria-valuetext` says "Large", not
+   "4"); the words below carry the pointer.
+
+   NOTHING HERE IS FIXED-SIZE. The whole control is in `em`, so it grows with
+   the setting it sets — which is the clearest possible confirmation that the
+   click took: the control you just used is now bigger. */
+.text-size-slider {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  height: 1.6em;
+  padding: 0 0.4em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  cursor: pointer;
+}
+
+.text-size-slider:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* One mark per step, evenly spaced, growing left to right so the direction of
+   the range is visible without reading the words — the same fact the words say,
+   in a second channel. */
+.text-size-tick {
+  flex: 1 1 0;
+  height: 0.25em;
+  margin: 0 0.15em;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.text-size-tick:nth-child(2) { height: 0.35em; }
+.text-size-tick:nth-child(3) { height: 0.45em; }
+.text-size-tick:nth-child(4) { height: 0.55em; }
+.text-size-tick:nth-child(5) { height: 0.65em; }
+
+.text-size-tick.is-current {
+  background: var(--accent);
+}
+
+.text-size-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Each word is drawn at the size it SETS. The control is the specimen: you can
+   see what "Largest" means before choosing it, which is the one thing a row of
+   equal-sized words cannot tell you. Capped well below the biggest step so the
+   five buttons still fit a line on a settings sheet. */
+.text-size-step[data-size="xs"] { font-size: 0.8571rem; }
+.text-size-step[data-size="s"] { font-size: 0.9286rem; }
+.text-size-step[data-size="m"] { font-size: 1rem; }
+.text-size-step[data-size="l"] { font-size: 1.1429rem; }
+.text-size-step[data-size="xl"] { font-size: 1.2857rem; }
+
+/* The chosen one. `--bg-selected` with `--fg` on it rather than the accent fill
+   a primary button uses: that pair is one tokens.css already promises and
+   checks in both themes (@contrast fg/bg-selected), and it is the same "this is
+   the current one" colour every selected row in this app already uses. The
+   border is the second channel — never colour alone. */
+.text-size-step.is-current {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Two options that are one choice, so they are drawn as one object. Still a
+   radio group underneath (AppearanceRow.tsx says why); this is only the look. */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.segmented-option {
+  padding: 0.2em 0.6em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.segmented-option:has(input:checked) {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Quiet hours (#59): two time fields side by side where there is room, the
+   days as a wrapping row of checkboxes, everything stacking at phone width. */
+.quiet-hours fieldset { border: 0; margin: 0; padding: 0; }
+.quiet-hours-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.quiet-hours-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 8px 0;
+}
+.quiet-hours-days legend { width: 100%; padding: 0; margin-bottom: 2px; }
+
+/* Senders (#59) and the clean-up list (#53): one sender per line, name then
+   address then what applies, with its buttons at the end — wrapping rather
+   than overlapping when the line is narrow. */
+.senders-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.senders-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.senders-name { font-weight: 600; overflow-wrap: anywhere; }
+.senders-address,
+.senders-where { color: var(--fg-muted); overflow-wrap: anywhere; }
+.senders-list > li > .button:first-of-type { margin-left: auto; }
+
+/* Clean up (#53): the three choices on one wrapping line where they fit;
+   each row's actions on their own wrapping line under its facts, and the
+   confirm, the block form and the unsubscribe panel full width below. */
+.cleanup-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+}
+.cleanup-controls fieldset { border: 0; margin: 0; padding: 0; }
+.cleanup-controls legend { padding: 0; margin-bottom: 2px; }
+.cleanup-item { flex-direction: row; }
+.cleanup-facts { flex-basis: 100%; }
+.cleanup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-basis: 100%;
+}
+.cleanup-unsubscribe,
+.cleanup-block-form,
+.cleanup-item > .sender-bulk { flex-basis: 100%; }
+
+/* ---- out of office (#50) ------------------------------------------------- */
+
+.oof-account {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.oof-account h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.oof-account textarea,
+.oof-account input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.oof-dates {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.oof-dates .menu-note {
+  grid-column: 1 / -1;
+}
+
+/* Drift and errors are a warning, in the warn tone: never colour alone, the
+   sentence says what happened. */
+.oof-status.warn,
+.oof-error {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  padding: 4px 6px;
+  border-radius: 3px;
+}
+
+/* ---- API keys, approvals and AI-tool setup (#49) ------------------------- */
+
+.apikeys-page h4 {
+  margin: 14px 0 4px;
+  font-size: 1rem;
+}
+.apikeys-page h5,
+.apikey-token h4 {
+  margin: 12px 0 4px;
+  font-size: 0.9286rem;
+}
+.apikey-hint,
+.apikey-scope-id {
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+.apikey-scope-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.apikey-revoked {
+  margin: 10px 0;
+}
+.apikey-revoked summary {
+  cursor: pointer;
+}
+
+/* Agent- and mail-written text: its own bidi paragraph (Untrusted.tsx), and
+   allowed to break anywhere so a 200-character subject or address cannot push
+   a phone-width card sideways. */
+.untrusted-text {
+  unicode-bidi: isolate;
+  overflow-wrap: anywhere;
+}
+
+/* One card per request, boxed for the reason area cards are: it holds a dozen
+   facts and two buttons, and without an edge it is unclear which request a
+   button answers. */
+.pending-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.pending-card {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.pending-card.is-decided {
+  background: var(--bg-sunken);
+}
+.pending-card-heading {
+  margin: 0 0 6px;
+  font-size: 0.9286rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* Label then value, two columns where there is room, one on a phone. */
+.pending-fields,
+.apikey-facts,
+.setup-generic {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 6px 0;
+}
+.pending-fields dt,
+.apikey-facts dt,
+.setup-generic dt {
+  font-weight: 600;
+}
+.pending-fields dd,
+.apikey-facts dd,
+.setup-generic dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pending-fields .is-warn,
+.apikey-facts .is-warn,
+.own-key-facts .is-warn,
+.apikey-event.is-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+}
+.pending-count {
+  font-weight: 400;
+  color: var(--fg-muted);
+}
+.pending-addresses,
+.pending-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/* The subject is the key's own words: set apart as quoted material, so it
+   reads as something the agent wrote rather than as this page talking. */
+.pending-subject {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 6px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-sunken);
+}
+.pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.pending-result {
+  margin: 4px 0 0;
+}
+.pending-result.is-warn {
+  color: var(--warn-fg);
+}
+.approve-what {
+  margin-top: 0;
+}
+
+/* Activity: one call per line, newest first. */
+.apikey-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9286rem;
+}
+.apikey-event {
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.apikey-event-time {
+  color: var(--fg-muted);
+}
+.apikey-event.is-warn .apikey-event-time {
+  color: inherit;
+}
+.apikey-event.is-suppressed {
+  font-style: italic;
+}
+
+/* Setup snippets: shown whole, scrolled sideways rather than wrapped (a wrapped
+   JSON line is a different-looking line to copy), never wider than the page. */
+.setup-code {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 4px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.8571rem;
+  white-space: pre;
+}
+.setup-inline,
+.apikey-token-value {
+  font-family: ui-monospace, "SFMono-Regular", "Consolas", monospace;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.setup-tools {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+.setup-tools-label {
+  font-weight: 600;
+}
+.copy-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0;
+}
+.apikey-both {
+  margin: 10px 0 0;
+}
+.apikey-both p {
+  margin: 0 0 4px;
+}
+
+@media (max-width: 560px) {
+  .pending-fields,
+  .apikey-facts,
+  .setup-generic {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0 0;
+  }
+  .pending-fields dd,
+  .apikey-facts dd,
+  .setup-generic dd {
+    margin-bottom: 6px;
+  }
+}
+
+/* Mail-provider sign-in (#52): the Connect buttons under the account list, the
+   Reconnect / Disconnect pair in an account's Sign-in group, and the admin's
+   notice that a provider is refusing this server. Every group wraps, so a
+   phone never scrolls sideways for a long provider name. */
+.setting-oauth-connect { margin: 12px 0; }
+.setting-oauth-buttons,
+.setting-signin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+.setting-operator-notices p { margin: 0 0 4px; overflow-wrap: anywhere; }
+.setting-operator-title { font-weight: 600; }
+
+/* Signed-in devices (#937): the "This device" tag beside the description. */
+.device-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8571rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

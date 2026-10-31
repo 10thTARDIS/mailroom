@@ -1,0 +1,34 @@
+.git
+.gitignore
+.forgejo
+
+# Docs, ADRs, dev scratch — not needed inside the build context's image, but
+# still readable by the builder stage for docs-referencing code, so we only
+# exclude what genuinely never needs to enter the image.
+*.md
+docs/
+
+# web/ IS part of the build now (the `web` stage builds it and the runtime image
+# serves it from /srv/web — Dockerfile). Only its generated output is excluded:
+# node_modules is reinstalled from the lockfile inside the image, and a stale
+# host-built dist/ must never shadow the one the image builds.
+**/node_modules/
+**/dist/
+**/build/
+
+# Local dev / test artifacts.
+tmp/
+*.tmp
+*.log
+.env
+.env.*
+
+# Editor/OS cruft.
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Deploy artifacts and secrets must never end up baked into an image layer.
+deploy/

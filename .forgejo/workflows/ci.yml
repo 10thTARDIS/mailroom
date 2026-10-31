@@ -1,0 +1,658 @@
+﻿name: CI
+
+# CI from commit #1 (spec Â§16): build, unit tests, lint, vulnerability scan,
+# a clean apply of db/schema.sql to PostgreSQL 18, and the RLS isolation
+# suite (required â€” a red isolation test blocks merge, ADR-010).
+
+on:
+  # Manual re-run for a commit whose push run was killed mid-flight (a runner
+  # restart, #502) or lost a job to a flake (#463): Forgejo 16 has no re-run API,
+  # and tag-provenance requires the tagged commit's push run to be green, so
+  # without this the only lever was a person clicking Re-run in the web UI.
+  # Dispatched with `ref` = the commit or branch to test; it runs the same jobs.
+  workflow_dispatch:
+  # Feature branches are tested via their pull request only; pushing a branch
+  # that has a PR must NOT also start a second, parallel run. The e2e jobs
+  # (gate-e2e, hostile-content) use fixed Docker resource names, so two copies on
+  # one runner collide — hence push is scoped to main, PRs cover the rest.
+  #
+  # ⚠ TAGS USED TO BE HERE TOO, AND MUST NOT COME BACK (#356). `on.push` used
+  # to match `tags: ["v*"]` as well as `branches: [main]`, so a release (which
+  # pushes `main` and then the `vX.Y.Z` tag) ran this entire ~19-job matrix
+  # TWICE against byte-identical code — the concurrency group below is keyed
+  # on github.ref, so main and the tag land in different groups and neither
+  # cancels the other. Measured: every tagged merge got two CI runs (and two
+  # restore-drill runs — same defect, other workflow). On 0fb00dc (v1.64.1)
+  # the duplicate run went red on a flaky inline-images job while the FIRST
+  # run of that exact SHA was green — a false red on an already-released
+  # commit that could not have added information (#432).
+  #
+  # Nothing in this workflow keys off github.ref_type or a tag: no image
+  # publish, no artifact upload, no release notes happen here. Branch
+  # protection only gates `main`, so the tag run's result gated nothing. The
+  # one guarantee worth keeping — that a tag was actually cut from a commit
+  # whose CI passed on main, not a stray local commit — now lives in its own
+  # cheap job: .forgejo/workflows/tag-provenance.yml, which is the only
+  # workflow in this repo that still triggers on `tags:`.
+  push:
+    branches: [main]
+  pull_request:
+
+# ⚠ WITHOUT THIS, SUPERSEDED RUNS NEVER STOP (#346). The `on:` block above keeps
+# push and pull_request from BOTH firing for one commit — but it does nothing
+# about successive commits to the same branch. Push three fixes in five minutes
+# and all three full matrices run to completion; on a matrix this wide that is
+# the single largest source of wasted CI capacity.
+#
+# It also closes a collision the comment above only half-solves: the e2e jobs use
+# FIXED Docker resource names, so two live runs of this workflow on one runner
+# fight over the same containers.
+#
+# ⚠ CANCELLATION IS ONLY SAFE BECAUSE THE SCRIPTS' TRAPS WERE FIXED FIRST. A
+# cancelled step gets SIGTERM, and a shell with only an EXIT trap dies without
+# running it — measured, not assumed. Every scripts/*.sh cleanup now traps
+# EXIT INT TERM; before that change, turning this on would have made the
+# leaked-container problem WORSE rather than better.
+#
+# Verified by pushing twice in quick succession to a PR branch and confirming the
+# first run reports `cancelled` (#346's last acceptance item).
+#
+# Keyed on workflow + ref so a PR branch supersedes itself while main is
+# unaffected. Tags no longer reach this workflow at all (#356), so there is no
+# second group to worry about superseding.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          # ⚠ WAS `cache: "false"`, AND THE REASON TURNED OUT TO BE "nobody
+          # chose it" (#346). It was present in the very first CI commit
+          # (d0b61c6) and never justified — not a workaround for a cache
+          # corruption, just an inherited default. Every Go job therefore
+          # recompiled from cold, on a repo whose vet step deliberately compiles
+          # the full integration+interop tag set.
+          #
+          # Caches are keyed on go.sum and the Go version, so a dependency bump
+          # invalidates them correctly. They are PER-RUNNER and
+          # unshared, so a job landing on a different runner still starts cold.
+          #
+          # ⚠ THE SAVING IS UNMEASURED. If a Go job starts failing in a way that
+          # smells like stale artefacts, set this back to "false" and say so
+          # here — that comment would be worth more than the setting.
+          cache: "true"
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - name: Build
+        run: go build ./...
+      # ⚠ THE TAGS ARE THE POINT (#311). `go vet ./...` at the default tag set
+      # constrains out 290 `//go:build integration` files — the RLS negative
+      # tests and every store DB-interaction test — plus the two `interop` files.
+      # Vet is a COMPILE, so without them a tagged file that no longer builds
+      # only surfaces in the job that runs it, and a tagged file that builds but
+      # is wrong is never examined at all. tantivy stays out: it is
+      # `tantivy && cgo` and needs the musl static library, which is why it has
+      # its own job (see .golangci.yml for the full reasoning).
+      - name: Vet (including the integration, interop and sievelive tags)
+        run: go vet -tags integration,interop,sievelive ./...
+      - name: Unit tests (no database)
+        run: go test ./...
+      # The restore drill's relevance filter (#306). It decides, on every push,
+      # whether a required check runs at all — and it decided "no" on a release
+      # that changed internal/store, because it was a hand-written path list
+      # that had drifted from the drill's real dependency graph.
+      #
+      # It is now DERIVED from the import graph, and these two steps are what
+      # keep that honest. --self-test proves the filter can answer BOTH true and
+      # false, and includes a negative control (a first-party package the drill
+      # does not link must answer false) so that "always true" cannot pass.
+      # --check-go-list proves the script's grep walk is a superset of what
+      # `go list -deps -tags tantivy` says the two commands actually link — it
+      # lives HERE, in the job that already has a toolchain and a warm module
+      # cache, rather than on the relevance path itself, which must stay
+      # toolchain-free and network-free (it gates a required check).
+      - name: The restore drill's relevance filter can still say both things
+        run: sh scripts/drill-relevance.sh --self-test
+      - name: The relevance filter's derived set covers what the drill links
+        run: sh scripts/drill-relevance.sh --check-go-list
+
+      # #539's acceptance criteria require that the freshness alert "has been
+      # proven to fire when backups stop", and that retention is bounded. Both
+      # are otherwise code that runs only on a production host: the freshness
+      # check would be exercised by nothing, and retention is a destructive `rm`
+      # loop over a glob. These two self-tests are where that proof lives, and
+      # they need no database, no Docker and no network — which is why they sit
+      # in this job rather than behind the drill.
+      #
+      # Each carries its own positive control, because "always red" would
+      # otherwise pass every alerting case: the freshness test asserts a fresh,
+      # well-formed artifact goes GREEN and that the same file goes red under a
+      # tighter bound, and the retention test asserts the canonical artifact, a
+      # concurrent run's .partial and unrelated neighbours are never pruned.
+      - name: The backup freshness check can go red, and green
+        run: sh scripts/backup-freshness.sh --self-test
+      - name: Backup retention prunes to the bound and nothing else
+        run: sh scripts/backup-retain.sh --self-test
+
+  web:
+    # The web client is a SHIPPED artifact (the Dockerfile's `web` stage builds
+    # it into /srv/web), so it is held to the same bar as the Go code:
+    # `npm run build` = `tsc --noEmit && vite build`, and a type error is a red
+    # build. `npm ci` needs web/package-lock.json, which is committed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm ci
+        working-directory: web
+      # The JS half of the dependency-vulnerability gate (#351). Go has had
+      # govulncheck as a required job since early on; the web client — a SHIPPED
+      # artifact, built into /srv/web by the Dockerfile — had no equivalent, so
+      # Renovate could open its weekly PRs and a known-vulnerable package would
+      # still merge and ship.
+      #
+      # ⚠ IT IS NOT govulncheck, AND THE DIFFERENCE DECIDES THE THRESHOLD.
+      # govulncheck does reachability analysis: it reports a CVE only when the
+      # vulnerable symbol is actually called. `npm audit` has nothing of the
+      # kind — it asks only whether an installed version falls in an advisory's
+      # range, so it reports build tooling the shipped bundle never contains,
+      # and it reports it whether or not the code path exists. Gating on
+      # everything would therefore mean a standing red for reasons nobody can
+      # act on, which is how a check stops being read (#104 was six weeks of
+      # exactly that). High and critical block; moderate and low are printed by
+      # the step above and are a Renovate problem, not a merge problem.
+      #
+      # It runs the FULL tree, not --omit=dev, even though only react and
+      # react-dom reach the browser: a compromised build tool compromises the
+      # artifact it builds, which is the supply-chain shape worth blocking. If
+      # dev-tool churn ever makes that unbearable, --omit=dev is the fallback
+      # and narrows this to what actually ships — say so here if you take it.
+      #
+      # Green when added, and that took three major bumps to arrange (vite
+      # 5→8, vitest 2→4, plugin-react 4→6, all measured against the build and
+      # the 275 client-core tests). A gate introduced already-red teaches
+      # people to ignore it before it has ever said anything true.
+      - name: Dependency advisories (report)
+        run: npm audit || true
+        working-directory: web
+      - name: Dependency advisories (gate — high and critical)
+        run: npm audit --audit-level=high
+        working-directory: web
+      # #376: npm run build runs check:tokens first now, so token drift fails here too.
+      - name: Typecheck + build
+        run: npm run build
+        working-directory: web
+      # The client-core is DOM-free by design (spec §12) so that the logic worth
+      # reasoning about can be reasoned about without a browser — the view
+      # planner, the optimistic overlay, the queue grouping. Until #176 nothing
+      # exercised any of it, and the numbers those modules produce are shown to
+      # the user as facts about their mailbox.
+      - name: Unit tests (client-core)
+        run: npm test
+        working-directory: web
+
+  portability:
+    # CLAUDE.md's open-source portability rule, enforced instead of remembered
+    # (#351). Nothing in this tree may identify the operator or the
+    # infrastructure they self-host.
+    #
+    # ⚠ THE RULE HAS BEEN BROKEN BEFORE BY SOMEONE WHO KNEW IT: a private repo
+    # reference landed in a workflow file during the #351 review, shortly
+    # after the tree had been audited for exactly that, and was caught by luck
+    # at the end of a manual sweep.
+    #
+    # ⚠ checkout@v7 fetches a single commit by default, and that is all this
+    # needs — the check reads the WORKING TREE. History is a separate problem
+    # with a separate answer (#351's publication track: a fresh public repo with
+    # no history), and no CI job can fix an object that is already hashed.
+    #
+    # MAILROOM_PORTABILITY_PATTERNS is a repository secret, and the job is RED
+    # without it — deliberately. The one real violation was a bare
+    # `owner/repo#nnn` reference, which the in-tree host allowlist structurally
+    # cannot see; a run with no patterns configured has not checked the thing
+    # that actually went wrong. See scripts/portability-check.sh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Portability check
+        env:
+          MAILROOM_PORTABILITY_PATTERNS: ${{ secrets.MAILROOM_PORTABILITY_PATTERNS }}
+        run: sh scripts/portability-check.sh --require-patterns
+      - name: Portability check self-test
+        # #548: proves layer 3 (the scheme-less image-reference/registry-login
+        # check) can actually reject, against fixtures built under mktemp -d —
+        # never this checkout. Same job, not a new required context.
+        run: sh scripts/portability-check.sh --self-test
+
+  openapi-lint:
+    # Validate the hand-authored JMAP OpenAPI 3.1 document (docs/openapi.yaml)
+    # against the OpenAPI schema + Redocly's structural ruleset (docs/redocly.yaml
+    # relaxes only three documentation-only style rules). It describes the HTTP
+    # surface, so it is a NON-required check — a lint miss here never blocks the
+    # server build, and it is deliberately kept out of branch-protection's
+    # required set. setup-node is the same shape the `web` job already relies on.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Lint docs/openapi.yaml (Redocly)
+        run: npx --yes @redocly/cli@latest lint --config docs/redocly.yaml docs/openapi.yaml
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: "true"
+      - name: Install golangci-lint
+        # Built from source with the job's toolchain so the linter can never lag
+        # the module's Go language version.
+        #
+        # ⚠ PINNED, AND IT HAS TO STAY PINNED. This was `@latest` until #315, and
+        # the cost showed up exactly as you would expect a floating merge gate to
+        # behave: 2.13.1 shipped a staticcheck that knows about Go 1.26's
+        # crypto/ecdsa deprecations, and the next PR to open went red on a file it
+        # had never touched. main had been red for four days at that point and
+        # nobody could know, because nothing re-lints main.
+        #
+        # A required check whose verdict depends on WHEN it ran is not a gate, and
+        # it sits badly next to a project where a tag plus a changelog is supposed
+        # to say exactly what a version contains.
+        #
+        # This does not mean falling behind: renovate.json has a rule for this
+        # dependency, so an upgrade arrives as a PR that runs the new linter
+        # against the whole tree and can be read before it is merged — which is
+        # the same bargain every other dependency here already gets.
+        # ⚠ RETRIED, because this fetches ~150 modules and any one stream failing
+        # fails the job — twice observed, most recently going red on a PR whose
+        # only change was deleting a dead function. The helper announces every
+        # retry so a degrading proxy stays visible. See its header.
+        #
+        # ⚠ The toolchain above is NOT pinned to a patch release (`go-version:
+        # "1.27"`), so a Go patch can still break this pin from underneath: Go
+        # 1.27.2 raised the export-data version, and 2.13.2 then failed every
+        # package with "export data version 5 is greater than maximum supported
+        # version 4" (v1.81.1). When a Go patch lands, check this job first.
+        run: sh scripts/go-install-retry.sh github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+      # The build tags this runs under are in .golangci.yml (`run.build-tags`),
+      # not on this line, so `golangci-lint run` locally and in CI analyse the
+      # SAME files. Read the comment there before changing the set: until #311
+      # this job carried no tags at all, so it had never looked at any of the
+      # integration-tagged files.
+      - name: Lint
+        run: PATH="$(go env GOPATH)/bin:$PATH" golangci-lint run ./...
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+          cache: "true"
+      - name: Install govulncheck
+        # Retried for the same reason as golangci-lint above.
+        run: sh scripts/go-install-retry.sh golang.org/x/vuln/cmd/govulncheck@latest
+      # -tags for the same reason as vet and golangci-lint (#311): at the
+      # default tag set the integration-tagged files are not loaded, so a
+      # vulnerable dependency reachable ONLY from test-support code in them
+      # would not appear in the call graph. tantivy is excluded here too — it
+      # needs the native library; its own job builds and vets that path.
+      - name: Vulnerability scan (including the integration + interop tags)
+        run: PATH="$(go env GOPATH)/bin:$PATH" govulncheck -tags=integration,interop ./...
+
+  schema-apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply db/schema.sql to a clean PostgreSQL 18
+        run: sh scripts/schema-apply.sh
+
+  migrate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Applies db/migrations via cmd/mailroom-migrate and proves the result
+      # matches db/schema.sql (forward-only + no drift, ADR-008). Runs in
+      # containers on a docker network, same shape as schema-apply.
+      - name: Migrations apply cleanly and match db/schema.sql
+        run: sh scripts/migrate-check.sh
+
+  isolation-tests:
+    runs-on: ubuntu-latest
+    # Above the script's own go test -timeout (20m) plus container start-up, so
+    # a stuck suite fails with a goroutine dump from go test rather than being
+    # killed blind by the runner (#855).
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      # No setup-go: the suite runs inside a golang container on the same
+      # docker network as the database — the only shape that works when the
+      # job itself runs in a container with the Docker socket mounted (host ports
+      # and host paths don't resolve from in here).
+      - name: RLS negative tests + store integration tests
+        run: sh scripts/integration-test.sh
+
+  sync-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Brings up a throwaway Dovecot and exercises the SyncSession ACL
+      # against a real IMAP server (spec §4), including a concurrency test.
+      - name: SyncSession live tests against Dovecot
+        run: sh scripts/sync-test.sh
+
+  tantivy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The CGO search engine (ADR-006). It is behind the `tantivy` build tag,
+      # so the build-test / lint / govulncheck jobs above stay pure Go and need
+      # no C toolchain and no 58 MB native artifact — but the tagged path must
+      # never go untested, which is what this job is for: it builds, vets, and
+      # tests internal/search WITH the engine compiled in.
+      #
+      # Runs inside a musl-native container (no setup-go): the prebuilt Rust
+      # static library ships musl-only, and this is also the shape that works on
+      # a CI runner that executes jobs in containers.
+      - name: Tantivy search backend (CGO)
+        run: sh scripts/tantivy-test.sh
+
+  pgp-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # ⚠ THIS JOB EXISTS SO THE INTEROP CHECK CANNOT SILENTLY NOT RUN (#263).
+      #
+      # Our PGP/MIME framing was only ever validated against itself: SplitSigned
+      # round-tripped against our own Sign, and the live 4/4 verified signatures
+      # our own pipeline produced. A shared off-by-one on which CRLF belongs to
+      # the boundary delimiter would agree with itself and disagree with every
+      # other implementation.
+      #
+      # So this checks BOTH directions against GnuPG, which shares no code with
+      # us, with negative controls on each. It is behind the `interop` build tag
+      # (the build-test job runs outside a container, where gpg is not
+      # guaranteed) and runs inside golang:1.27, which ships GnuPG — the same
+      # container-only shape as tantivy-backend, for the same reason. Missing
+      # gpg is a FAILURE inside that container, never a skip.
+      - name: OpenPGP interop against GnuPG
+        run: sh scripts/pgp-interop-test.sh
+
+  clamav-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # ⚠ THIS JOB EXISTS BECAUSE THE SCANNER'S MOST IMPORTANT BEHAVIOUR IS NOT
+      # IN ITS DOCUMENTATION (#394, ADR-027 §5a).
+      #
+      # Stock clamd CANNOT produce the `unknown` verdict: AlertExceedsMax and
+      # AlertEncrypted are both disabled by default, so an encrypted zip and an
+      # archive too deep to open BOTH return plain "stream: OK" — a clean verdict
+      # on a file nothing looked inside. Enabling them turns those into
+      # DETECTIONS, which a naive mapping quarantines as malware. Four of this
+      # increment's facts were measured against a real daemon and contradicted
+      # what was written down, including StreamMaxLength (100 MB in the official
+      # image, not the documented 25 MB).
+      #
+      # So the suite runs against a REAL clamd, configured the way a deployment
+      # must be, and the script ASSERTS the configuration took effect with
+      # clamconf before running a single test — a suite against a default daemon
+      # would pass three states and prove nothing about the fourth.
+      #
+      # Behind the `clamav` build tag, in containers on a shared Docker socket,
+      # the same shape as pgp-interop and tantivy-backend. A missing daemon is a
+      # FAILURE, never a skip (#263, #159): a scanner suite that skips when the
+      # scanner is absent goes green in exactly the situation it exists to catch.
+      #
+      # ⚠ The signature download is a multi-minute cold start, which is why this
+      # is its own job rather than a step in another one.
+      - name: ClamAV live verdicts (real daemon)
+        run: sh scripts/clamav-test.sh
+
+  sieve-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The ManageSieve client (#50) against a REAL Dovecot Pigeonhole, the
+      # stock image with no configuration. internal/sieve/sievetest's fake
+      # copies Pigeonhole's wire bytes; this is what keeps that copy honest.
+      # Behind the `sievelive` tag, in containers on a shared Docker socket
+      # like clamav-live. A missing server is a FAILURE, never a skip.
+      - name: ManageSieve live (real Pigeonhole)
+        run: sh scripts/sieve-live-test.sh
+
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The production image links the CGO search engine; a build failure there
+      # is a shipping failure, so it is a required job rather than something we
+      # discover at release time.
+      - name: Build the production image
+        run: docker build -t mailroom:ci .
+      # #633: the production image now carries `age` (Dockerfile), so it can
+      # seal a backup with no network — that is the whole point of pinning
+      # MAILROOM_AGE_IMAGE to it instead of an unpinned alpine tag. Proved
+      # against the image THIS job just built, not a published tag, so a
+      # Dockerfile change that drops `age` again fails here before it ships.
+      - name: The pinned sealing image can seal and open with NO network
+        run: MAILROOM_AGE_IMAGE=mailroom:ci sh scripts/backup.sh --self-test
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Build web shell + TS client-core
+        run: cd web && npm ci && npm run build
+
+  mailsync-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Live Dovecot + live Postgres: the full sync engine, the #86 expunge
+      # reaper, the #88 UIDVALIDITY reconciliation, and the #93 gap backfill —
+      # every path that can add or remove a message's folder membership, proven
+      # against a real IMAP server rather than a fake. These are the mail-loss
+      # cases, so the live proof is not optional.
+      - name: Sync engine live tests (Dovecot + Postgres)
+        run: sh scripts/mailsync-test.sh
+
+  login-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The whole real image behind a real OIDC provider: proves an anonymous
+      # request reaches NOTHING but the sign-in page and the probes, and that a
+      # subject the operator allowlist refuses gets no session cookie (#92). A
+      # regression here is an authentication bypass, so it is a required job.
+      - name: OIDC login gate end-to-end
+        run: sh scripts/gate-e2e.sh
+
+  hostile-content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # A genuinely hostile HTML mail body delivered over IMAP and rendered in
+      # headless Chromium (#39): nothing executes, no remote content is fetched.
+      #
+      # ⚠ THE BROWSER STAGE FAILS CLOSED (#281). This comment used to say it
+      # "self-skips if the image is unavailable", which stopped being true when
+      # the catch-all skip was removed — and a comment that understates a
+      # guarantee is its own kind of misleading (#308). Only a genuinely
+      # unobtainable Chromium image may skip, it must be opted into with
+      # MAILROOM_SKIP_BROWSER=1, and every other outcome — including the render
+      # script's own ERR — is a failure.
+      #
+      # Since #308 the stage also EXTRACTS the app CSP, the message CSP, the
+      # sandbox tokens, the height reporter and the preview response headers
+      # from the repo at run time (scripts/e2e-policy.cjs) instead of carrying
+      # copies, so it can no longer validate a policy the server does not ship.
+      - name: Hostile-content neutralization end-to-end
+        run: sh scripts/hostile-content-e2e.sh
+
+  inline-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Inline cid: images render WITHOUT re-opening the remote-content hole
+      # (#99, #39, spec §11). This suite existed for a month before anything ran
+      # it: the commit that wired "the three e2e harnesses" simply did not
+      # include the fourth, and `git log -S` on this file was empty until now
+      # (#280). A suite nobody runs is worse than a browser that moves under an
+      # unpinned tag, which is the neighbouring problem #254 fixed.
+      #
+      # It guards the boundary where a change to "inline images render with no
+      # gate" could quietly re-open "remote content is blocked" — the one place
+      # hostile-content does not cover, since it never tests the cid: path.
+      #
+      # Its load-bearing assertions are the four `=true` tokens, and they FAIL
+      # CLOSED: each is `grep -q … || fail`, so a browser that errors produces
+      # four failures rather than a skip. (This used to add "hostile-content
+      # does the opposite and is fail-open"; #281 closed that, and #308 found
+      # the sentence still here describing a hole that no longer exists. Both
+      # suites fail closed now.)
+      #
+      # It also renders the REAL message CSP since #308: its own helper had
+      # frozen at the pre-#100 policy, with no `script-src '<reporter hash>'`,
+      # so it was drawing conclusions about a document we stopped shipping.
+      #
+      # ⚠ The "tracker received ZERO bytes" line is corroboration, NOT proof.
+      # Probing #280 by disabling remote parking in sanitize.go turned the suite
+      # red on all four tokens while that line still reported ok — the browser
+      # check bails before rendering, so nothing fetches and the tracker is
+      # trivially silent. Read the tokens, not the tracker.
+      - name: "Inline cid: images render, remote stays blocked, end-to-end"
+        run: sh scripts/inline-images-e2e.sh
+
+  proxied-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Proxied remote images actually RENDER for a signed-in reader (#667).
+      #
+      # With the image proxy on (ADR-026) an allowed remote image is a
+      # same-origin /jmap/proxy/... path gated by the session cookie, and the
+      # message frame — sandboxed without allow-same-origin, so an opaque
+      # origin — is never sent that cookie. Left for the frame to fetch, every
+      # proxied image was a 401 in Chromium and in Firefox on a cookie-gated
+      # deployment, and the banner said they were loading.
+      #
+      # No lane could see it, structurally: every BROWSER lane above runs with
+      # dev-auth, which has no credential to withhold, and the one OIDC lane
+      # (gate-e2e) is curl, which has no frame. This is the conjunction — a
+      # real Chromium that signs in at the provider's own login form, holds a
+      # real session cookie, and reads mail in the real client.
+      #
+      # It guards the fix's shape: the APP fetches each allowed image with
+      # credentials and hands the frame a data: URL. Its load-bearing lines are
+      # read INSIDE the message frame — the image decoded, its src is
+      # data:image/, nothing references /jmap/proxy/ — once after a "Show
+      # remote content" click and once under a remembered grant, on a message
+      # nobody clicked on.
+      #
+      # ⚠ Its NEGATIVE CONTROL is what makes those lines mean anything: a frame
+      # with the client's own sandbox tokens is handed the same proxy path and
+      # must NOT load it, while the app's own fetch of that path is a 200 image
+      # and the same bytes as data: decode in that same frame. That is the
+      # pre-fix behaviour reproduced on every run. If the control ever loads
+      # the image the lane goes red and says its premise is gone.
+      #
+      # Probed by rebuilding the image with messageFrameDocument returning the
+      # pre-fix document: exactly the six in-frame lines went red (naturalWidth
+      # 0, src still /jmap/proxy/...) and every control line stayed green.
+      #
+      # It FAILS CLOSED: green needs exit 0, the DONE line and exactly the
+      # expected number of PASS lines, so a stage that bails early — or an
+      # assertion somebody removed — is red, not skipped.
+      # ⚠ This is the ONLY job that builds with -tags e2eprivateimages (the script
+      # passes it via the Dockerfile's MAILROOM_EXTRA_TAGS arg; #676). That tag
+      # lets the image proxy fetch from the lane's private Docker subnet; the
+      # release build passes no tags.
+      - name: Proxied images render in the sandboxed frame behind a real login
+        run: sh scripts/proxied-images-e2e.sh
+
+  tabs-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The category-tab JMAP surface over REAL HTTP (#228). The in-process tests
+      # call handlers directly, which bypasses the dispatcher — and the `using`
+      # gate lives in the dispatcher. That is the #159 shape exactly: a capability
+      # the client fails to declare makes every method answer `unknownMethod`
+      # while the read path still renders perfectly.
+      #
+      # Its load-bearing assertion is a NEGATIVE CONTROL: the same CategoryTab/set
+      # is re-sent with the capability omitted and MUST come back unknownMethod.
+      # Probed by making mayCall return true unconditionally — exactly one
+      # assertion goes red, and it is that one.
+      - name: Category tabs over HTTP end-to-end
+        run: sh scripts/tabs-e2e.sh
+
+  accessibility:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # setup-node + `npm ci` BEFORE the script, the same shape the `web` job
+      # uses, because the lane's LINTER is a devDependency: axe-core, exact-pinned
+      # in web/package.json and imported by nothing in web/src. The script
+      # `docker cp`s web/node_modules/axe-core/axe.min.js into the browser
+      # container and FAILS if it is not there — a lint lane that skips when its
+      # linter is absent goes green in exactly the situation it exists to catch
+      # (#263's rule, #159's reason). `npm audit --audit-level=high` in the `web`
+      # job now covers axe-core too, since it runs the full tree.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install (axe-core lives here)
+        run: npm ci
+        working-directory: web
+      # The automated half of #447 (spec §12). web/ACCESSIBILITY.md records a
+      # model — the desk's list is a `role="grid"` whose current row is named by
+      # `aria-activedescendant`, a row's name is an assembled sentence, the line
+      # is a `role="slider"` whose value text states the split, there is exactly
+      # ONE live region — and NOT ONE of those is checkable by a linter. So this
+      # job does both halves against the real image: axe-core over eleven
+      # surfaces in three themes, and Chromium's own accessibility tree read
+      # after each step of the desk's core loop.
+      #
+      # ⚠ ITS LOAD-BEARING ASSERTIONS ARE THE FOUR NEGATIVE CONTROLS, and they run
+      # in the same job: a nameless button must make axe report `button-name`, a
+      # glyph button losing its label must make the tree check go red, the header
+      # sentence losing `role`/`aria-live` must make the live-region check go red,
+      # and the grid losing `aria-activedescendant` must make the cursor check go
+      # red. A run in which any control stays green FAILS — so a green job is
+      # itself evidence that the checks can fail.
+      #
+      # ⚠ AND IT PROVED ITSELF BEFORE IT WAS TRUSTED. Probed by deleting
+      # `aria-rowindex` from ui/desk/VirtualList.tsx and rebuilding the image:
+      # all thirty-three axe passes stayed green — a linter cannot see a cursor
+      # that stopped saying where it is — and the lane went red on
+      # `NOACTIVE move: aria-rowindex went 0 -> 0`. That is the whole argument
+      # for reading the tree as well as running axe, in one measurement.
+      #
+      # ⚠ NO SKIP PATH IN PRACTICE. Unlike hostile-content, this lane has no
+      # stage that survives the browser's absence — even the fixture's JMAP calls
+      # run in that image — so an unobtainable Chromium is a FAILURE.
+      # MAILROOM_SKIP_BROWSER=1 exists for symmetry with the sibling suites, says
+      # in its own output that it proved nothing, and is never set here.
+      - name: Accessibility end-to-end (axe + the accessibility tree)
+        run: sh scripts/a11y-e2e.sh

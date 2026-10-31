@@ -1,0 +1,48 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Environment / secrets — never committed (spec §11)
+.env
+.env.*
+# ...except the committed template operators copy to their real .env
+!.env.example
+!**/.env.example
+
+# Key material. The master key is escrowed OFFLINE (ADR-005, docs/key-escrow.md)
+# and the backup artifact's age identity lives with whoever restores — neither
+# ever belongs in the repo. These patterns catch the throwaway key material the
+# restore drill generates, and act as a backstop against a real one being staged
+# by accident.
+*.age
+*.key
+age-identity*
+backup-identity*
+recovery-key*
+
+# Scratch dirs from scripts/backup.sh and scripts/restore-drill.sh (they are
+# PID-scoped and self-cleaning; this catches the debris of an interrupted run,
+# which can contain a throwaway master key and a decrypted payload).
+.backup-tmp.*
+.drill-tmp.*
+# The same for the three end-to-end lanes (scripts/a11y-e2e.sh,
+# hostile-content-e2e.sh, inline-images-e2e.sh). Also PID-scoped and
+# self-cleaning, and also worth a backstop: each one generates a throwaway
+# Dovecot TLS key inside its scratch dir, and a cancelled run (SIGTERM before
+# the trap, mailroom#346) leaves it on disk next to a tree somebody is about to
+# `git add -A`. `.a11y-e2e-shots` is where #514's rendering check drops its
+# screenshots — evidence for a review, never a tracked file.
+.a11y-e2e-tmp.*
+.a11y-e2e-shots/
+.hostile-e2e-tmp.*
+.inline-e2e-tmp.*
+
+# Editor noise
+.idea/
+.vscode/
+
+# Local tool state
+.claude/

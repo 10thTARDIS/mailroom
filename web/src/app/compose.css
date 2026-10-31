@@ -1,0 +1,576 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* THE COMPOSER (#448). Loaded after settings.css, last of the five, so it can
+   lean on the component classes in styles.css (.field, .button, .text-input,
+   .recipient-suggestions) and override the docked-panel geometry that file still
+   declares for `.compose`.
+
+   NO NEW DESIGN TOKENS. tokens.css is the one inventory (#376) and the build
+   refuses a definition anywhere else; every colour below is an existing token,
+   which is also why both themes work with no second palette here.
+
+   ── WHERE THE COMPOSER SITS ────────────────────────────────────────────────
+
+   `.compose` in styles.css is a `position: fixed` panel docked to the
+   bottom-right corner. That is still the fallback and still what the PHONE uses
+   (full screen); the two desktop placements below take it out of flow instead and
+   put it in the workspace GRID, which is the whole point of the reshape: composing
+   a reply happens where reading happens.
+
+   ⚠ THE GRID IS `.workspace`, NOT `.content`. `.content` is rendered by each route
+   (DeskRoute, ListRoute, TrayRoute) and its columns ARE the reading-pane layout,
+   so the composer cannot be a child of it without every route rendering it. It is
+   a child of `.workspace` instead — one level out — and the track sizes below
+   reproduce what `.content` does for a thread, which is why the list keeps the
+   width it had.
+
+   ⚠ EVERY DOCKED CASE PLACES BOTH ITEMS EXPLICITLY (`grid-area`). Grid
+   auto-placement is SPARSE by default: an explicitly-placed composer at row 1
+   column 3 would push an auto-placed `.content` onto row 2 rather than leaving it
+   in column 2. Stating both is the only way the two cannot disagree.
+
+   ⚠ AND THE READING PANE IS HIDDEN WHILE THE COMPOSER HAS ITS COLUMN. Shell.tsx
+   drops `data-pane="thread"` for a docked composer, which leaves `.content` a
+   single column — so a ThreadPane still mounted for `?m=` would be auto-placed
+   into row 2 and drawn UNDER the list. It stays mounted deliberately (its body is
+   a sandboxed iframe, and unmounting would re-fetch the whole document when the
+   composer closes), so it is hidden here. */
+
+/* ---- the pane placement ------------------------------------------------- */
+
+@media (min-width: 760px) {
+  /* The composer IS the third column, and the list keeps the 320–420px track
+     `.content` gives it beside a thread. */
+  .app[data-compose="pane"] .workspace {
+    grid-template-columns: var(--nav-w) minmax(320px, 420px) minmax(0, 1fr);
+  }
+  .app[data-compose="pane"] .content {
+    grid-area: 1 / 2;
+  }
+  .app[data-compose="pane"] .compose-pane {
+    grid-area: 1 / 3;
+  }
+  /* See the ⚠ above: `.content` is one column now, so an un-hidden pane would be
+     drawn below the list rather than beside it. */
+  .app[data-compose="pane"] .thread-pane,
+  .app[data-compose="pane"] .content .pane-splitter {
+    display: none;
+  }
+
+  /* FOCUSED READING has no second column to take, so the composer takes the
+     content area — over the list, in the SAME cell, opaquely. Not `display: none`
+     on the list: a hidden scroll container loses its scroll position, and the list
+     is exactly where the reader is going back to. */
+  .app[data-compose="main"] .content,
+  .app[data-compose="main"] .compose-main {
+    grid-area: 1 / 2;
+  }
+  .app[data-compose="main"] .compose-main {
+    z-index: 1;
+  }
+
+  /* Both desktop placements are IN FLOW: the fixed geometry styles.css declares
+     for the docked panel would otherwise still win. */
+  .compose-pane,
+  .compose-main {
+    position: static;
+    right: auto;
+    bottom: auto;
+    width: auto;
+    max-height: none;
+    min-width: 0;
+    min-height: 0;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--bg);
+  }
+  .compose-main {
+    border-left: 0;
+  }
+}
+
+@media (min-width: 1100px) {
+  /* The vertical reading-pane layout sizes the LIST from `--pane-split` (the same
+     track `html[data-pane-layout="vertical"] .app[data-pane="thread"] .content`
+     uses), so a composer in the pane column is exactly as wide as the reading pane
+     the user sized. The HORIZONTAL layout deliberately keeps the band above:
+     `--pane-split` is a HEIGHT there and cannot size a column, and a composer laid
+     out below the list would be a few hundred pixels of writing space. */
+  html[data-pane-layout="vertical"] .app[data-compose="pane"] .workspace {
+    /* The `auto` track is the docked splitter (#617; styles.css). */
+    grid-template-columns: var(--nav-w) var(--pane-split, 380px) auto minmax(0, 1fr);
+  }
+  html[data-pane-layout="vertical"] .app[data-compose="pane"] .compose-pane {
+    grid-area: 1 / 4;
+  }
+}
+
+/* THE PHONE (<760px) IS FULL SCREEN, not a docked panel with rounded corners:
+   there is one pane at a time below this width, and the composer is it. The rule
+   in styles.css already stretches `.compose` edge to edge; this finishes the job
+   (top edge, no height cap) rather than restating it. */
+@media (max-width: 759px) {
+  .compose-full {
+    top: 0;
+    inset-inline: 0;
+    max-height: none;
+    border: 0;
+  }
+}
+
+.compose-pane,
+.compose-main,
+.compose-full {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.compose-pane .compose-form,
+.compose-main .compose-form,
+.compose-full .compose-form {
+  flex: 1;
+  min-height: 0;
+}
+
+.compose-loading {
+  margin: 16px;
+  color: var(--fg-muted);
+}
+
+/* ---- the From sentence -------------------------------------------------- */
+
+.compose-from {
+  margin-bottom: 10px;
+}
+
+.compose-from-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+}
+
+.compose-from-address {
+  font-weight: 600;
+}
+
+.compose-from-sep,
+.compose-from-reason {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+.compose-from-change {
+  margin-inline-start: auto;
+}
+
+.compose-from-local {
+  margin-top: 6px;
+}
+
+.compose-from-picker {
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.compose-from-picker .text-input {
+  width: 100%;
+}
+
+.compose-from-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.compose-from-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.compose-from-option:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.compose-from-option[aria-selected="true"] {
+  background: var(--bg-selected);
+}
+
+.compose-from-option-name,
+.compose-from-option-reason {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+/* THE REASON WORD IS ALWAYS THE LAST THING ON THE ROW, so the column of reasons
+   is readable down the list rather than jumping with each address's length. */
+.compose-from-option-reason {
+  margin-inline-start: auto;
+}
+
+/* A disabled row is still LISTED — that is how "why can I not send from there?"
+   gets answered — so it must read as unavailable rather than as absent. Colour is
+   not the only cue: the row also prints the word `disabled`. */
+.compose-from-option.is-disabled {
+  cursor: not-allowed;
+  color: var(--fg-muted);
+}
+
+/* ---- recipient chips ---------------------------------------------------- */
+
+.compose-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  min-height: 2.4286rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: text;
+}
+
+.compose-chips:focus-within {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.compose-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 4px 2px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.9286rem;
+  max-width: 100%;
+}
+
+.compose-chip-contact {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The chip's name is a BUTTON since #816 (it opens what the chip knows about
+   the contact), drawn as the text it was. */
+.compose-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  max-width: 100%;
+}
+.compose-chip-name:hover { text-decoration: underline; }
+.compose-chip-name:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Under the chip, solid, above the fields below it; a floating thing, so it
+   carries the elevation shadow. */
+.compose-chip-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  min-width: 12rem;
+  max-width: min(20rem, 80vw);
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  white-space: normal;
+  font-size: 0.9286rem;
+}
+.compose-chip-panel[hidden] { display: none; }
+
+/* THE SEAL TONE, the same one a signed message's own seal line uses (--seal,
+   tokens.css): "a fact about cryptographic state", which is exactly what a held
+   key is. The ⚿ glyph beside it is the second channel — colour is never the only
+   carrier (spec's WCAG 1.4.1 rule). */
+.compose-chip-key {
+  color: var(--seal);
+  font-size: 0.7857rem;
+  white-space: nowrap;
+}
+
+.compose-chip-nokey,
+.compose-chip-lapsed {
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+  white-space: nowrap;
+}
+
+/* A chip whose key fact is UNKNOWN prints nothing at all, so it needs no rule
+   here — `.compose-chip-unknown` exists only so a future state has a hook, and
+   deliberately looks identical to a plain chip. */
+
+.compose-chip-remove {
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  color: var(--fg-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.compose-chip-remove:hover {
+  color: var(--fg);
+}
+
+.compose-chip-input {
+  position: relative;
+  flex: 1;
+  min-width: 8ch;
+}
+
+.compose-chip-text {
+  width: 100%;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  font: inherit;
+}
+
+.compose-chip-text:focus {
+  outline: none;
+}
+
+.compose-more-recipients {
+  display: flex;
+  gap: 12px;
+  margin: -4px 0 10px;
+  font-size: 0.8571rem;
+}
+
+/* ---- the send line ------------------------------------------------------ */
+
+.compose-sendline {
+  margin: 8px 0 0;
+  font-size: 0.8571rem;
+}
+
+.compose-sendline-seal {
+  color: var(--seal);
+}
+
+/* WARN, not error: nothing has failed — the message will go, in the clear, and
+   the line is saying so before it does. --returned is the "this is a state you
+   should notice" tone; --danger would read as a refusal. */
+.compose-sendline-warn {
+  color: var(--returned);
+}
+
+.compose-sendline-plain {
+  color: var(--fg-muted);
+}
+
+.compose-sendline-sep {
+  color: var(--fg-muted);
+}
+
+.compose-alias-note {
+  margin-top: 6px;
+}
+
+/* The disclosure line (#533). Carries the accent rather than the muted tone its
+   neighbour uses: it is rare, and it is the one of the two that is about what
+   the recipient learns. Still a line, never a dialog — see
+   ui/compose/aliasDisclosure.ts. */
+.compose-alias-disclosure {
+  margin-top: 6px;
+  color: var(--accent);
+}
+
+/* ---- attachment tiles --------------------------------------------------- */
+
+.compose-attach {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.compose-attach.is-dragover {
+  border-color: var(--accent);
+  background: var(--bg-selected);
+}
+
+.compose-attach-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8571rem;
+}
+
+.compose-attach-label {
+  color: var(--fg-muted);
+}
+
+.compose-tiles {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.compose-tile {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.9286rem;
+}
+
+.compose-tile-size,
+.compose-tile-origin {
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+}
+
+/* A HELD TILE IS HATCHED, which is the point: it looks like something withheld
+   rather than something attached, before any word is read. The --held tone is the
+   one the reading pane's withheld chip already uses — "waiting on a decision", a
+   different hue from --danger's "failed" on purpose. */
+.compose-tile.is-held {
+  color: var(--held);
+  border-color: var(--held);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--held-bg),
+      var(--held-bg) 6px,
+      var(--bg) 6px,
+      var(--bg) 12px
+    );
+}
+
+.compose-tile-held {
+  font-size: 0.7857rem;
+  font-weight: 600;
+}
+
+.compose-tile-reason {
+  color: var(--fg-muted);
+  font-size: 0.7857rem;
+}
+
+.compose-tile-release {
+  border-color: var(--held);
+  color: var(--held);
+}
+
+/* ---- the footer -------------------------------------------------------- */
+
+.compose-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* The autosave state is a FACT, not a control, so it sits in the row of controls
+   as muted text and pushes Discard to the far end — where a destructive action
+   belongs, away from Send. */
+.compose-save-state {
+  margin-inline-start: auto;
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+/* ---- the Outbox -------------------------------------------------------- */
+
+.outbox-pane {
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.outbox-header h1 {
+  margin: 0 0 12px;
+  font-size: 1.1429rem;
+}
+
+.outbox-empty {
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.outbox-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outbox-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.outbox-row-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.outbox-row-alias,
+.outbox-row-unloaded {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+.outbox-row-subject {
+  margin: 2px 0 0;
+  color: var(--fg-muted);
+}
+
+/* THE STATE IS THE ROW'S CONTENT — "Sending in 14 s" or "Scheduled · Mon 09:00" —
+   so it is the emphasised line, not a tag on the end of one. --returned carries
+   "this is leaving and has not left", which is neither a warning nor an error. */
+.outbox-row-state {
+  margin: 4px 0 0;
+  color: var(--returned);
+  font-size: 0.9286rem;
+}
+
+.outbox-row-actions {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 0;
+}

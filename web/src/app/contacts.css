@@ -1,0 +1,280 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* THE CONTACTS PAGE (#816): the list, and one contact beside it.
+
+   The geometry is the mail list's and the reading pane's (styles.css): at
+   >=1100px a contact opens BESIDE the list; below that it REPLACES the list;
+   on a phone the rail is a pane of its own as everywhere else. The list stays
+   in the DOM behind an open contact (display:none), so Back finds it as it was
+   (ui/contacts/ContactsList.tsx restores its scroll). Solid surfaces only. */
+
+.contacts-content[data-open="page"] {
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+}
+
+@media (max-width: 1099px) {
+  .contacts-content[data-open="page"] { grid-template-columns: minmax(0, 1fr); }
+  .contacts-content[data-open="page"] .contacts-list-pane { display: none; }
+}
+
+.contacts-list-pane {
+  padding: 16px;
+  gap: 10px;
+}
+
+.contacts-list-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contacts-list-header h1 {
+  margin: 0 0 4px;
+  font-size: 1.2857rem;
+}
+
+.contacts-search { width: 100%; }
+
+.contacts-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+/* A filter is a pressed toggle: the fill AND the weight say which one is on,
+   and aria-pressed says it to a reader. */
+.chip-button {
+  min-height: 2.2rem;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.chip-button:hover { background: var(--bg-hover); }
+.chip-button.is-on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.chip-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.contacts-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.contacts-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+.contacts-rows > li { border-bottom: 1px solid var(--border); }
+
+.contacts-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  color: var(--fg);
+  text-decoration: none;
+  min-width: 0;
+}
+.contacts-row:hover { background: var(--bg-hover); }
+.contacts-row[aria-current="page"] {
+  background: var(--bg-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.contacts-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.contacts-row-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.contacts-row-address {
+  overflow-wrap: anywhere;
+}
+.contacts-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 0.9286rem;
+}
+
+.contacts-chip {
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.8571rem;
+}
+.contacts-chip.is-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.contacts-state { margin: 8px 0; }
+.contacts-bound { margin: 4px 0; }
+.contacts-more { align-self: flex-start; }
+
+.contacts-add {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.contacts-add > .button { align-self: flex-start; }
+.contacts-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.contacts-add-row .text-input { flex: 1 1 12rem; min-width: 0; }
+
+/* ---- one contact -------------------------------------------------------- */
+
+.contact-page {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 32px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+}
+@media (max-width: 1099px) {
+  .contact-page { border-left: 0; }
+}
+
+.contact-back { margin-bottom: 8px; }
+
+.contact-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 44rem;
+}
+
+.contact-name {
+  margin: 0;
+  font-size: 1.7143rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.contact-learned { margin: 2px 0 0; }
+.contact-head p { margin: 4px 0; }
+
+.contact-name-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 28rem;
+}
+
+.contact-section {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.contact-section-heading {
+  margin: 0 0 6px;
+  font-size: 1.0714rem;
+}
+
+.contact-addresses,
+.contact-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.contact-address,
+.contact-recent-subject {
+  overflow-wrap: anywhere;
+}
+.contact-recent-meta { overflow-wrap: anywhere; }
+.contact-counts,
+.contact-dates { margin: 2px 0; }
+
+.contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.contact-vip[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.contact-blocked {
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-radius: var(--radius);
+}
+.contact-block-form fieldset { border: 0; margin: 0; padding: 0; }
+.contact-block-form legend { padding: 0; font-weight: 600; margin-bottom: 2px; }
+
+.contact-notes {
+  width: 100%;
+  min-height: 6rem;
+}
+.contact-notes-count { margin: 4px 0; }
+
+.contact-separated ul { margin: 4px 0; }
+
+/* ---- the merge and separate dialogs (KeyDialog's shell) ------------------ */
+
+.contact-merge-results {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.contact-merge-option {
+  padding: 8px 10px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.contact-merge-option.is-active {
+  background: var(--bg-selected);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.contact-merge-option.is-chosen { font-weight: 600; }
+.contact-merge-preview {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+}
+.contact-merge-preview h3 { margin: 0 0 4px; font-size: 1rem; overflow-wrap: anywhere; }
+.contact-merge-preview ul { margin: 0 0 6px; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.contact-separate-addresses { border: 0; margin: 0; padding: 0; }
+.contact-separate-addresses legend { padding: 0; font-weight: 600; margin-bottom: 4px; }
+.contact-separate-addresses .checkbox { overflow-wrap: anywhere; }
+
+/* ---- the entry points ---------------------------------------------------- */
+
+.sender-popover-saved { margin: 6px 0 0; }
+.senders-links { margin: 4px 0 8px; padding-left: 1.2rem; }
+.correspondent-key-contact { margin: 2px 0; }
+
+/* The real address under a name that could pass for another contact (#816:
+   the name contained "@" or directional controls; core/contacts.ts). */
+.contact-real-address { margin: 2px 0 0; overflow-wrap: anywhere; font-weight: 600; }

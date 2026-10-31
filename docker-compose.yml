@@ -1,0 +1,36 @@
+# Local development + test database (PostgreSQL 18, spec §14 / CLAUDE.md).
+#
+#   docker compose up -d postgres
+#
+# db/schema.sql is applied automatically on first boot of a fresh volume
+# (docker-entrypoint-initdb.d). CI and scripts/integration-test.sh use their
+# own throwaway containers instead of this service.
+#
+# Pinned `tag@sha256:...`, matching deploy/compose.yml (#535): a tag is a
+# pointer upstream can repoint, so this stays the exact bytes that were
+# tested rather than whatever `postgres:18` currently resolves to; Renovate
+# proposes the bump when it moves.
+services:
+  postgres:
+    image: postgres:18@sha256:1957b2ff3137e4ef7f3bc813e74fff50b1e1ffddc85c8b9d6f14ade972be8687
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${MAILROOM_PG_PASSWORD:-mailroom-dev}
+      POSTGRES_DB: mailroom
+    ports:
+      - "${MAILROOM_PG_PORT:-5432}:5432"
+    volumes:
+      # /var/lib/postgresql, not .../data — PostgreSQL 18's image moved PGDATA to
+      # a major-version-scoped subdirectory and refuses to boot with a volume on
+      # the old path. Same reason as deploy/compose.yml, where it is explained at
+      # length; see docker-library/postgres#1259.
+      - pgdata:/var/lib/postgresql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mailroom"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

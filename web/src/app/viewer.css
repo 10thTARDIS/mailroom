@@ -1,0 +1,464 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* THE ATTACHMENT VIEWER (#449). Loaded after compose.css, last of the six, so it
+   can lean on the component classes in styles.css (.button, .button-primary,
+   .button-danger) and on the grid the composer's stylesheet already reasons about.
+
+   NO NEW DESIGN TOKENS. tokens.css is the one inventory (#376) and the build
+   refuses a definition anywhere else; every colour below is an existing token,
+   which is also why both themes work with no second palette here.
+
+   ── WHERE THE VIEWER SITS, AND WHY IT IS NOT AN OVERLAY ────────────────────
+
+   The lightbox this replaces (#200) was a floating box centred on a translucent
+   `.modal-backdrop` — the one shape spec §12 says this app never uses ("nothing is
+   ever layered on top of anything else, and no surface is translucent"). The viewer
+   is a GRID OCCUPANT instead, in exactly the three placements the composer has and
+   from the same decision function (ui/compose/placement.ts, via ui/Shell.tsx):
+
+     pane   ≥760px with a reading pane configured. The viewer IS the reading pane's
+            column and the list stays beside it.
+     main   ≥760px with the reading pane off (Focused). There is no second column to
+            take, so it takes the content area — over the list, in the same cell,
+            OPAQUELY.
+     full   <760px. One pane at a time, and the viewer is it.
+
+   ⚠ THE THREE ⚠ NOTES IN compose.css APPLY HERE WORD FOR WORD, because this is the
+   same grid: the grid is `.workspace` and not `.content`; every docked case places
+   BOTH items explicitly, because grid auto-placement is sparse and would otherwise
+   push `.content` onto row 2; and the reading pane is hidden while the viewer holds
+   its column, because Shell.tsx drops `data-pane="thread"` for a docked viewer and a
+   still-mounted ThreadPane would otherwise be drawn UNDER the list. It stays mounted
+   deliberately — its body is a sandboxed iframe, and unmounting would re-fetch the
+   whole document when the viewer closes — and it is also the element holding the
+   tile that gets focus back on close (ui/ThreadPane.tsx says why that focus() has to
+   wait for an effect).
+
+   ⚠ AND THE PANE PLACEMENT IS WHY THE LIST KEEPS ITS SCROLL POSITION. The list is
+   not hidden and not re-rendered; the viewer simply occupies the column next to it,
+   so closing the viewer puts the reader back exactly where they were. */
+
+/* ---- the pane placement -------------------------------------------------- */
+
+@media (min-width: 760px) {
+  /* The viewer IS the third column, and the list keeps the 320–420px track
+     `.content` gives it beside a thread. */
+  .app[data-viewer="pane"] .workspace {
+    grid-template-columns: var(--nav-w) minmax(320px, 420px) minmax(0, 1fr);
+  }
+  .app[data-viewer="pane"] .content {
+    grid-area: 1 / 2;
+  }
+  .app[data-viewer="pane"] .viewer-pane {
+    grid-area: 1 / 3;
+  }
+  /* See the ⚠ above: `.content` is one column now, so an un-hidden pane would be
+     drawn below the list rather than beside it. */
+  .app[data-viewer="pane"] .thread-pane,
+  .app[data-viewer="pane"] .content .pane-splitter {
+    display: none;
+  }
+
+  /* FOCUSED READING has no second column to take, so the viewer takes the content
+     area — over the list, in the SAME cell, opaquely. Not `display: none` on the
+     list: a hidden scroll container loses its scroll position, and the list is
+     exactly where the reader is going back to. */
+  .app[data-viewer="main"] .content,
+  .app[data-viewer="main"] .viewer-main {
+    grid-area: 1 / 2;
+  }
+  .app[data-viewer="main"] .viewer-main {
+    z-index: 1;
+  }
+
+  .viewer-pane {
+    border-left: 1px solid var(--border);
+  }
+}
+
+@media (min-width: 1100px) {
+  /* The vertical reading-pane layout sizes the LIST from `--pane-split` — the same
+     track `html[data-pane-layout="vertical"] .app[data-pane="thread"] .content`
+     uses — so a viewer in the pane column is exactly as wide as the reading pane the
+     user sized. The HORIZONTAL layout deliberately keeps the band above:
+     `--pane-split` is a HEIGHT there and cannot size a column. */
+  html[data-pane-layout="vertical"] .app[data-viewer="pane"] .workspace {
+    /* The `auto` track is the docked splitter (#617; styles.css). */
+    grid-template-columns: var(--nav-w) var(--pane-split, 380px) auto minmax(0, 1fr);
+  }
+  html[data-pane-layout="vertical"] .app[data-viewer="pane"] .viewer-pane {
+    grid-area: 1 / 4;
+  }
+}
+
+/* THE PHONE (<760px) IS THE WHOLE SCREEN. Out of flow entirely rather than placed
+   in the grid: below this width `.workspace` is one column, and an explicitly
+   placed grid item would either fight the single track or create a second one.
+
+   `z-index: 9` is BELOW `.modal-backdrop`'s 11 on purpose, and it is not a
+   contradiction: the release confirmation is a DESCENDANT of the viewer, so it is
+   painted inside this stacking context and still lands on top of the file — while
+   the toasts, which are not, stay reachable above both. */
+@media (max-width: 759px) {
+  .viewer-full {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+  }
+}
+
+/* ---- the dialog itself --------------------------------------------------- */
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+/* The dialog takes focus on open (WAI-ARIA APG allows the container), so it has to
+   be able to SHOW that it has it — an invisible focus is how a keyboard user loses
+   track of where they are. */
+.viewer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---- the top bar -------------------------------------------------------- */
+
+.viewer-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.viewer-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.viewer-name {
+  font-weight: 600;
+  /* A 200-character filename must not push the controls off the bar — and it is
+     sender-authored text, so it is isolated as well as truncated: a direction
+     control inside it can then never reorder the facts beside it (#307). */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  unicode-bidi: isolate;
+}
+
+.viewer-fact {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+/* The release mark wears the HELD tone rather than a muted grey: it is a fact
+   about a decision someone made about withheld content, and it should read as
+   belonging to that vocabulary wherever it appears. */
+.viewer-released {
+  color: var(--held);
+  font-size: 0.8571rem;
+  font-weight: 600;
+}
+
+/* An <a> styled as a button needs the box a <button> gets for free — without this
+   the Download link sits a few pixels off the row it shares. */
+.viewer-topbar a.button,
+.viewer-panel-actions a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+
+/* ---- the file ----------------------------------------------------------- */
+
+/* The whole remaining box, and every renderer fills it — the content gets the room,
+   not the chrome. */
+.viewer-file {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: var(--bg-sunken);
+  overflow: auto;
+}
+
+.viewer-note {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+/* Fit is the default; 100% lets the container scroll instead of shrinking the
+   image, which is the whole point of the toggle — a scan of a receipt is unreadable
+   fitted to a column. */
+.viewer-image.is-fit {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.viewer-image.is-actual {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+
+.viewer-text {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.viewer-pdf {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-raised);
+}
+
+/* ---- a panel where a file would be -------------------------------------- */
+
+.viewer-panel {
+  max-width: 52ch;
+  padding: 14px 16px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.viewer-panel-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.viewer-panel-note {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+.viewer-panel-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ---- the held panel ----------------------------------------------------- */
+
+/* TWO TONES, and the difference is visible before a word is read. The bar down the
+   inline start is 4px rather than a full border because this panel is the CONTENT
+   of the area, not a callout inside it. */
+.viewer-held {
+  max-width: 62ch;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-inline-start-width: 4px;
+  border-radius: var(--radius);
+}
+
+/* "Waiting on your decision" — the same tone the reading pane's withheld chip and
+   the composer's held tile already use, so one vocabulary covers all three. */
+.viewer-held-held {
+  color: var(--held);
+  background: var(--held-bg);
+  border-color: var(--held);
+}
+
+/* A verdict. --warn-fg on --warn-bg is a contrast pair tokens.css declares and the
+   build checks in both themes; the --danger edge is the part that says a scanner
+   found something rather than failed to look. */
+.viewer-held-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--danger);
+}
+
+.viewer-held-title {
+  margin: 0;
+  font-size: 1.0714rem;
+}
+
+/* The body stays at the panel's own colour rather than being muted: it is the
+   explanation, not a footnote to it, and muting the one paragraph that says what a
+   release actually does would be the app hiding the consequence. */
+.viewer-held-body {
+  margin: 8px 0 0;
+  max-width: 60ch;
+}
+
+.viewer-held-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ---- the bottom bar and the strip --------------------------------------- */
+
+.viewer-bottombar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.viewer-strip {
+  list-style: none;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Scrolls rather than wraps: the bar is chrome at a fixed height, and a message
+     with eleven attachments must not turn it into three rows that push the file
+     off the screen. */
+  overflow-x: auto;
+}
+
+.viewer-strip-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.viewer-position {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+}
+
+.viewer-zoom {
+  display: flex;
+  gap: 4px;
+}
+
+/* A pressed toggle is a STATE, so it says so in two channels: the weight here and
+   `aria-pressed` on the element (ui/viewer/Viewer.tsx). */
+.viewer-zoom .button[aria-pressed="true"],
+.viewer-strip-controls .button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.viewer-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8571rem;
+  text-align: start;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.viewer-thumb:hover {
+  background: var(--bg-hover);
+}
+
+.viewer-thumb.is-current {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* A HELD ITEM IS DASHED, IN THE HELD TONE, and that is what makes it knowable
+   before it is landed on. The word `held` is in the accessible name too
+   (ui/viewer/strip.ts) — this border is the second channel, never the only one. */
+.viewer-thumb.is-held {
+  color: var(--held);
+  border-color: var(--held);
+  border-style: dashed;
+}
+
+.viewer-thumb-kind {
+  text-transform: uppercase;
+  font-size: 0.7143rem;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.viewer-thumb.is-held .viewer-thumb-kind {
+  color: var(--held);
+}
+
+.viewer-thumb-name {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Sender-authored, like every filename this app draws in its own chrome. */
+  unicode-bidi: isolate;
+}
+
+/* ---- the tiles in the reading pane that open this ----------------------- */
+
+/* The withheld chip's name is a control now (#449): it opens the viewer onto the
+   explanation. It must look exactly like the text it replaced — the chip already
+   carries the affordance in its own frame, and a second button-shaped thing inside
+   it would read as two controls. */
+.attachment-withheld-open {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.attachment-withheld-open:hover .attachment-name,
+.attachment-withheld-open:focus-visible .attachment-name {
+  text-decoration: underline;
+}
+
+/* The mark a release leaves on an ordinary tile, in the same tone and words the
+   viewer's top bar uses. */
+.attachment-released {
+  margin-inline-start: 6px;
+  color: var(--held);
+  font-size: 0.7857rem;
+  font-weight: 600;
+}

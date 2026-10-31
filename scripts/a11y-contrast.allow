@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# WHERE 4.5:1 IS THE ANSWER AND 7:1 IS NOT ASKED FOR (#447).
+#
+# scripts/a11y-check.cjs runs axe twice per surface per theme. The first run is
+# the GATE: WCAG 2 A + AA, and a violation is a red build with no exceptions and
+# no file like this one. The second run is `color-contrast-enhanced` — AAA, 7:1 —
+# which this project MEASURES rather than gates, because AAA on body text and AAA
+# on a 12px timestamp beside it are different decisions and only one of them is
+# worth taking.
+#
+# So: every AAA failure is reported, and a failure whose element is not named here
+# FAILS THE RUN. That is the opposite way round from an ordinary lint suppression
+# file, and deliberately — a new element that misses 7:1 has to be looked at and
+# either fixed or written down with a reason, rather than joining a silent
+# majority. `--disable-rules color-contrast-enhanced` would have been one line and
+# would have measured nothing.
+#
+# FORMAT: `<selector> <min-ratio> <reason>`. The selector must contain no spaces
+# (a comma list is fine); the element is tested with `Element.matches`.
+#
+# ⚠ THE NUMBER IS WHAT STOPS THIS BEING A MUTE. An allowlist of bare selectors
+# accepts 6.9:1 and 2:1 equally, so a token that regressed INSIDE the allowed band
+# would pass forever. Each floor here is the WORST ratio that element was actually
+# measured at, across both themes and every background it was seen on, rounded
+# down to one decimal — so a regression of more than a rounding error is red even
+# though AA would still pass it. The lane prints `BELOW-FLOOR` with both numbers
+# when that happens.
+#
+# ⚠ AND THE FLOOR IS NOT THE WCAG FLOOR. AA (4.5:1) is enforced twice over and
+# neither enforcement is here: scripts/check-tokens.mjs asserts every declared
+# token pair at 4.5:1 in BOTH themes on every `npm run build`, and the axe AA run
+# above this one re-measures the RENDERED result. An entry here means "held to AA,
+# on purpose, and currently at N". It never means "unmeasured".
+#
+# HOW THIS FILE WAS WRITTEN, and how to rewrite it:
+#
+#     A11Y_CONTRAST_REPORT=1 sh scripts/a11y-e2e.sh
+#
+# which measures instead of gating and prints one `aaacand` line per element class
+# and colour pair with the worst ratio seen. Every number below came from that run
+# (axe-core 4.13.0, Chromium 124, 11 surfaces × 3 themes): 46 element classes, all
+# of them between 4.66:1 and 6.97:1 — that is, every AAA shortfall in this client
+# is a LABEL at comfortably better than AA, and not one thing is close to failing.
+# That is the finding this file records.
+#
+# THREE MORE ENTRIES (`.field-hint`, `.setup-step-n`, `.setup-step-name`) were
+# added later, when the day-one wizard (`#/setup`, mailroom#447 follow-up) joined
+# the surface list as its own DENIED failures rather than a fresh report run — the
+# ratio (5.94:1, floored to 5.9) is the same `--fg-muted` tone already documented
+# above at 5.9 on half a dozen other elements, not a new finding.
+#
+# THE THREE FAMILIES BELOW ARE THREE TOKENS, and the entries are the elements each
+# one is drawn on. If a fourth family appears, the honest move is to ask whether
+# it is a label at all before adding lines to it.
+
+# ---------------------------------------------------------------------------
+# 1. THE MUTED LABEL TONE (--fg-muted). Counts, timestamps, aliases, previews,
+#    state lines, the header sentence: the second thing on a row, never the
+#    thing itself. tokens.css declares this tone against --bg, --bg-selected,
+#    --bg-read and --bg-unread at 4.5:1 and check-tokens.mjs holds it there.
+# ---------------------------------------------------------------------------
+.nav-badge 4.6 rail unread count; also the one drawn on the selected entry (--bg-selected)
+.nav-badge-split 5.3 the split half of a rail badge
+.nav-heading 5.3 rail section heading, including its disclosure button form
+.nav-item-muted 5.3 a rail entry for something not syncing
+.sidebar-footer 5.3 the rail's footer line
+.desk-heading-hint 5.3 the hint beside an area heading
+.desk-line-side 5.3 the two counts either side of the line
+.desk-line-value 5.3 the line's printed threshold (its aria-valuetext is the real answer)
+.desk-drawer-sweep 5.3 a drawer's auto-archive sentence
+.list-count 5.3 the message list's count
+.setting-scope-word 5.3 a settings row's scope word
+.setting-fact 5.3 one clause of a settings row's state line
+.menu-group>legend 5.3 a radio group's legend
+.viewer-fact 5.3 a fact on the attachment viewer's top bar
+.viewer-thumb-kind 4.6 the file-type caption on a viewer thumbnail, incl. the current one
+# ⚠ THE NEXT SEVEN WERE 5.5 UNTIL mailroom#514, AND THE NUMBER CHANGED BECAUSE
+# THE MEASUREMENT DID, NOT BECAUSE THE COLOURS DID. Adding two desk surfaces to
+# the lane (the multi-line row layout, and the largest text size) put the
+# pointer, after a click in Settings, over a desk row on the way back — so for
+# the first time these three elements were measured on `--bg-hover` (#eceff1)
+# rather than on `--bg-read`/`--bg-unread`. `--fg-muted` on `--bg-hover` is
+# 5.15:1; on `--bg-read` it is 5.59:1, which is where 5.5 came from.
+#
+# This is #447's lesson repeating exactly: "a pair that exists only because two
+# rules meet in the cascade is invisible to the token checker and plain to a
+# browser." The hovered row is a state every one of these elements is drawn in
+# every day; nobody had ever measured it. So the floor moves to the real worst
+# case, tokens.css gains an `@contrast fg-muted/bg-hover` line (which holds the
+# pair at AA, 4.5:1, from now on, and it clears that at 5.15), and the four
+# message-list entries move with them because the same two rules meet there.
+#
+# NOT "lowered to make the lane green": 5.15 is the measurement, the pair is
+# still comfortably AA, and the floor is still a floor — a token change that
+# took it to 5.0 would go red tomorrow.
+.desk-preview 5.1 the desk row's preview text, including on a hovered row (--bg-hover)
+.desk-alias 5.1 the desk row's "arrived at" alias, including on a hovered row
+.desk-time 5.1 the desk row's time, including on a hovered row
+.sender 5.1 a READ message-list row's sender (unread is --fg), including on a hovered row
+.subject 5.1 a READ message-list row's subject, including on a hovered row
+.preview 5.1 the message-list row's preview text, including on a hovered row
+.row-meta>time 5.1 the message-list row's time, including on a hovered row
+.desk-header 5.9 the desk's one live region, the header sentence
+.desk-tab-count 5.9 the count printed inside a desk tab
+.desk-tab 5.9 a desk tab's label, selected or not
+.field-label 5.9 a form field's visible label
+.field-hint 5.9 explanatory text under a control (first seen on the day-one wizard's step 1, when it has only an inbox to report on)
+.setup-step-n 5.9 a not-yet-current step's number in the day-one wizard's step list (--fg-muted; the current step is --fg, see .setup-step.is-current)
+.setup-step-name 5.9 a not-yet-current step's name in the same list
+.compose-from-reason 5.9 why the composer chose this From address
+.compose-attach-label 5.9 the composer's attachment label
+.compose-sendline>span 5.9 the composer's send line note
+.compose-save-state 5.9 the composer's autosave state
+.message-address 5.9 an address under a name in the reading pane
+.message-meta 5.9 a reading-pane meta line
+.pane-label-add 5.9 the reading pane's add-a-label control
+.attachment-size 5.9 an attachment's size beside its name
+# The withheld chip's reason line, first linted when #675's held-inline surface
+# drew a chip at all (no earlier surface had a quarantined part): the same tone
+# as .attachment-size, measured 5.94:1.
+.attachment-withheld-reason 5.9 why a held file is held ("the scanner flagged this" / "could not be checked")
+# The composer's attachment tiles, first measured when #612's reload surface
+# opened a FORWARD (the only composer with tiles) — the same tone as
+# .attachment-size, on the tile's --bg-sunken, hence 5.34:1 floored to 5.3.
+.compose-tile-size 5.3 a composer attachment tile's size
+.compose-tile-origin 5.3 a composer attachment tile's "from the message" note
+.sender-popover-address 5.9 the sender popover's address line
+.sender-popover-alias 5.9 the sender popover's "writes to" line
+.sender-popover-section>h3 5.9 a sender-popover section heading
+
+# ---------------------------------------------------------------------------
+# 2. THE ACCENT AS TEXT (--accent on a background, --accent-fg on --accent).
+#    Words that are also controls. tokens.css declares both pairs at 4.5:1.
+# ---------------------------------------------------------------------------
+.link-button 5.1 a words-only button (Retry, Details, Undo, Change, and the two compose toggles)
+.desk-line-move 6.6 the line's "stricter"/"looser"
+.compose-button 6.6 the rail's Compose button (--accent-fg on --accent)
+.button-primary 6.6 a primary button (--accent-fg on --accent)
+
+# ---------------------------------------------------------------------------
+# 3. THE WARNING TONE (--danger on --bg-raised). It is never the only carrier:
+#    the sentence itself says what is wrong, and the row's accessible name
+#    repeats it (ui/desk/rowName.ts warningText).
+# ---------------------------------------------------------------------------
+.sender-warning 6.6 the sender-warning panel in the reading pane
+# The withheld chip's Release button (#675's surface, as above): --danger on
+# --bg-raised, 8.0:1 light and 6.69:1 dark (computed from tokens.css; the first
+# run measured 6.96:1 on the browser's button face, before the button was given
+# a background of its own). Never the only carrier: the chip's accessible name
+# says "withheld" and the button says what it does.
+.attachment-withheld>.button-quiet 6.6 the Release button on a withheld chip
+# The rest of the chip is the same tone on the same face (dark: #f28b82 on
+# #1e2228, measured 6.68:1): the held file's name and its WITHHELD pill.
+.attachment-withheld-open>.attachment-name 6.6 a held file's name on its withheld chip
+.attachment-withheld-state 6.6 the WITHHELD pill on a withheld chip

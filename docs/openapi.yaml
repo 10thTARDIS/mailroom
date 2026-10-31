@@ -1,0 +1,2751 @@
+openapi: 3.1.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mailroom JMAP HTTP surface (RFC 8620 core + an RFC 8621 mail subset, plus the
+# urn:mailroom:* extensions). This document is HAND-AUTHORED to match the code in
+# internal/api, not generated, and it is authoritative for the HTTP surface only:
+# where a shape is standard it cross-references RFC 8620 (core) / RFC 8621 (mail).
+#
+# It is deliberately conservative — a property that the server does not emit is
+# NOT listed here. Large objects (notably Email) are documented as a labelled
+# SUBSET of the commonly-used properties; the RFC is the full reference for the
+# rest. The `.forgejo/workflows/ci.yml` `openapi-lint` job validates this file on
+# every PR.
+#
+# Portability (CLAUDE.md): no operator-identifying hosts/domains appear here; all
+# examples use example.com and relative URLs, exactly as the server emits them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+info:
+  title: Mailroom JMAP API
+  version: "1.0"
+  summary: JMAP (RFC 8620/8621) mail server with Mailroom extensions.
+  description: |
+    Every endpoint here is mounted BEHIND the authentication middleware and
+    requires an authenticated session: the user identity is taken from the
+    session cookie (set by the OIDC login flow), NEVER from an `accountId` in a
+    path or request body (spec §10). An unauthenticated request to any JMAP route
+    is answered `401 Unauthorized`.
+
+    There is exactly one JMAP account per user, and its `accountId` IS the user's
+    ULID. A request naming any other account is `accountNotFound` (method calls)
+    or `404` (blob endpoints) — a foreign account is never distinguishable from a
+    non-existent one.
+
+servers:
+  - url: /
+    description: Same-origin; the Session resource advertises relative URLs.
+
+security:
+  - sessionCookie: []
+  - apiKey: []
+
+tags:
+  - name: session
+    description: The JMAP Session resource (RFC 8620 §2).
+  - name: api
+    description: The JMAP API endpoint — batched method calls (RFC 8620 §3).
+  - name: blob
+    description: Blob download/upload (RFC 8620 §6).
+  - name: push
+    description: EventSource server-push of state changes (RFC 8620 §7.3).
+
+paths:
+  /jmap/session:
+    get:
+      tags: [session]
+      operationId: getSession
+      summary: Fetch the Session resource.
+      description: |
+        Returns the authenticated user's Session object (RFC 8620 §2):
+        advertised capabilities, the single account, per-capability primary
+        account, and the API/download/upload/eventSource URLs. Also served at the
+        well-known alias `/.well-known/jmap`.
+      responses:
+        "200":
+          description: The Session object.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /.well-known/jmap:
+    get:
+      tags: [session]
+      operationId: getWellKnownSession
+      summary: Session resource at the RFC 8620 §2.2 well-known location.
+      description: |
+        Identical to `GET /jmap/session`. RFC 8620 §2.2 defines this as the
+        autodiscovery entry point; Mailroom serves the Session object here
+        directly (it does not redirect).
+      responses:
+        "200":
+          description: The Session object.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /jmap:
+    post:
+      tags: [api]
+      operationId: apiRequest
+      summary: Execute a batch of JMAP method calls (RFC 8620 §3).
+      description: |
+        The JMAP request/response envelope. The body is a Request object with a
+        `using` capability list and an ordered `methodCalls` array; the response
+        is a Response object with `methodResponses` in the same order and the
+        current `sessionState`.
+
+        - A `using` entry naming a capability the server does not advertise is a
+          request-level failure: `400` with `urn:ietf:params:jmap:error:unknownCapability`.
+        - A body larger than `maxSizeRequestObject` (see the core capability) or
+          more than `maxCallsInRequest` method calls is a request-level `400`.
+        - A method whose capability was not declared in `using`, and an unknown
+          method, are both answered per-call as `["error", {type:"unknownMethod"}, callId]`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JMAPRequest" }
+      responses:
+        "200":
+          description: |
+            The JMAP Response. NOTE: individual method calls may still have failed
+            — a per-call failure is an `["error", …]` entry in `methodResponses`,
+            not a non-200 status. A non-200 is reserved for request-level failures.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JMAPResponse" }
+        "400":
+          description: Request-level failure (malformed body, unknown capability, limit exceeded).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /jmap/download/{accountId}/{blobId}/{name}:
+    get:
+      tags: [blob]
+      operationId: downloadBlob
+      summary: Download a blob (RFC 8620 §6.2).
+      description: |
+        Streams a blob the caller owns. A `blobId` is a message content hash
+        (64 hex chars) optionally suffixed with a dotted MIME part path
+        (`<hash>.<part>`, e.g. `966f…e6.1.2`) minted by `Email/get`.
+
+        The response is ALWAYS served as an attachment (`Content-Disposition:
+        attachment`) with `X-Content-Type-Options: nosniff` and a restrictive CSP;
+        the `Content-Type` is chosen by the server from a small allowlist (never
+        echoed from the `type` query parameter), so an untrusted attachment can
+        never run as script on the origin. A whole message is served as
+        `message/rfc822`; an unattached upload as `application/octet-stream`.
+
+        Ownership is resolved in Postgres under row-level security keyed to the
+        authenticated user. A blob the caller does not own, a malformed blobId, an
+        account that is not the caller's, and a non-existent blob are ALL answered
+        `404` and are indistinguishable from outside.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          description: MUST equal the caller's own account id (their ULID).
+          schema: { type: string }
+        - name: blobId
+          in: path
+          required: true
+          description: Content hash (64 hex), optionally `.`-suffixed with a MIME part path.
+          schema: { type: string }
+        - name: name
+          in: path
+          required: true
+          description: Client-chosen download filename (sanitized before use in the Content-Disposition header).
+          schema: { type: string }
+        - name: type
+          in: query
+          required: false
+          description: |
+            Advisory only. Present because RFC 8620's downloadUrl template carries
+            it; the server does NOT trust it to choose the Content-Type.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The blob bytes.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: Always `attachment; filename=…`.
+            Content-Type:
+              schema: { type: string }
+              description: Server-chosen (allowlist); `message/rfc822` or `application/octet-stream` for a whole blob.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/BlobNotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /jmap/upload/{accountId}/:
+    post:
+      tags: [blob]
+      operationId: uploadBlob
+      summary: Upload a blob (RFC 8620 §6.1).
+      description: |
+        Stores the request body as a blob owned by the authenticated user and
+        returns its metadata. The stream is capped at `maxSizeUpload` (see the
+        core capability) and refused as it arrives if larger. The declared
+        `Content-Type` is echoed back but not trusted — the download endpoint
+        re-derives the served type.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          description: MUST equal the caller's own account id (their ULID).
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: The stored blob's metadata.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: The `accountId` is not the caller's account.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "413":
+          description: The upload exceeds `maxSizeUpload`, or storing it would exceed the user's storage quota.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: This instance is not configured to store blobs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+
+  /jmap/preview/{accountId}/{blobId}/{name}:
+    get:
+      tags: [blob]
+      operationId: previewBlob
+      summary: Render one blob INLINE for in-browser preview.
+      description: |
+        A narrower, separate door from `downloadBlob`: it serves a stranger's
+        bytes with `Content-Disposition: inline` instead of `attachment`, so a
+        browser renders them directly rather than saving them. Almost nothing
+        qualifies — the inline allowlist is `application/pdf` only today;
+        every other type is refused `415`, including types the download door
+        is happy to name. A bare `blobId` with no MIME-part suffix is also
+        refused `415`: a whole message's raw bytes are never previewable.
+
+        The response carries a `sandbox` CSP directive and `frame-ancestors
+        'self'` / `X-Frame-Options: SAMEORIGIN`, so the served document has an
+        opaque origin and is frameable only from this origin, whatever markup
+        embeds it. `?type=` is ignored exactly as on the download door.
+
+        An attachment quarantined by malware scanning (ADR-027 §8) is refused
+        `403` here too — this door hands a stranger's bytes to the browser's
+        own PDF engine, so it is enforced at least as strictly as the
+        download door.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          description: MUST equal the caller's own account id (their ULID).
+          schema: { type: string }
+        - name: blobId
+          in: path
+          required: true
+          description: |
+            `<hash>.<part>` — a MIME part reference. A bare content hash with
+            no part suffix is refused `415` (nothing to preview).
+          schema: { type: string }
+        - name: name
+          in: path
+          required: true
+          description: Client-chosen filename (sanitized before use in the Content-Disposition header).
+          schema: { type: string }
+      responses:
+        "200":
+          description: The part's bytes, served inline.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: Always `inline; filename=…`.
+            Content-Type:
+              schema: { type: string }
+              description: Server-chosen (allowlist); `application/pdf` is the only previewable type today.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The part is quarantined by malware scanning (ADR-027 §8); see the `X-Mailroom-Attachment-Scan` header. A HEAD request gets the same status and headers, which is how the web client checks before it navigates.
+          headers:
+            X-Mailroom-Attachment-Scan:
+              schema: { type: string, enum: [flagged, unknown] }
+              description: The verdict that blocked the part.
+            X-Mailroom-Attachment-Signature:
+              schema: { type: string }
+              description: The scanner's detection name. Present only for `flagged` on a part of a decrypted message (stored verdicts do not keep it).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "404": { $ref: "#/components/responses/BlobNotFound" }
+        "415":
+          description: This part's type is not on the (short) inline-preview allowlist, or the `blobId` names a whole message rather than a part; download it instead.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /jmap/proxy/{accountId}/{messageId}/{token}:
+    get:
+      tags: [blob]
+      operationId: proxyRemoteImage
+      summary: Fetch a remote image the user has unblocked, through the server (ADR-026).
+      description: |
+        A Mailroom extension, not part of RFC 8620/8621. When the image proxy
+        is enabled (`MAILROOM_IMAGE_PROXY`, on by default) and the user has
+        unblocked remote content for a message, `bodyValues` rewrites the
+        sender's remote `<img>` URL to this same-origin path instead of
+        leaving it for the browser to fetch directly. The server then fetches
+        it through the SSRF-guarded egress client (`internal/egress`) and
+        re-serves only real image bytes — hiding the reader's browser, TLS
+        fingerprint and address from the sender, but not the fact or timing
+        of the open.
+
+        `token` is `sha256(url)` truncated to 16 bytes, hex-encoded — a
+        lookup key scoped to this message, not a capability; the endpoint
+        re-resolves and re-authorizes the URL server-side rather than
+        trusting the token. Every "you may not have this" case (no such
+        message, sender not allowed, no such image, a disabled proxy)
+        collapses to the same `404` deliberately, so the endpoint is never an
+        oracle. A refusal is always a status, never a redirect to the
+        sender's URL.
+
+        A cache hit is served with no outbound fetch at all — the only case
+        in which re-reading a message does not tell the sender it was opened
+        again.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          description: MUST equal the caller's own account id (their ULID).
+          schema: { type: string }
+        - name: messageId
+          in: path
+          required: true
+          description: The message the image URL was parked in.
+          schema: { type: string }
+        - name: token
+          in: path
+          required: true
+          description: Lower-case hex, `sha256(url)` truncated to 16 bytes.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The re-served image bytes.
+          content:
+            image/*:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The resolved URL was refused by the egress guard (a private/blocked address or a disallowed scheme).
+          content:
+            text/plain:
+              schema: { type: string }
+        "404":
+          description: |
+            The proxy is disabled, or the account/message/token do not
+            resolve, or the sender is not allowed — deliberately
+            indistinguishable from each other (no oracle).
+          content:
+            text/plain:
+              schema: { type: string }
+        "415":
+          description: The fetched resource was not a re-servable image content type.
+          content:
+            text/plain:
+              schema: { type: string }
+        "429":
+          description: Per-user image-fetch rate limit exceeded (separate from the general API rate limit).
+          content:
+            text/plain:
+              schema: { type: string }
+        "502":
+          description: The sender's server could not be reached, or refused or errored on the request.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /jmap/eventsource/:
+    get:
+      tags: [push]
+      operationId: eventSource
+      summary: Server-push of state changes (RFC 8620 §7.3).
+      description: |
+        A `text/event-stream` that emits a `state` event carrying a StateChange
+        object whenever a subscribed type's change state advances. The client
+        reacts by calling `Foo/changes` for the moved type — the same
+        authoritative delta it would poll for, without the wait. Server-side the
+        states are POLLED at a short interval (this is not a notification bus).
+
+        Concurrency is capped server-wide; over the cap the server answers `503`
+        with `Retry-After`.
+      parameters:
+        - name: types
+          in: query
+          required: false
+          description: |
+            Comma-separated JMAP types to subscribe to, or `*`/empty for all.
+            An unknown type is a `400`. Supported: Email, Mailbox, Thread, Label,
+            Identity, EmailSubmission, Contact.
+          schema: { type: string }
+        - name: closeafter
+          in: query
+          required: false
+          description: '`state` closes the stream after the first state event (a one-shot "what is the state now?").'
+          schema: { type: string, enum: ["state", "no"] }
+        - name: ping
+          in: query
+          required: false
+          description: Ping interval in seconds (`0` = no ping), clamped to a server minimum.
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: The event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: An unknown `types` value or a malformed `ping`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503":
+          description: Too many concurrent event streams (carries `Retry-After`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RequestError" }
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: mailroom_session
+      description: |
+        The session cookie set by the OIDC login flow (default name
+        `mailroom_session`; the operator may override it). Every JMAP route
+        requires it; without it the response is `401`.
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        An API key (ADR-042): `Authorization: Bearer mr_…` — the standard
+        scheme, for any HTTP or MCP client. Keys are created in a browser
+        session with `ApiKey/set` (urn:mailroom:apikeys); the token is shown
+        once. A key reaches ONLY `POST /jmap`, `GET /jmap/session` and
+        `GET /.well-known/jmap` (anything else is `403`), and only the methods
+        its scopes allow (method-level `forbidden` otherwise; see the scope
+        table in ADR-042 §3).
+
+        Every authentication failure — malformed, unknown, revoked or
+        suspended key, or a request carrying BOTH a session cookie and a
+        bearer token — is the same `401` with `WWW-Authenticate: Bearer
+        realm="mailroom"` and body `unauthorized`. Repeated failures from one
+        client address are answered `429` with `Retry-After`.
+
+        Per-key limits are method errors in the response, not HTTP statuses:
+        `rateLimit` (the key's per-minute rate) and `overQuota` (its 24-hour
+        budget). A read costs one unit per 50 objects (`readUnitObjects`); a
+        `/set` costs 1 per object. A key submits only drafts it wrote, and
+        cannot change or cancel a submission.
+
+  responses:
+    Unauthorized:
+      description: No authenticated session.
+      content:
+        text/plain:
+          schema: { type: string, example: "unauthorized" }
+    RateLimited:
+      description: Per-user request rate limit exceeded (spec §10).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RequestError" }
+    BlobNotFound:
+      description: |
+        No such blob — collapses "not found", "not yours", "wrong account", and
+        "malformed blobId" into one answer (no oracle).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/RequestError" }
+
+  schemas:
+
+    # ── Session (RFC 8620 §2) ────────────────────────────────────────────────
+    Session:
+      type: object
+      required: [capabilities, accounts, primaryAccounts, username, apiUrl, downloadUrl, uploadUrl, eventSourceUrl, state]
+      properties:
+        capabilities:
+          type: object
+          description: URN → capability object. The single source of truth for what a client may `using`.
+          $ref: "#/components/schemas/Capabilities"
+        accounts:
+          type: object
+          description: accountId → Account. Exactly one entry (the caller's own account).
+          additionalProperties: { $ref: "#/components/schemas/SessionAccount" }
+        primaryAccounts:
+          type: object
+          description: capability URN → the primary account id for it (always the caller's account).
+          additionalProperties: { type: string }
+        username: { type: string, description: The user's email address. }
+        apiUrl: { type: string, example: "/jmap" }
+        downloadUrl:
+          type: string
+          example: "/jmap/download/{accountId}/{blobId}/{name}?type={type}"
+        uploadUrl:
+          type: string
+          example: "/jmap/upload/{accountId}/"
+        eventSourceUrl:
+          type: string
+          example: "/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}"
+        state:
+          type: string
+          description: Opaque session state (RFC 8620 §2); changes when capabilities/accounts change.
+
+    SessionAccount:
+      type: object
+      description: One entry in Session.accounts (RFC 8620 §2).
+      required: [name, isPersonal, isReadOnly, accountCapabilities]
+      properties:
+        name: { type: string, description: The account's display name (the user's email). }
+        isPersonal: { type: boolean }
+        isReadOnly: { type: boolean }
+        accountCapabilities:
+          type: object
+          description: Per-account capability objects (everything except urn:ietf:params:jmap:core, which is a server property).
+
+    Capabilities:
+      type: object
+      description: |
+        The advertised capability set: the three IETF standards plus the
+        urn:mailroom:* extensions. `capabilityObjects()` in
+        internal/api/capability.go is the single source of truth — the session
+        map, the per-account map and the `using` validator are all derived from
+        it, so THAT is what to read when this document and the code disagree.
+
+        ⚠ This description used to say "twelve URNs … nine urn:mailroom:*
+        extensions", which had been wrong for some time, and separately five
+        advertised URNs — unsubscribe, remotecontent, composesnippets,
+        savedsearches, categorytabs — were simply missing from the properties
+        below. A hand-maintained count drifts silently and
+        reads authoritative while it does, so the count is gone in favour of a
+        pointer to the thing that cannot drift; the property list itself is
+        pinned against capabilityObjects() by TestCapabilityDocMatchesCode
+        (internal/api/openapi_capability_test.go), which fails in EITHER
+        direction — a URN the code advertises and this file omits, or one this
+        file documents that the code no longer advertises.
+
+        DEFERRED / NOT YET ADVERTISED — documented for completeness, but the
+        server does NOT advertise it because its methods are not built
+        (advertising a method-less capability would violate the fail-closed
+        model): `urn:mailroom:keys`.
+      properties:
+        urn:ietf:params:jmap:core: { $ref: "#/components/schemas/CoreCapability" }
+        urn:ietf:params:jmap:mail: { $ref: "#/components/schemas/MailCapability" }
+        urn:ietf:params:jmap:submission: { $ref: "#/components/schemas/SubmissionCapability" }
+        urn:mailroom:labels: { type: object, description: Label extension (spec §6/§13). No capability properties. }
+        urn:mailroom:compose: { type: object, description: Compose/alias extension (spec §5). No capability properties. }
+        urn:mailroom:accounts: { type: object, description: In-UI account management (spec §12). No capability properties. }
+        urn:mailroom:contacts: { type: object, description: Auto-derived contacts (spec §10a). No capability properties. }
+        urn:mailroom:rules:
+          type: object
+          description: |
+            T0 rules engine (spec §8). No capability properties.
+
+            Methods: Rule/get, Rule/query, Rule/changes, Rule/set,
+            Rule/preview and Rule/induce.
+
+            **Rule/preview** — the blast radius of a rule BEFORE it is saved.
+            Takes a rule literal (no id; the rule need not exist), writes
+            nothing, and returns { matched, scanned, total, complete,
+            readBodies, conflicts, conflictLabels, samples }. The scan is
+            bounded and reports its own bound: complete=false means `matched` is
+            a lower bound over the `scanned` most recent messages, not a
+            whole-mailbox count. Conditions testing `to` or a named header must
+            open message blobs (there is no recipients table), so they scan a
+            smaller window and set readBodies=true.
+
+            Pass `targetLabelId` — the label the rule would apply — to get
+            `conflicts`: matched messages the user has already filed under a
+            DIFFERENT label BY HAND. Labels applied by a rule or the model are
+            not conflicts; only the user's own filing counts. Without
+            targetLabelId, conflicts is 0 because none was asked for, which is
+            not a claim of safety.
+
+            When `targetLabelId` is an area's own label, the result also
+            carries `areaFiling`: { areaId, labelId, move, alreadyThere,
+            contestedByUser, contestedByRule, contestedOther }, what Rule/apply
+            would do to the matched mail. Its counts sum to `matched`. An
+            area-filing apply removes the OTHER areas' own labels only where
+            the desk or day-one setup applied them; mail the user, another rule
+            or anything else filed in another area is left there and counted.
+            Rule/apply reports the same object over the mail it processed, plus
+            `removedAreaLabels` ({messageId: [{labelId, appliedBy}]}), which an
+            undo passes back as `restoreAreaLabels` to put those labels back
+            with their original attribution. `areaFiling` is null for any
+            other target.
+
+            **Rule/induce** — propose a rule from what the user has labelled.
+            Given `labelId`, it takes the hand-labelled messages as positive
+            examples, measures candidate rules against a bounded window of real
+            mail, and returns { examples, required, scanned, total, complete,
+            candidates } best-first. It CREATES NOTHING: a candidate is a
+            proposal the client saves with Rule/set once a human accepts it.
+
+            `examples < required` is the normal answer for a new label — one
+            example is not evidence, since a message shares its own sender and
+            subject with itself. An empty `candidates` with enough examples is
+            also honest: messages with nothing in common do not imply a rule.
+            Each candidate reports `covers` (labelled examples matched),
+            `collateral` (other mail it would newly label) and `samples` drawn
+            from the collateral, since what a person needs to see is what ELSE
+            a rule catches.
+        urn:mailroom:remotecontent:
+          type: object
+          description: |
+            Remembered per-sender "show remote content" decisions (spec
+            §11). No capability properties. The RemoteAllow object
+            (`{id, kind, value}`; `kind` is "address" or "domain") and
+            RemoteAllow/get, /changes, /set, plus RemoteContent/request —
+            `{accountId, messageId}` → `{accountId, requested, expiresIn?}` —
+            which is the OTHER way to be allowed: a one-off "yes, this once"
+            for a single message, held in memory for 30 minutes and never
+            written to a table, because a durable row would turn a
+            non-decision into a permanent grant.
+
+            No /query on RemoteAllow: the list is a handful of rows a client
+            reads whole, and a filterable query over "senders whose images I
+            load" answers a question nobody asks.
+
+            Its own capability rather than a corner of capMail, because
+            remote-content policy is not mail data, and because a client that
+            does not declare this URN cannot read or write the allow list at
+            all — the right failure, since such a client falls back to
+            blocking remote content and asking every time, i.e. the safe
+            default.
+        urn:mailroom:composesnippets:
+          type: object
+          description: |
+            Saved signatures and templates (spec §5). No capability
+            properties. One ComposeSnippet object for both — a signature and a
+            canned reply are the same thing wearing two hats: a named piece of
+            body text the user wrote once and reuses
+            (`{id, kind, identityId, name, bodyHtml, bodyText, isDefault}`) —
+            and ComposeSnippet/get, /changes, /set. No /query: a compose
+            window reads the whole handful and picks locally.
+
+            Separate from urn:mailroom:compose, which covers the
+            derived-alias properties on Email and Identity — those are facts
+            about a message; these are stored text the user authored.
+        urn:mailroom:savedsearches:
+          type: object
+          description: |
+            Named queries and the sidebar's smart folders (matrix §7). No
+            capability properties. One SavedSearch object doubles as both — a
+            saved search and a smart folder are the same row plus a pinned
+            flag (`{id, name, query, inSidebar, position}`) — and
+            SavedSearch/get, /changes, /set. No /query: a saved search RUNS by
+            putting its `query` verbatim into an Email/query filter, exactly
+            the path typed text already takes, so there is deliberately no
+            SavedSearch/query method that could interpret the string a second,
+            possibly disagreeing, way.
+
+            Separate from urn:mailroom:search, which advertises the query
+            SYNTAX and its operators — a property of the search engine, not of
+            the stored state a user authored. A server with no search index
+            still holds saved searches (they simply fail to run, exactly as
+            typing the same text would), so tying them to capSearch would make
+            a broken index look like missing folders.
+        urn:mailroom:unsubscribe:
+          type: object
+          description: |
+            Unsubscribe detection (matrix §6). No capability properties.
+            The read-only, opt-in `unsubscribe` Email property:
+            List-Unsubscribe (RFC 2369) parsed server-side into `{url, email}`
+            — `url` an https: link for the user's own browser to open,
+            `email` a mailto: split into `{to, subject, body}` for the
+            ordinary submission path. Either half can be null; a message with
+            neither has no unsubscribe.
+
+            SURFACING ONLY: nothing here sends an unsubscribe, and RFC 8058
+            one-click is deliberately not implemented — a server-side POST to
+            a URL taken out of a message would be this project's first
+            outbound fetch on behalf of a message (docs/hostile-content.md
+            §2.3). Plain http: links are refused rather than offered (0 of 506
+            real messages used one, so the cost is measured and zero, while
+            cleartext both leaks the subscription and can be rewritten in
+            flight); a message offering only one is reported as having no
+            unsubscribe link, though a mailto beside it still survives.
+
+            Its own capability rather than a corner of capMail, for
+            senderauth's reason below: RFC 8621 defines no such property, so a
+            client that speaks the RFC and nothing else should not be
+            implicitly claiming to understand it.
+
+            This URN gates NO METHOD AT ALL — there is no Unsubscribe/*
+            method, because nothing here sends one — so it is purely a
+            conformance signal, listed as one in capability.go's
+            capabilitiesGatingNoMethod and asserted there in
+            both directions.
+        urn:mailroom:senderauth:
+          type: object
+          description: |
+            What the reading pane can say about a SENDER. No
+            capability properties. Two read-only Email properties, both opt-in:
+
+            **authResults** — the Authentication-Results header (RFC 8601)
+            parsed per method: `{present, spf, dkim, dmarc}`, each method an
+            array of its result keywords or null. Reports FACTS, never a
+            verdict; three distinct states — null (Mailroom wrote the message,
+            so authentication never applied), present:false (it arrived from
+            outside carrying none), present:true (read the methods).
+
+            **senderWarnings** — `[{kind, domain, resembles?, unicode?}]`
+            or null, worst first. `kind` is selfSpoof (a stranger claiming one
+            of the user's own domains without passing DKIM/DMARC),
+            lookalikeDomain (the sending domain RENDERS like one the user
+            corresponds with; `resembles` names it) or punycodeDomain (an xn--
+            label; `unicode` carries the decoded form).
+
+            ⚠ A DIFFERENT QUESTION FROM authResults, not a refinement of it: a
+            lookalike domain passes SPF and DKIM perfectly, because the attacker
+            configured them. ⚠ null is the answer for the overwhelming majority
+            of mail, deliberately — external-sender marking (99.4% of a
+            catch-all mailbox) and display-name impersonation (4.9%, 0%
+            precision) were both measured and NOT built.
+        urn:mailroom:attachmentscan:
+          type: object
+          description: |
+            Attachment malware quarantine (ADR-027). No capability
+            properties. The `attachmentScan` property on Email, and
+            **Email/releaseAttachment** — `{ accountId, id, partId, revoke? }`
+            → `{ accountId, newState, released, affectedEmailIds }`.
+
+            ⚠ A release is keyed on the part's CONTENT, so it covers every copy
+            of those bytes the user holds, including copies that arrive later.
+            `affectedEmailIds` lists every message it touched, which is usually
+            more than the one named in the request.
+
+            ⚠ THIS URN WITHHOLDS NOTHING AND ENFORCES NOTHING. The `using` gate
+            is per-method, so a client that names `attachmentScan` without
+            declaring it still receives the property, and one that declares
+            nothing at all is still refused the quarantined bytes. Enforcement
+            is a server-side gate on the download and preview routes, which no
+            capability declaration can reach — deliberately, since a third-party
+            client that ignores the property is one of the cases it exists for.
+        urn:mailroom:calendar:
+          type: object
+          properties:
+            maxCalendarSize: { type: integer, description: 'Largest text/calendar part the server reads, in octets (262144).' }
+            maxAttendees: { type: integer, description: 'Attendees listed per invitation; the rest are counted in attendeesOmitted.' }
+          description: |
+            Calendar invitations (ADR-033). The read-only `calendarInvite`
+            property on Email — an iTIP REQUEST, CANCEL or REPLY (RFC 5546)
+            parsed on the SERVER from the message's text/calendar part or .ics
+            attachment, so a client never handles a raw .ics — and
+            **Email/replyToInvite** `{ accountId, emailId, partstat:
+            "accepted"|"tentative"|"declined", sendAt? }` → `{ accountId,
+            emailId, partstat, submission, newState }`.
+
+            `calendarInvite` is null (no calendar), `{problem: "tooLarge" |
+            "unreadable"}`, or `{method, uid, sequence, status, summary,
+            location, start, end, organizer, attendees[{name, email, partstat,
+            role}], attendeesOmitted, recurrence{freq, interval, count, until,
+            byDay, text}, recurrenceId, cancelled, cancelledByEmailId,
+            newerEmailId, updatesEmailId, response{partstat, sequence,
+            respondedAt, submissionId, emailId}, canReply, cannotReplyReason,
+            verified}`. `verified` is whether this message is authenticated as
+            coming from the person it speaks for (its one From = ORGANIZER, or the
+            attendee for a REPLY, plus a trusted aligned DMARC pass; Sender is
+            never honoured); only a
+            verified cancellation or update changes another message's card.
+            A time is `{kind: "utc"|"date"|"floating", utc, date, local,
+            timeZone}`; a floating time is shown as written, with its zone
+            named, never silently in the reader's zone.
+
+            ⚠ A REPLY IS ONLY EVER SENT BY THIS METHOD. Nothing answers an
+            invitation on arrival or on read. The reply is a draft submitted
+            through the same path as EmailSubmission/set create — From the
+            address the invitation was delivered to, To the organiser — so the
+            From check, ingest-only mode and Undo Send apply; cancelling the
+            submission withdraws the recorded answer. A refusal is the
+            `cannotReply` error with a sentence for the user.
+
+            ⚠ Updates and cancellations are related only when the UID AND the
+            organiser match, so a stranger's CANCEL for a UID they learned does
+            not cancel the card. Nothing a calendar names (URL, ATTACH, TZURL)
+            is ever fetched; recurrence is summarised, never expanded.
+        urn:mailroom:triage: { type: object, description: 'T1 priority scoring + Triage controls (spec §8). No capability properties.' }
+        urn:mailroom:organize: { type: object, description: 'Local-first organization: pin, mute, snooze (spec §6). No capability properties.' }
+        urn:mailroom:categorytabs: { $ref: "#/components/schemas/CategoryTabsCapability" }
+        urn:mailroom:desk: { $ref: "#/components/schemas/DeskCapability" }
+        urn:mailroom:outofoffice: { type: object, description: 'Out-of-office reply per MAIL account: OutOfOffice/get, /set and /check. One object per account, its id the account id (not RFC 8621 VacationResponse, which is a per-JMAP-account singleton). /set installs the reply on the provider over ManageSieve and saves only what the provider accepted; it refuses while another Sieve script is active. Replies are sent by the provider and do not appear in the outbound ledger (ADR-034). No capability properties.' }
+        urn:mailroom:search: { $ref: "#/components/schemas/SearchCapability" }
+        urn:mailroom:apikeys:
+          type: object
+          description: |
+            Agent access (ADR-042). Methods — all SESSION ONLY except
+            PendingAction/get:
+
+            - `ApiKey/get` {ids?} → {list, notFound}. A key: id, name,
+              tokenHint ("mr_" + 7 characters), scopes, accountIds (null = every
+              account), labelIds (always null), confirmScopes, ratePerMinute,
+              dailyBudget, suspendOnAnomaly, createdAt, lastUsedAt, revokedAt,
+              suspendedAt, suspendedReason, usedLastMinute, usedLast24h.
+            - `ApiKey/set` create {name, scopes, accountIds?, labelIds? (must be
+              null), confirmScopes?, ratePerMinute?, dailyBudget?,
+              suspendOnAnomaly?, acknowledgeSendAndDelete?} → `created[cid]`
+              carries `token`, the ONLY time it is returned. A key with both
+              mail:send and mail:delete needs acknowledgeSendAndDelete: true
+              (on create, and on an update that newly grants both).
+              confirmScopes defaults to the destructive scopes granted. update
+              takes the same properties plus `suspended` (false resumes);
+              destroy REVOKES (permanent; the row and its audit stay).
+            - `ApiKey/getEvents` {keyId?, before?, limit? (1–200, default 50)} →
+              {list} newest first: at, method, outcome (ok, denied,
+              rate_limited, over_budget, pending, approved, denied_by_user,
+              expired, anomaly), cost, deletes, sends, summary (ids and counts,
+              never content), clientIp, pendingActionId, errorType, anomaly
+              (mass_delete, mass_send, off_hours).
+            - `PendingAction/get` {ids?, states?} → {list, notFound}: id, keyId,
+              keyName (session only), kind (send|delete), method, summary,
+              state (pending, approved, denied, expired, failed), emailIds,
+              createdAt, expiresAt, decidedAt, detail. A KEY may call it and
+              sees only its own requests.
+            - `PendingAction/set` update {id: {state: "approved"|"denied"}} →
+              updated[id] = {state, result | error}; notUpdated types
+              notFound, notPending, pendingExpired, keyNotActive, draftChanged.
+
+            A held call answers with SetError type `pendingApproval` carrying
+            `pendingActionId`: in `notDestroyed` (Email/set) or `notCreated`
+            (EmailSubmission/set).
+
+            A key's OWN drafts in Email/set (ADR-045; keys only, under
+            mail:draft, never held, refused with `forbidden` for anything
+            that is not this key's unsent draft in Drafts with no submission
+            and no send waiting for approval):
+
+            - a create identical to one this key saved in the last 10 minutes
+              (still a live draft) writes nothing: `created[cid]` is that
+              draft, with `alreadySaved: true`;
+            - a create carrying `replacesEmailId` is a new version of that
+              draft: the old one moves to Trash in the same transaction, the
+              old threading is kept when the create gives none, and
+              `created[cid].replacedEmailId` names it;
+            - `discardDrafts: [ids]` moves drafts to Trash, answered in
+              `discarded` / `notDiscarded`.
+
+            A key's EmailSubmission create is refused for its draft once that
+            draft is in Trash or out of Drafts (replaced or discarded).
+          properties:
+            scopes: { type: array, items: { type: string } }
+            confirmableScopes: { type: array, items: { type: string } }
+            defaultRatePerMinute: { type: integer }
+            maxRatePerMinute: { type: integer }
+            defaultDailyBudget: { type: integer }
+            maxDailyBudget: { type: integer }
+            approvalWindowSeconds: { type: integer }
+            labelRestrictionSupported: { type: boolean }
+            massDeleteThreshold: { type: integer }
+            massDeleteWindowSeconds: { type: integer }
+            massSendThreshold: { type: integer }
+            massSendWindowSeconds: { type: integer }
+            readUnitObjects:
+              type: integer
+              description: Objects one budget unit reads (50). A /get costs ceil(ids/50), a /query ceil(limit/50); a read whose size its arguments do not state costs 1 and is topped up from the size of its answer.
+        urn:mailroom:push: { $ref: "#/components/schemas/PushCapability" }
+        urn:mailroom:devices: { type: object, description: 'Signed-in devices (ADR-048 section 6): SignedInDevice/get {ids: null} → {list, state, notFound}, each {id, description ("Firefox on Linux"; the raw user agent is never returned), createdAt, lastSeenAt, lastAddr, isCurrent}; any other ids are notFound. There is no /changes; re-fetch. SignedInDevice/set supports only destroy: a list of ids and/or the literal "*others*" (every session but this one) ends those sessions, deletes the push subscriptions registered from them and revokes their provider refresh token; destroying the current session equals signing out here (the next request is 401). create and update are forbidden. SESSION ONLY: an API key is refused both methods. No capability properties.' }
+        urn:mailroom:pgp:
+          type: object
+          properties:
+            signing:
+              type: boolean
+              description: |
+                Whether THIS SERVER can sign outbound mail at all — that
+                is, whether a crypto process is wired to it. The private half of
+                a key only ever exists behind that boundary (ADR-024), so an
+                instance with keys bound and no crypto socket sends the key and
+                NO signature. Server-wide, not per-identity.
+            encrypt:
+              type: boolean
+              description: |
+                Whether THIS SERVER can encrypt outbound mail at all (ADR-038): a crypto process wired for signing AND encrypting.
+                Server-wide. Per-recipient availability is `RecipientKey/lookup`;
+                per-identity the sender also needs a non-null `signingKeyId`
+                (encryption signs, and always encrypts to the sender's own key
+                so the Sent copy stays readable). Absent on a server that
+                predates encryption: read absent as "cannot ask", not "no".
+            keyManagement:
+              type: boolean
+              description: |
+                Whether UserKey/generate, /import, /extend, /revoke and /export
+                can be called: a crypto process is wired for key custody.
+                Without it they answer `keyManagementUnavailable`. UserKey/set
+                (bind, publish, retire) and the reads work either way.
+            keyExpiryWarningDays:
+              type: integer
+              description: |
+                The ONE expiry-warning threshold, in days (default 30;
+                pgpkeys.ExpiryWarningDays). Every `expiringSoon` flag the
+                server returns uses it, so a client's own wording ("expires in
+                12 days") agrees with them.
+          description: |
+            The first key-management increment (spec §9), plus `signing`.
+            Read-only additions that let a client say "key held" on a recipient
+            chip, "1 key, published · 0 correspondent keys held" on the settings
+            page, and "Will sign" in a compose window — without exposing any key
+            material.
+
+            **"Will sign" NEEDS BOTH FACTS, AND EITHER ALONE IS WRONG.** Print it
+            only when this capability's `signing` is `true` AND the sending
+            `Identity` reports a non-null `signingKeyId`. `signing` alone says
+            the server could sign for somebody; `signingKeyId` alone says a
+            usable key is bound to this address, which on a server with no
+            crypto process still sends nothing but the key. Both are read-only
+            and both are derived from what the send path itself consults, so
+            neither can drift from what actually happens at submit time.
+
+            **Decrypt on open (ADR-037).** Three read-only Email
+            properties: `encrypted`, `decrypted`, `pgpSignature` (see the
+            Email schema). When a message is RFC 3156 PGP/MIME encrypted and a
+            BODY property is requested, the server decrypts it in its crypto
+            process for that request only and renders the plaintext through the
+            ordinary body pipeline. The plaintext is never stored, indexed,
+            snippeted or cached: encrypted mail is not searchable, and its
+            `preview` stays what ingest saw (the ciphertext's).
+
+            Parts of a decrypted message have partIds `e.<path>` and blobIds
+            `<messageBlobId>.e.<path>`. Downloading or previewing one decrypts
+            the message again and scans that part with the malware scanner
+            before serving it; `flagged`/`unknown` are refused with 403
+            `attachmentQuarantined`, exactly as for stored parts, and a message
+            that cannot be decrypted answers 422 `notDecryptable` with no
+            detail. Responses carry `Cache-Control: no-store`. Such a blobId
+            cannot be attached to a draft (its plaintext would be stored).
+
+            **UserKey/get** — the login's OWN keys (`app.user_keys`), public
+            facts only (see the UserKey schema): the stored facts plus, read
+            from the key's packets at the call, `expiresAt`, `expired`,
+            `usable`, `expiringSoon`, `canSign`, and `origin`, `wkdUrl`,
+            `wkdServable`. The response also carries `wkdConfigured` and
+            `wkdDomain` (MAILROOM_WKD_DOMAIN, or null). NEVER `private_key_ct`,
+            `dek_id`, `envelope_ver`, or the public key bytes. No
+            UserKey/changes: `state` is a hash of the rows and the
+            clock-derived flags, for cache-busting (every mutation below does
+            append Key / Identity change_log rows).
+
+            **Own-key management (ADR-040 amendment).** Every operation
+            on a private key runs in the crypto process; generate, import and
+            export are rate-limited per user (method error `rateLimited`),
+            extend and revoke are not. Passphrases and private keys are never
+            logged, echoed in errors, or stored. Shared method errors:
+            `keyManagementUnavailable` (no crypto process), `notFound` (no
+            such key, or another user's), `rateLimited`, `invalidArguments`.
+
+            - **UserKey/generate** `{accountId, identityId, expiresDays? |
+              expiresAt?, bind?}` → `{accountId, id, fingerprint, boundTo,
+              key}`. The identity must be a FIXED address (`wildcardIdentity`
+              otherwise); its display name and address go on the key, never
+              free text. `expiresDays` absent/null = 730, 0 = never, at most
+              3650. `expiresAt` (at most one of the two) is an exact
+              expiry: a date `YYYY-MM-DD` means the END of that day in UTC
+              (23:59:59Z); a UTCDate or RFC 3339 date-time is that instant in
+              UTC, to the second. It must be at least one day and at most 3650
+              days from now. The key's primary and encryption subkey expire at
+              exactly that second (the lifetime is computed from the key's own
+              creation time). `bind: true` also makes it the identity's
+              signing key. Change rows: Key created (+ Key, Identity updated
+              when bound).
+            - **UserKey/import** `{accountId, privateKey, passphrase?}` →
+              `{accountId, id, fingerprint, alreadyStored, key}`.
+              `privateKey` is an armored PRIVATE KEY BLOCK or the base64 of a
+              binary secret key (at most 512 KiB of text). Errors:
+              `publicKeyRefused` (a public key was given), `invalidKey`
+              (unreadable, wrong passphrase, no secret half), `tooLarge`. A
+              key already held is `alreadyStored: true` with no change row.
+            - **UserKey/set** `{accountId, ifInState?, update: {id: patch}}`.
+              A patch changes ONE of `identityId` (an identity id to bind,
+              null to unbind), `wkdPublished` (true/false) or `decryptOnly:
+              true` (retire; never undone), except that `decryptOnly: true`
+              may come with `identityId: null` to retire and unbind together.
+              SetError types: `oneChangeAtATime`, `keyIsDefault` (retiring a
+              bound key without unbinding), `keyIsPublished` (unbinding a
+              published key), `keyRetired` (binding a retired or revoked key),
+              `wkdNotConfigured`, `notPublishable` (unbound, wildcard, at a
+              domain this server does not publish for, retired, revoked),
+              `retireIsPermanent`, `notFound`, `invalidProperties`. create and
+              destroy are refused (`forbidden`). A patch that changes nothing
+              writes no change row. A successful BIND returns
+              `updated[id] = {boundAddressListed}`; when the key carries no
+              valid user ID naming the identity's address it is
+              `{boundAddressListed: false, warning: "addressNotInKey"}`: the
+              bind is made, and the client warns that correspondents' clients
+              may refuse or flag the key.
+            - **UserKey/extend** `{accountId, id, days | expiresAt}` (exactly
+              one: `days` 1..3650 from now, or `expiresAt` as for generate) →
+              `{accountId, id, expiresAt, key}`. Same fingerprint. Refused for
+              a revoked key (`invalidArguments`). One Key change row.
+            - **UserKey/replace** `{accountId, id, expiresDays? |
+              expiresAt?}` → `{accountId, id (the new key), replacedId,
+              fingerprint, published, boundTo, key, oldKey}`. Generates a new
+              key for the address of `id` (its identity's signing key), then in
+              ONE transaction binds it there, publishes it in WKD when the old
+              key was published and this server serves the address, and retires
+              the old key (`decryptOnly`, unpublished, `retiredAt`,
+              `replacedBy`). The old key still decrypts. A failure after the
+              key is generated leaves the old key exactly as it was (the new
+              key then exists unbound and the description names it). Errors,
+              each before anything is generated: `keyRevoked`, `keyRetired`,
+              `keyNotBound` (unbound, or no longer its address's signing key),
+              `wildcardIdentity`, `rateLimited` (shares generate's budget),
+              `notFound`, `invalidArguments`. Change rows: Key created (new),
+              Key updated (new), Key updated (old), Identity updated.
+            - **UserKey/revoke** `{accountId, id, reason, confirm}` →
+              `{accountId, id, revokedAt, key}`. `reason` is `compromised`,
+              `superseded` or `retired`; `confirm` the last 8 hex digits of
+              the fingerprint, checked by the crypto process against the key
+              it resolved. Irreversible; the key still decrypts. Change rows:
+              Key, and each Identity it signed for.
+            - **UserKey/export** `{accountId, id, passphrase}` (at least 12
+              characters) → `{accountId, id, fingerprint, armoredKey,
+              fileName}`. `armoredKey` is the key with its secret packets
+              encrypted under that passphrase; it is returned in this response
+              only and stored nowhere (no blob). No change row.
+
+            **ContactKey/get** `{accountId, contactIds?, includeRemoved?}` →
+            `{accountId, state, list, notFound}`: one entry per held
+            correspondent key, `{id, contactId, fingerprint, kind, source,
+            authenticated, refused, pinned, pinnedFor, addresses, createdAt
+            (the key's own creation time; null if unreadable), fetchedAt,
+            expiresAt, expired, revoked, usable, expiringSoon,
+            hasEncryptionKey, userIds, removedAt}`. `userIds` is
+            `[{name, email, revoked, primary}]`, primary first: only user IDs
+            carrying a verifying self-signature, as cleaned untrusted text
+            (control and Unicode format characters removed, 256 runes per
+            field, at most 32). `contactIds` null means every contact.
+            `includeRemoved: true` also lists keys the user removed,
+            with `removedAt` set; such a key is never used for anything.
+            Never key material. No ContactKey/changes: a key change is a
+            Contact change.
+
+            **ContactKey/set** `{accountId, destroy: [id]}` removes a held key
+            and any pin naming it, with one Contact `updated` change row;
+            `notFound` for an id not held. Removal is a soft
+            delete: the key and its history are kept, and a later sighting of
+            the same key (Autocrypt, WKD, import) brings it back with its
+            history. create and update are refused (`forbidden`; use
+            ContactKey/import and ContactKey/decide).
+
+            **ContactKey/history** `{accountId, id}` → `{accountId, id,
+            list: [{kind, source, at, expiresAt}]}`, oldest first, for a held
+            or removed key. `kind`: `first_seen`, `renewed`, `updated`,
+            `revoked_seen`, `pinned`, `refused`, `removed`; `source`: the key
+            route (`autocrypt`, `wkd`, `manual`, `keyserver`) or `user`;
+            `expiresAt`: the key's end of usability after the event (null =
+            never, or unreadable). `notFound` otherwise. Read-only.
+
+            **ContactKey/refresh** `{accountId, id}` → `{accountId, id,
+            result, checkedAt, key, addresses: [{address, outcome}],
+            newKeyId?, newFingerprint?}`. Looks the key up over WKD (the
+            RecipientKey/lookup fetcher: https only, private hosts refused,
+            bounded) at its user ID addresses that are its contact's (else the
+            contact's, at most 3) and merges what is served. `result`:
+            `renewed` (a renewal of this key was merged), `revoked` (a
+            revocation of it was merged), `updated` (the held copy changed
+            otherwise), `unchanged`, `differentKey` (a different usable key is
+            served: it is stored and, when the address has no pin, the held
+            key is pinned first, so it shows as `keyChanged` and waits for
+            ContactKey/decide; `newKeyId` and `newFingerprint` name it),
+            `notFound`, `unreachable` (an address could not be reached; never
+            reported as `unchanged`). `outcome` per address: `found`, `none`,
+            `unusable`, `failed`. Errors: `rateLimited` (per user, per domain,
+            and at most once per 15 minutes per key), `wkdUnavailable` (no
+            fetcher), `notFound`. A merge writes its history event and a
+            Contact `updated` row; a stored different key writes one too; a
+            refresh that finds nothing writes neither.
+
+            **Contact.keys** (rides on `urn:mailroom:contacts`, NOT gated by
+            this URN) — an array on the Contact object, one entry per
+            correspondent key held: `{fingerprint, kind, source, fetchedAt}`.
+            `source` is `wkd`, `autocrypt`, `manual`, or `keyserver` (see
+            `internal/store/contact_keys.go` for why the route a key arrived
+            by is recorded rather than discarded). Never the key material.
+
+            **Contact/query.hasKey** (rides on `urn:mailroom:contacts`
+            likewise) — an optional boolean filter, combinable with `text`:
+            `true` selects contacts holding at least one key, `false` selects
+            those holding none.
+
+            **Encrypting outgoing mail (ADR-038).** Two additions.
+
+            `EmailSubmission/set` create accepts `encrypt: true`: the message is
+            signed, then encrypted (RFC 3156 §6.1) to every To/Cc recipient and
+            to the sender's own key, and the STORED message is rewritten to the
+            encrypted one before the submission is queued, so the Sent copy is
+            the ciphertext and stays readable through decrypt-on-open. Drafts are
+            never encrypted. The request is REFUSED, never downgraded to a plain
+            send, with SetError type `cannotEncrypt` (and `properties:
+            ["encrypt"]`) when: a recipient has no usable key (the description
+            names the addresses); a recipient's key CHANGED since the last
+            encrypted send (the description gives both fingerprints; answered
+            by ContactKey/decide); there is any Bcc recipient (one ciphertext
+            would reveal every recipient's key id, the Bcc ones included); the
+            sending identity has no bound key; or the server cannot encrypt. A
+            refused send leaves the draft's bytes untouched. The subject and
+            recipients are NOT encrypted (no protected headers).
+
+            **RecipientKey/lookup** — `{accountId, addresses, wkd?}` where
+            `addresses` is 1..50 plain email addresses and `wkd` (default true)
+            allows a bounded WKD lookup for addresses with no usable stored key.
+            Returns `{accountId, list}` with, per address: `usable` (boolean),
+            `fingerprint` and `source` (`manual` | `wkd` | `autocrypt`; null when
+            not usable), `wkd` (what the network side did: `notAsked`,
+            `unavailable`, `skipped`, `found`, `none`, `unusable`, `failed`),
+            `keyChanged` (true when a different key than the last one encrypted
+            to would now be used; `usable` is then false) and `pinnedFingerprint`
+            (the last one, when `keyChanged`), `expiresAt` and `expiringSoon`
+            for the chosen key, and `reason` when not usable: `expired`
+            (with `expiredAt`, the latest moment an eligible key stopped
+            working), `revoked`, `keyChanged` or `noKey`. NEVER key material. A key found
+            over WKD is stored (source `wkd`) so that Submit, which never touches
+            the network, uses the same key.
+
+            Which stored key an address gets: only keys that (1) come from an
+            import, WKD, or an Autocrypt header on a message authenticated for its
+            From domain (DMARC pass under the topmost trusted
+            Authentication-Results, or an aligned local DKIM pass); (2) have an
+            unexpired, unrevoked encryption subkey; and (3) carry a valid,
+            non-revoked user ID naming the address. Highest source wins (import >
+            WKD > authenticated Autocrypt), then the newest. The fingerprint
+            encrypted to is pinned per address (trust on first use).
+
+            **ContactKey/decide** (ADR-039) — `{accountId, address,
+            fingerprint, decision}` where `decision` is `"trust"` or `"keep"`:
+            the user's answer when a sender's key is not the one already
+            pinned (`pgpSignature.state` `keyChanged`, or a recipient's
+            `RecipientKey/lookup` `keyChanged`). `fingerprint` must name a key
+            already held under the contact that owns `address`; this method
+            can neither add nor delete a key. `trust` makes that key the pin
+            for the address and an imported (`manual`) key, clearing any
+            refusal, so encryption to the address then uses it; it requires
+            the key to carry a valid user ID naming `address`, else
+            `keyDoesNotNameAddress`. `keep` records the key as refused: it is
+            never encrypted to, the pin stays the old key, and a signature by
+            it keeps showing as `keyChanged` with `refused: true`. Both write a
+            Contact `updated` change_log row (Contact.keys carries `source` and
+            `refused`). Returns `{accountId, address, fingerprint, decision,
+            pinnedFingerprint}`; `notFound` when no such key is held for the
+            address; `invalidArguments` otherwise.
+
+            **ContactKey/import** (ADR-038) — `{accountId, address,
+            publicKey, dryRun?}`: the user imports a correspondent's public key.
+            `publicKey` is an ASCII-armored key or the base64 of a binary key
+            (at most 256 KiB decoded). The key is stored as an eligible
+            `manual` key under the contact that owns `address` (the contact is
+            created when there is none) and REPLACES the pin for the address,
+            because importing is explicit. Returns `{accountId, address,
+            fingerprint, userId, pinnedFingerprint}`. With `dryRun: true`
+            every check runs and `fingerprint` and `userId` (the user ID that
+            names the address) are returned with `dryRun: true`, but nothing is
+            stored and no change row is written; the web dialog uses it to show
+            the key before the user confirms. One transaction, one Contact
+            `updated` change_log row. Refusals, each a distinct method error
+            type and each storing nothing: `secretKeyRefused` (the input holds
+            secret-key material), `keyDoesNotNameAddress` (no valid,
+            non-revoked user ID with that email), `noEncryptionSubkey`,
+            `keyExpiredOrRevoked`, `invalidKey` (unreadable, or more than one
+            primary key), `tooLarge`, and `ownAddress` (`address` is one the
+            user sends as, so it is not a correspondent's); `invalidArguments`
+            for a malformed request.
+
+            THIS URN GATES EXACTLY THESE METHODS: UserKey/get, /generate,
+            /import, /set, /extend, /revoke, /export, /replace,
+            RecipientKey/lookup, ContactKey/get, /set, /decide, /import,
+            /history and /refresh — a client
+            that omits it cannot reach them (fail-closed, capability.go's mayCall).
+            Contact.keys and Contact/query.hasKey are NOT gated by it: they
+            ride on Contact/get and Contact/query, which
+            urn:mailroom:contacts already gates, for the same reason every
+            other opt-in Mailroom property in this file gives — the `using`
+            gate is per-METHOD, so a client naming `keys` or `hasKey` without
+            declaring this URN still receives it. Declaring urn:mailroom:pgp
+            is what a conformant client is REQUIRED to do before using
+            either; it is not what makes them reachable.
+
+    CoreCapability:
+      type: object
+      description: RFC 8620 §2 core limits. Each value is the limit the server actually enforces.
+      properties:
+        maxSizeUpload: { type: integer, description: Bytes; the enforced upload cap. }
+        maxConcurrentUpload: { type: integer }
+        maxSizeRequestObject: { type: integer, description: Bytes; the enforced POST /jmap body cap. }
+        maxConcurrentRequests: { type: integer }
+        maxCallsInRequest: { type: integer }
+        maxObjectsInGet: { type: integer }
+        maxObjectsInSet: { type: integer }
+        collationAlgorithms:
+          type: array
+          items: { type: string }
+          example: ["i;ascii-casemap", "i;octet"]
+
+    MailCapability:
+      type: object
+      description: RFC 8621 §1.4 mail limits.
+      properties:
+        maxMailboxesPerEmail: { type: [integer, "null"] }
+        maxMailboxDepth: { type: [integer, "null"] }
+        maxSizeMailboxName: { type: integer, example: 255 }
+        maxSizeAttachmentsPerEmail: { type: integer }
+        emailQuerySortOptions:
+          type: array
+          items: { type: string }
+          example: ["receivedAt", "sentAt"]
+        mayCreateTopLevelMailbox: { type: boolean, example: false }
+
+    SubmissionCapability:
+      type: object
+      description: |
+        RFC 8621 §7 submission limits.
+
+        Methods: EmailSubmission/get, EmailSubmission/query,
+        EmailSubmission/changes, EmailSubmission/set.
+
+        **EmailSubmission/get** with `ids: null` returns the 100 most recent
+        submissions only, and does not say so. A client that needs a complete
+        set asks EmailSubmission/query and passes its ids to /get with a `#ids`
+        result reference.
+
+        **EmailSubmission/query** — RFC 8621 §7.3 with a deliberately small
+        surface; anything outside it is REFUSED rather than ignored:
+
+        - `filter`: one FilterCondition of `undoStatus` (`pending` | `final` |
+          `canceled`, as the object reports it), `emailIds` (an empty list
+          matches nothing) and the urn:mailroom:compose extension
+          **`inOutbox: true`** — exactly what the web client's Outbox shows: the
+          submission is the LATEST for its `emailId` (no other submission of the
+          same message has a greater id), and it is either pending
+          (`undoStatus: pending`) or failed and not dismissed
+          (`mailroomState: failed`, `dismissedAt: null`). Only `true` is
+          accepted. Any other condition, or a FilterOperator, is
+          `unsupportedFilter`.
+        - `sort`: not accepted (`unsupportedSort`); the order is fixed, newest
+          first (creation time, then id, descending).
+        - `anchor`: not supported (`invalidArguments`).
+        - `position`: RFC 8620 §5.5, a negative value counts from the end.
+        - `limit`: at most 500 (the advertised `maxObjectsInGet`, so a page
+          always fits one /get). When the limit applied differs from the one
+          requested — none was sent, or it was over the maximum — the response
+          carries `limit`, so a page is never mistaken for the whole result.
+        - `total` is always the real count; `calculateTotal` is accepted.
+        - `queryState` is the EmailSubmission state string;
+          `canCalculateChanges` is always false (there is no
+          EmailSubmission/queryChanges).
+      properties:
+        maxDelayedSend: { type: integer, description: Seconds; the Undo/Send-Later horizon. }
+        submissionExtensions: { type: object }
+
+    SearchCapability:
+      type: object
+      description: |
+        Mailroom search extension (urn:mailroom:search, spec §7).
+
+        `Email/query` accepts an optional integer `searchLimit`: how
+        many hits the search index may return as candidates for a text filter.
+        Absent, it is 500 (`defaultSearchLimit`). A client that must enumerate
+        every match (select all matching, bulk move from a sender) sends
+        `maxSearchLimit` (5000); a larger value is clamped, a smaller one is
+        raised to the default, and a negative one is `invalidArguments`. A
+        bigger limit costs index time (about 0.4 s for 20,000 matches), so
+        ordinary list views should not send it. `searchCapped` in the response
+        is the limit that was actually applied, present only when it was hit.
+      properties:
+        operators:
+          type: array
+          items: { type: string }
+          example: ["from", "to", "cc", "subject", "body", "label", "is", "has", "account", "keyword", "before", "after", "on", "date"]
+        maxSnippetsPerRequest: { type: integer }
+        defaultSearchLimit: { type: integer, example: 500 }
+        maxSearchLimit: { type: integer, example: 5000 }
+        typoTolerance: { type: boolean }
+        prefixSearch: { type: boolean }
+        phraseSearch: { type: boolean }
+
+    PushCapability:
+      type: object
+      description: Web Push extension (urn:mailroom:push, ADR-016).
+      properties:
+        vapidPublicKey:
+          type: string
+          description: base64url VAPID applicationServerKey (empty when push is not wired on this instance).
+
+    CategoryTabsCapability:
+      type: object
+      description: |
+        Gmail-style category tabs (urn:mailroom:categorytabs, spec §8):
+        the CategoryTab object (`{id, tab, enabled, position}`) and its /get,
+        /changes, /set — no /query and no create/destroy, since the
+        vocabulary below is closed and five rows are read whole — plus the
+        `tab` property on Label that says which tab a label's mail feeds.
+
+        Separate from urn:mailroom:labels even though the mapping rides on the
+        Label object, because tabs and labels are two ORTHOGONAL axes: tabs
+        are message FUNCTION, decided from public RFC facts (List-Id,
+        List-Unsubscribe, Auto-Submitted, …); labels are TOPIC, decided from
+        identity and rules. A client that manages labels and knows nothing
+        about tabs is a coherent client, and under capability.go's
+        fail-closed rule it simply cannot reach the tab surface — folding
+        tabs into capLabels would make "I support labels" mean two unrelated
+        things.
+      properties:
+        tabs:
+          type: array
+          items: { type: string, enum: [primary, social, promotions, updates, forums] }
+          description: The closed vocabulary, in Gmail's own strip order (the default arrangement before a user rearranges it).
+
+    DeskCapability:
+      type: object
+      description: |
+        The desk (urn:mailroom:desk): the user's own PARTITION of mail,
+        a THIRD axis alongside category tabs (message function) and labels
+        (topic) — fed by both, arranged by the user. No capability properties
+        of its own beyond the closed vocabularies below; everything else is
+        the objects and methods it gates.
+
+        **Area** — `{id, name, position, labelId, tabs, labelIds,
+        autoArchive, autoArchiveDays, hiddenFromRail}`. An area OWNS a label
+        (`labelId`, immutable — placing a message in the area IS applying
+        that label, "areas are labels") plus any number of ADDITIONAL feeds:
+        `tabs` (category tabs whose mail lands here) and `labelIds` (other
+        labels that also feed it, EXCLUDING the own label — it is never
+        repeated). `autoArchive` is whether this area's DRAWER
+        auto-archives at all, default `true`; `autoArchiveDays` is only the
+        PERIOD, and `null` now means "the login default"
+        (DeskPreferences' `drawerDefaultDays`) — never "off". "Off" is
+        `autoArchive: false`. Area/get and /changes are the ordinary
+        RFC 8620 §5.1/§5.2 shapes; Area/set creates, patches (a full
+        replace-all of `tabs`/`labelIds` when either is present in the
+        patch) and destroys — an area's own label survives its destruction,
+        and every message that carried it keeps the label.
+
+        **Area/getSummary** — a Mailroom Type/verb extension, not a get/
+        query/changes/set shape, because its answer is COUNTS: `{accountId,
+        mailAccountId?, threshold?}` → `{accountId, state, threshold, list:
+        [{areaId, surface, drawer, unscored, archivedByDrawer}]}`, one row
+        per area in position order plus a trailing `areaId: null` row for
+        "Needs sorting" (a message no area claims; `archivedByDrawer` is
+        always `0` there — nothing sweeps unsorted mail). `threshold`
+        defaults to DeskPreferences' `lineThreshold` when omitted.
+        `archivedByDrawer` is an ALL-TIME count of messages the
+        drawer sweep has archived out of that area, independent of
+        `threshold`.
+
+        **Area/getDesk** — the whole Review-first desk in one call:
+        Area/getSummary's counts PLUS the first page of every requested
+        section, all taken from ONE resolution of every message's area (the
+        per-section Email/query re-resolved it per call, about a second
+        apiece on a large mailbox). Advertised by `getDesk: true` in this
+        capability object; a server without the flag does not have the
+        method, and a client keeps sending Area/getSummary plus one
+        Email/query per section. Request `{accountId, mailAccountId?,
+        threshold?, sections?: [{areaId, position?, limit?}]}` — `areaId`
+        is an area's id, or `null` for Needs sorting; `position` defaults to
+        `0`, `limit` to `50`, and a `limit` above `500` (maxObjectsInGet) is
+        clamped and reported. At most 100 sections; omitted or empty asks
+        for the counts alone. Response `{accountId, mailAccountId?, state,
+        queryState, threshold, list, sections: [{areaId, position, total,
+        ids, limit?}], notFound}`: `state`, `threshold` and `list` are
+        exactly Area/getSummary's (the Area state; the line actually used),
+        `queryState` is the Email state the ids were taken at (what
+        Email/query reports), and both come from the same transaction as
+        the counts. Each section is EXACTLY what `Email/query` returns for
+        the web client's section filter — `{inArea, onDesk: true,
+        onSurface: true, isSnoozed: false, inAccount?}` for an area,
+        `{unsorted: true, onDesk: true, isSnoozed: false, inAccount?}` for
+        Needs sorting, sorted `returnedAt` descending with
+        `collapseThreads: true` — so `ids` are thread representatives and
+        `total` is the collapsed count. `onSurface` uses `threshold`, the
+        same line as the counts. `sections` keeps request order but omits
+        an area id that names no area of the caller's (destroyed from
+        another device); those ids are listed in `notFound` instead of
+        failing the call. HYDRATING: one `Email/get` with `#ids` referencing
+        `/sections/*/ids` fetches every section's rows, as long as the sum
+        of the requested limits fits `maxObjectsInGet`; past that, fetch the
+        returned ids in chunks of at most `maxObjectsInGet`.
+
+        **Email/query filters** — `onDesk` and `onSurface`: `onDesk`
+        selects mail that is (`true`) or is not (`false`) "on the desk" —
+        live in INBOX or a `feeds_desk` mailbox, and not junk, trashed,
+        vanished or a draft — the exact predicate Area/getSummary counts
+        over, so a tab's query and its count can never disagree. `onSurface`
+        splits mail at DeskPreferences' `lineThreshold`: `true` keeps what is
+        at or above the line OR unjudged (unjudged mail is never hidden in a
+        drawer); `false` keeps what is below it. Both may be combined with
+        any other structured filter (`inArea`, `inAccount`, …), and both are
+        refused by Email/queryChanges (`cannotCalculateChanges`), like
+        `inArea` — a score can be rewritten or the line changed, and a
+        mailbox's `feedsDesk` can flip, with no Email change_log row behind
+        any of it.
+
+        **The line override** — a `Triage/correct` MOVES the message
+        across the line immediately, rather than only recording a training
+        signal for the next time the model is retrained. `important` places
+        it on the surface, `notImportant` in the drawer, and that placement
+        is the user's: it outranks the model, survives a rescoring, and is
+        NOT cleared by `Triage/set`'s model reset or rollback (rolling the
+        model back is not the user retracting their own edits). One
+        expression decides which side any message is on — the user's
+        placement if they made one, else its score against `lineThreshold` —
+        so `Area/getSummary`'s counts, `onSurface` and the drawer sweep
+        cannot disagree, and the sweep will never archive mail the user just
+        pulled above the line. The consequences worth knowing: a corrected
+        message appears in `Email/changes` as `updated` (the placement is a
+        mutation of the message, and it appends the change_log row every
+        other message mutation does); `Area/getSummary`'s `unscored` bucket
+        now means "neither scored nor placed", so an unscored message the
+        user drops in a drawer counts under `drawer` instead; and an
+        unscored message placed in a drawer BECOMES sweepable once it is old
+        enough, which is the one case where the sweep acts on mail nothing
+        ever scored.
+
+        **The drawer auto-archive sweep** (Direction 7, "Desk and
+        Drawers"): below the line, each area's drawer holds mail the desk
+        judged unimportant, and a recurring server job MOVES what has sat
+        there longer than the area's period to the account's Archive
+        folder — a real IMAP move, so every other client agrees about what
+        is in the inbox. It NEVER deletes and NEVER marks a message read;
+        only an explicit user rule may do either. The sweep is gated by
+        `drawerSweepEnabled` (below), a login-level switch default `false`,
+        so it archives nothing until the operator arms it. `mailroom-admin
+        drawer-report` previews the sweep, shows whether it is armed, and
+        `--enable`/`--disable` flips the switch.
+
+        **DeskPreferences** — the desk-wide settings SINGLETON:
+        `{id, lineThreshold, drawerDefaultDays, trayNagDays,
+        drawerSweepEnabled, setupCompletedAt, learnedPlacementEnabled}`,
+        where `id` is the user's own id (there is
+        exactly one record). `lineThreshold` is the Surface/Drawer score
+        cutoff Area/getSummary defaults to. `drawerSweepEnabled` is
+        the drawer sweep's login-level MASTER SWITCH, default `false` —
+        the sweep is seeded at boot and areas default to `autoArchive: true`,
+        so this is what keeps mail from moving before the operator has read
+        `mailroom-admin drawer-report`. `learnedPlacementEnabled` (ADR-032) is learned placement's off switch, default `true`, enforced
+        by the server at ingest. DeskPreferences/set accepts only
+        `update`; create and destroy are `forbidden` — the record cannot be
+        created or removed, only changed.
+
+        **ClientPreferences** — per-CLIENT-FAMILY display settings (a phone
+        and a browser legitimately differ): `{id, family, theme, density,
+        messageOpens, paneSplitPct, textSize, rowLayout}`, one row per family
+        in `clientFamilies` below. `/get` with no `ids` returns all three.
+        `/set` likewise accepts only `update`; `id` and `family` are
+        immutable.
+
+        `textSize` (migration 00052) is the whole client's text scale,
+        one of `textSizes` below — five steps, ORDERED SMALLEST FIRST, with
+        `m` the default and the size the web client has always rendered at.
+        `rowLayout` is how a row of mail is drawn: `oneLine` (the default —
+        sender, subject, then the snippet in whatever room the subject
+        leaves) or `multiLine` (sender and time, subject, snippet). The
+        server stores the CHOICE and defines no geometry; what a line
+        contains is the client's business. A value outside either enum is
+        `invalidProperties` naming the property.
+
+        **Mailbox.feedsDesk** — "folders feed the desk": whether
+        live mail in this folder counts toward the desk's Surface/Drawer/
+        Unscored split exactly like INBOX does. Settable through
+        `Mailbox/set` alongside `syncScope`.
+
+        **Email.area** — the opt-in, derived property naming which area a
+        message resolved into (or `null` for Needs sorting), reached through
+        `properties: ["area"]` on Email/get — absent from the default
+        property set, like every other Mailroom Email extension.
+
+        **Email.areaProvenance** — the opt-in property naming who put
+        the message in its area: the `applied_by` of the resolved area's OWN
+        label (`user`, `rule`, `desk`, `setup`, `learned`, ...), or `null`
+        when the message is in no area or is there without its own label.
+        Reached through `properties: ["areaProvenance"]`. It exists because an
+        area's own label is local-only (ADR-031), so `labelProvenance`, which
+        is keyed by keyword atom, never describes it.
+
+        **Email.drawerArchivedAt** — the opt-in, derived property
+        naming WHEN the drawer sweep archived this message, or `null` if a
+        sweep never did, reached through `properties: ["drawerArchivedAt"]`
+        on Email/get — the same opt-in shape as `area`. Read-only:
+        `Email/set` refuses a patch naming it, exactly like every other
+        server-derived Email property.
+
+        **Email.lineSide** — the opt-in property naming where the
+        USER put this message: `"surface"`, `"drawer"`, or `null` when they
+        have not placed it, reached through `properties: ["lineSide"]` on
+        Email/get. The same opt-in, read-only shape as `area` and
+        `drawerArchivedAt`; `Triage/correct` is the only way to set one, and
+        `Email/set` refuses a patch naming it. ⚠ It is the OVERRIDE, not the
+        effective side: `null` means "the score still decides", not
+        "surface". A client that wants the side a message actually renders
+        on asks `Email/query` with `onSurface`. What this property is for is
+        the sentence nothing else can say — "you placed this above the
+        line".
+
+        **Email/query** `inArea`/`unsorted` — `inArea` restricts to one
+        area's mail; `unsorted` restricts to Needs-sorting mail; the two are
+        mutually exclusive (`invalidArguments`). Neither is DELTA-STABLE — a
+        label repointing which area it feeds, or an area's own feeds
+        changing, moves mail between areas with no Email change_log row to
+        replay — so `Email/queryChanges` refuses both with
+        `cannotCalculateChanges`, exactly as it already does for `inTab`.
+
+        ── DAY-ONE SETUP ────────────────────────────────────────────
+
+        Turning a FOLDER-SORTED MAILBOX into a desk, in four steps, each of
+        which is a REPORT BEFORE A WRITE. A mailbox arriving from another
+        client holds years of mail already sorted into folders; making every
+        folder feed the desk would turn a tidy mailbox into a
+        four-thousand-message desk on first boot. Three of the six methods
+        below write nothing.
+
+        ⚠ **NOTHING MOVES ON THE SERVER** except a folder the plan
+        explicitly marks `bringToDesk`. Mail older than the window gets its
+        label (and through it its area) and is ARCHIVED IN MAILROOM: it
+        leaves the desk while its bytes stay exactly where the provider has
+        them, no IMAP write is queued, and no other client sees anything
+        change. `counts.moves` is the ONLY number in this surface that
+        changes anything on a provider, and it is `0` for a plan with no
+        `bringToDesk` folder.
+
+        **Setup/census** `{accountId, mailAccountId?, windowDays?}` →
+        `{accountId, windowDays, folders: [...]}`. READ-ONLY. One row per
+        folder day-one can act on, ordered by display name:
+        `{mailboxId, accountId, name, role, feedsDesk, live, inWindow,
+        older, unclassified, distinctSenders, distinctDomains,
+        sendersFor90, bulkShare, shape, existingLabelId, existingAreaId}`.
+        `windowDays` defaults to **30** (the wizard offers 7/14/30/90; the
+        server accepts any positive number). SPECIAL-USE folders (Drafts,
+        Sent, Trash, Archive, Junk, All, Flagged) are NOT rows — they are
+        mapped without asking — but **INBOX IS a row** (`role: "inbox"`),
+        because step 2 applies to the inbox too and its backlog is usually
+        the largest single pile. `live` is the denominator: `inWindow +
+        older == live`, always. `unclassified` is how much of `live` carries
+        no From address — counted, never hidden, because a largely
+        unclassifiable folder is one whose `shape` means much less than it
+        looks like it does. `sendersFor90` is the fewest senders covering
+        90% of `live`. `shape` is `"oneDomain" | "fewSenders" | "bulk" |
+        "mixed" | "empty"`, and it is A WORD FOR THE COUNTS BESIDE IT, not
+        an authority: render it with the numbers, never instead of them.
+        `existingLabelId`/`existingAreaId` name an existing label/area whose
+        name already equals the folder's (case-insensitively), so day-one
+        reuses it rather than minting a second one meaning the same thing;
+        both are `null` when there is none.
+
+        **The plan** is the shared argument of `Setup/preview` and
+        `Setup/apply`: `{windowDays, folders: [{mailboxId, action,
+        labelName?, areaId?, areaName?}]}`. `action` is `"labelArchive"`
+        (label it and archive it in Mailroom — the default and the point of
+        the feature), `"bringToDesk"` (a REAL server-side move to the
+        account's INBOX, with the writeback the user's own move would
+        enqueue; refused on INBOX itself), or `"leave"` (touch nothing).
+        `labelName` defaults to the folder's own display name and is IGNORED
+        for INBOX, whose older mail is labelled with each message's own
+        resolved AREA label instead — a Needs-sorting message therefore gets
+        NO label and IS still archived. `areaId` feeds an existing area;
+        `areaName` creates (or reuses by name) one owning the folder's
+        label; BOTH ABSENT means label-only, no area. A census folder the
+        plan omits is `leave`.
+
+        ⚠ A MESSAGE IS COUNTED AND WRITTEN UNDER EXACTLY ONE FOLDER — the
+        earliest in the plan's own order that holds it. Mail commonly has
+        live provenance in several folders at once (a provider that exposes
+        labels as IMAP folders makes this the normal case), and counting each
+        folder independently would promise more labels than the apply could
+        ever write.
+
+        **Setup/preview** `{accountId, plan}` → `{accountId, counts}`.
+        READ-ONLY. `counts` is `{labels, archived, moves, leave,
+        unclassified, estimatedSeconds, perFolder: [{mailboxId, name,
+        action, older, labels, archived, moves}]}`. PER FOLDER as well as in
+        total, because one number cannot tell "this plan does nothing
+        because the window covers everything" from "this plan does nothing
+        because everything is already labelled". `estimatedSeconds` is a
+        STATED PLANNING RATE, not a measurement — treat a disagreement with
+        reality as a wrong estimate, never as a wrong count.
+
+        **Setup/apply** `{accountId, plan}` → `{accountId, runId, counts}`.
+        Creates the run, mints the labels and areas the plan needs, and
+        enqueues a one-shot chunked job; the returned `counts` are what the
+        run records as PLANNED and will be compared against. Refused with
+        `setupRunBusy` — a Mailroom method error, distinct from
+        `invalidArguments` because the request was well formed and would be
+        valid later — while another run is queued, running or undoing.
+
+        **Setup/get** `{accountId, ids?}` → `{accountId, state, list,
+        notFound}` (ids omitted = every run, newest first), and
+        **Setup/changes** the ordinary RFC 8620 §5.2 shape. A SetupRun is
+        `{id, kind, status, windowDays, plan, plannedLabels, labelsWritten,
+        plannedArchived, archived, plannedMoves, moved, leftForLater,
+        unclassified, error, createdAt, startedAt, finishedAt, undoneAt}`.
+        `status` is `queued | running | done | failed | undoing | undone`.
+        PLANNED sits beside ACTUAL deliberately: "planned 4,404, wrote
+        4,404" is the only form in which the preview's promise can be
+        checked rather than trusted. The run is a change-logged object, so a
+        client SHOULD follow it through `Setup/changes` (or the EventSource
+        `SetupRun` type) rather than polling while the job drains. There is
+        no `Setup/set`: creating a run also mints labels and areas and
+        enqueues a job, none of which a patch could express honestly.
+
+        **Setup/undo** `{accountId, runId}` → `{accountId, runId}`. Sets the
+        run to `undoing` and enqueues the reversal, which replays the run's
+        per-message journal backwards. Refused with `setupRunBusy` until the
+        run has finished — a client should disable Undo until then. IT
+        REVERSES ONLY WHAT THE RUN ITSELF DID: a label the user has
+        re-applied by hand since survives, a message that was already
+        archived in Mailroom before the run stays archived, and a moved
+        message goes back to the folder it came out of (a real move back,
+        with a real writeback).
+
+        **Email.deskArchivedAt** — the opt-in, derived property
+        naming WHEN day-one setup archived this message in Mailroom, or
+        `null`. Same opt-in, read-only shape as `area` and
+        `drawerArchivedAt`, and ⚠ A DIFFERENT FACT FROM
+        `drawerArchivedAt`: that one means the bytes were MOVED to the
+        Archive folder, this one means the message was filed away while the
+        bytes stayed exactly where they were. A client must not present them
+        with the same words.
+
+        **Email/query** `deskArchived` — `true` keeps exactly the
+        mail day-one archived, `false` everything else. It exists because
+        that set is otherwise unnameable: the mail is in no folder anybody
+        moved it to and carries no keyword, and `onDesk: false` answers a
+        much broader question. NOT delta-stable (`Email/queryChanges`
+        refuses it with `cannotCalculateChanges`): undoing a run clears the
+        mark on thousands of messages inside a background job.
+
+        **DeskPreferences.setupCompletedAt** — a nullable UTCDate.
+        `null` means THIS LOGIN HAS NOT BEEN THROUGH DAY-ONE, and is how a
+        client decides to open the setup wizard rather than the desk. It is
+        settable to a date (the wizard writes one when it finishes) or back
+        to `null` (re-run day-one on a mailbox that has changed shape).
+        Every login that already had desk preferences before this shipped
+        carries a date, so no established desk is interrupted by a wizard.
+      properties:
+        clientFamilies:
+          type: array
+          items: { type: string, enum: [web, phone, desktop] }
+          description: The closed vocabulary ClientPreferences rows come in.
+        themes:
+          type: array
+          items: { type: string, enum: [system, light, dark] }
+        densities:
+          type: array
+          items: { type: string, enum: [compact, normal, relaxed] }
+        messageOpens:
+          type: array
+          items: { type: string, enum: [beside, focused] }
+        textSizes:
+          type: array
+          items: { type: string, enum: [xs, s, m, l, xl] }
+          description: >-
+            The five text-size steps, ORDERED SMALLEST FIRST — a client renders
+            its five-step control straight off this array rather than deciding
+            for itself which end is which.
+        rowLayouts:
+          type: array
+          items: { type: string, enum: [oneLine, multiLine] }
+        getDesk:
+          type: boolean
+          description: >-
+            `true` when this server answers Area/getDesk. Absent on a
+            server that predates it, which advertises this same URN without
+            the method.
+
+    # ── Request/response envelope (RFC 8620 §3) ──────────────────────────────
+    JMAPRequest:
+      type: object
+      required: [using, methodCalls]
+      properties:
+        using:
+          type: array
+          items: { type: string }
+          description: The capability URNs this request relies on. A URN not advertised → request-level unknownCapability.
+        methodCalls:
+          type: array
+          items: { $ref: "#/components/schemas/Invocation" }
+        createdIds:
+          type: object
+          additionalProperties: { type: string }
+          description: Optional client-supplied creationId → id map (RFC 8620 §3.3); echoed back when present.
+
+    JMAPResponse:
+      type: object
+      required: [methodResponses, sessionState]
+      properties:
+        methodResponses:
+          type: array
+          items: { $ref: "#/components/schemas/Invocation" }
+        sessionState: { type: string }
+        createdIds:
+          type: object
+          additionalProperties: { type: string }
+          description: Present only when the request carried createdIds.
+
+    Invocation:
+      type: array
+      description: |
+        A JMAP method call/response triple `[name, arguments, callId]`
+        (RFC 8620 §3.2). `arguments` is method-specific — see the per-method arg
+        and result schemas. On a per-call failure the name is `"error"` and
+        `arguments` is a MethodError.
+      minItems: 3
+      maxItems: 3
+      prefixItems:
+        - type: string
+          description: 'Method name (e.g. "Email/get"), or "error".'
+        - type: object
+          description: Method arguments (request) or result (response).
+        - type: string
+          description: Client-chosen callId, echoed in the response.
+
+    # ── Shared method result envelopes (RFC 8620 §5) ─────────────────────────
+    GetResult:
+      type: object
+      description: RFC 8620 §5.1 Foo/get result.
+      required: [accountId, state, list, notFound]
+      properties:
+        accountId: { type: string }
+        state: { type: string, description: Opaque per-type state string (`s:<seq>`). }
+        list:
+          type: array
+          items: { type: object }
+        notFound:
+          type: array
+          items: { type: string }
+
+    QueryResult:
+      type: object
+      description: RFC 8620 §5.5 Foo/query result.
+      required: [accountId, queryState, canCalculateChanges, position, total, ids]
+      properties:
+        accountId: { type: string }
+        queryState: { type: string, description: Equals the type's change state; chain it into Foo/queryChanges. }
+        canCalculateChanges:
+          type: boolean
+          description: |
+            For Email/query, true only for a DELTA-STABLE filter (structured
+            conditions inMailbox/hasKeyword/notKeyword/before/after, or the empty
+            filter, with receivedAt/sentAt sort). A text/search filter or
+            inThread/inAccount is false. So is isSnoozed: its membership
+            also turns over with the CLOCK, at the instant a wake time passes,
+            which no change-log delta can anticipate. So are the priority
+            conditions — isImportant and the `priority` sort — because the
+            model rescores, and a message crosses the threshold (or reorders)
+            with no Email change_log row to replay. So is `collapseThreads: true`
+            (RFC 8621 §4.4.4): a new message arriving in a thread changes
+            WHICH message represents that thread, with no added/removed pair a
+            change-log delta can express — the representative silently swaps.
+            Other types return false.
+        position: { type: integer }
+        total: { type: integer }
+        ids:
+          type: array
+          items: { type: string }
+
+    QueryChangesResult:
+      type: object
+      description: |
+        RFC 8620 §5.6 Foo/queryChanges result. Email/queryChanges returns a real
+        delta ONLY for a delta-stable filter (see QueryResult.canCalculateChanges)
+        and a non-windowed request; a volatile filter, a windowed `upToId`
+        request, a garbled `sinceQueryState`, or a delta larger than `maxChanges`
+        each yield the `cannotCalculateChanges` method error instead.
+      required: [accountId, oldQueryState, newQueryState, removed, added]
+      properties:
+        accountId: { type: string }
+        oldQueryState: { type: string }
+        newQueryState: { type: string }
+        total: { type: integer, description: Present only when calculateTotal was requested. }
+        removed:
+          type: array
+          items: { type: string }
+          description: Ids to delete from the cached result before applying `added`.
+        added:
+          type: array
+          items:
+            type: object
+            required: [id, index]
+            properties:
+              id: { type: string }
+              index: { type: integer, description: Absolute index in the new result at which to splice the id. }
+
+    ChangesResult:
+      type: object
+      description: RFC 8620 §5.2 Foo/changes result.
+      required: [accountId, oldState, newState, hasMoreChanges, created, updated, destroyed]
+      properties:
+        accountId: { type: string }
+        oldState: { type: string }
+        newState: { type: string }
+        hasMoreChanges: { type: boolean }
+        created: { type: array, items: { type: string } }
+        updated: { type: array, items: { type: string } }
+        destroyed: { type: array, items: { type: string } }
+
+    SetResult:
+      type: object
+      description: RFC 8620 §5.3 Foo/set result. Every map is always present (possibly empty).
+      required: [accountId, oldState, newState, created, updated, destroyed, notCreated, notUpdated, notDestroyed]
+      properties:
+        accountId: { type: string }
+        oldState: { type: [string, "null"] }
+        newState: { type: [string, "null"] }
+        created:
+          type: object
+          additionalProperties: { type: [object, "null"] }
+          description: creationId → the created object (with server-set properties).
+        updated:
+          type: object
+          additionalProperties: { type: [object, "null"] }
+        destroyed:
+          type: array
+          items: { type: string }
+        notCreated:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/SetError" }
+        notUpdated:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/SetError" }
+        notDestroyed:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/SetError" }
+
+    # ── Errors (RFC 8620 §3.6) ───────────────────────────────────────────────
+    RequestError:
+      type: object
+      description: RFC 8620 §3.6.1 request-level error (returned as the whole non-200 body).
+      required: [type, status]
+      properties:
+        type:
+          type: string
+          description: A `urn:ietf:params:jmap:error:*` URN (e.g. urn:ietf:params:jmap:error:unknownCapability), or a short token for the blob endpoints.
+        status: { type: integer }
+        detail: { type: string }
+
+    MethodError:
+      type: object
+      description: RFC 8620 §3.6.2 method-level error, emitted as `["error", {…}, callId]`.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - unknownMethod
+            - invalidArguments
+            - invalidResultReference
+            - accountNotFound
+            - cannotCalculateChanges
+            - stateMismatch
+            - serverFail
+            - requestTooLarge
+            - unsupportedFilter
+          description: The standard method-error types this server emits.
+        description: { type: string }
+
+    SetError:
+      type: object
+      description: RFC 8620 §5.3 per-object error inside a /set response.
+      required: [type]
+      properties:
+        type:
+          type: string
+          description: |
+            Standard types: notFound, forbidden, invalidProperties, invalidPatch,
+            stateMismatch, willDestroy, overQuota, notImplemented. Mail-specific
+            (RFC 8621 §7.5): forbiddenFrom, invalidEmail, noRecipients,
+            cannotUnsend. Mailroom Account/set: validationFailed.
+        description: { type: string }
+        properties:
+          type: array
+          items: { type: string }
+
+    # ── Objects (accurate to the Go json tags) ───────────────────────────────
+    Email:
+      type: object
+      description: |
+        RFC 8621 §4 Email — DOCUMENTED SUBSET of the commonly-used properties.
+        `id`, `blobId`, `threadId`, `mailboxIds`, `keywords`, `size`,
+        `receivedAt` and the envelope/threading properties below are always
+        available; the body properties (sender/to/cc/bcc/replyTo, bodyStructure,
+        textBody/htmlBody/attachments/bodyValues) are populated only when the
+        client requests a property that requires reading the message bytes.
+        `deliveredTo`/`identityId` are the urn:mailroom:compose alias extension.
+      properties:
+        id: { type: string }
+        blobId: { type: string, description: The message content hash (hex). }
+        threadId: { type: string }
+        mailboxIds:
+          type: object
+          additionalProperties: { type: boolean }
+          description: '{mailboxId: true} membership set.'
+        keywords:
+          type: object
+          additionalProperties: { type: boolean }
+          description: '{keyword: true}; MIRRORED labels appear here as their keyword atoms (spec §13). A local-only label has no atom and appears only in labelIds.'
+        labelIds:
+          type: object
+          additionalProperties: { type: boolean }
+          description: |
+            urn:mailroom:labels (ADR-031): {labelId: true} — the id of
+            EVERY label on the message, mirrored and local-only alike. A
+            mirrored label is also in `keywords` as its atom; a local-only
+            label (every area's own label, which is local by design) is ONLY
+            here. Opt-in — not in the default property set.
+
+            Settable in Email/set with the patch form only:
+            `labelIds/<labelId>: true` applies the label, `false` or `null`
+            removes it. The id must be one of the caller's labels, otherwise
+            the update is refused with invalidPatch naming that patch key (an
+            id belonging to another user is indistinguishable from one that
+            does not exist). Applying a MIRRORED label this way writes back
+            its keyword exactly as `keywords/<atom>` would; a local-only label
+            writes nothing to the mail server. A whole-object `labelIds`
+            replacement is refused with invalidPatch, as is a patch that both
+            adds and removes the same label.
+        size: { type: integer }
+        receivedAt: { type: string, description: UTCDate. }
+        sentAt: { type: [string, "null"], description: UTCDate or null. }
+        subject: { type: string }
+        preview: { type: string }
+        hasAttachment: { type: boolean }
+        messageId: { type: [array, "null"], items: { type: string } }
+        inReplyTo: { type: [array, "null"], items: { type: string } }
+        references: { type: [array, "null"], items: { type: string } }
+        from: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" } }
+        deliveredTo:
+          type: [string, "null"]
+          description: 'urn:mailroom:compose: the alias this message was delivered to (a reply''s default From).'
+        identityId:
+          type: [string, "null"]
+          description: 'urn:mailroom:compose: the verified identity the delivery address resolved to.'
+        isPinned:
+          type: boolean
+          description: 'urn:mailroom:organize (spec §6): pinned. Settable in Email/set as a plain boolean.'
+        pinnedAt:
+          type: [string, "null"]
+          description: 'urn:mailroom:organize: UTCDate the pin was set (server-derived; orders a pinned-first list), or null.'
+        flaggedAt:
+          type: [string, "null"]
+          description: |
+            UTCDate the message was last flagged, or null when it is
+            not flagged — the in-tray's "waiting since". Rides IMAP \Flagged
+            (no Mailroom-only keyword), so the settable half of the pair is
+            the $flagged keyword, not this property: Email/set refuses a
+            patch naming flaggedAt directly with invalidProperties, the same
+            way it refuses any other server-derived timestamp. Server-derived
+            specifically so two clients flagging the same message a minute
+            apart cannot disagree about when it happened. Opt-in — not in the
+            default property set.
+        isImportant:
+          type: boolean
+          description: |
+            urn:mailroom:triage (spec §8): the T1 priority score thresholded at
+            the server's importance cutoff. An UNSCORED message is never
+            important — a model that has not spoken does not promote mail — but
+            it is still returned by an isImportant:false filter, so mail ingested
+            before scoring was wired is never invisible. Read-only: the way to
+            change the verdict is Triage/correct, not a patch.
+        priorityScore:
+          type: [number, "null"]
+          description: 'urn:mailroom:triage: the model''s [0,1] priority, or null when never scored.'
+        priorityReasons:
+          type: [array, "null"]
+          description: |
+            urn:mailroom:triage: the top per-feature contributions behind the
+            score, already humanised — each { label, weight, polarity }, where
+            polarity is "up" or "down". Null when unscored or unexplainable.
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              weight: { type: number }
+              polarity: { type: string, enum: [up, down] }
+        labelProvenance:
+          type: [array, "null"]
+          description: |
+            urn:mailroom:rules (spec §8, T0): who applied each of this message's
+            labels — one entry per label, or null when it has none. `appliedBy`
+            is "user", "rule", "ml", "agent" or "desk" (the desk applied
+            its own area's label because the message's tab verdict placed it
+            there), "setup" or "learned" (learned placement filed
+            it from the user's own filings); `rule` names the rule when one
+            did it, and is null otherwise.
+
+            A rule DELETED after it labelled something leaves appliedBy "rule"
+            with a null rule: the attribution is dropped (ON DELETE SET NULL) but
+            the label itself is never removed. Opt-in — not in the default
+            property set.
+          items:
+            type: object
+            properties:
+              keyword:
+                type: string
+                description: The label's keyword atom, as it appears in Email.keywords.
+              appliedBy: { type: string, enum: [user, rule, ml, agent, desk, setup, learned] }
+              rule:
+                type: [object, "null"]
+                properties:
+                  id: { type: string }
+                  name: { type: string }
+        suggestedLabels:
+          type: [array, "null"]
+          description: |
+            urn:mailroom:rules (spec §8): the classifier's or the
+            rule inducer's OPEN QUESTIONS about this message — labels
+            considered and not confident enough to apply. Not a weaker form of
+            label: nothing here touches keywords or mailboxIds, and answering
+            one goes through the ordinary Email/set labelling path. Null when
+            there are none (the overwhelming majority of mail) or a human has
+            already answered. Opt-in — not in the default property set.
+          items:
+            type: object
+            properties:
+              labelId:
+                type: string
+                description: |
+                  Only the id travels; labels are part of ordinary client sync
+                  and already carry every name and colour, so sending them
+                  again would be a second copy to disagree with the first.
+              confidence:
+                type: number
+                description: |
+                  The needs-a-category queue's ordering key
+                  (max(confidence) DESC NULLS LAST per message) — but NOT one
+                  uniform quantity. For `source: "model"` it is the T1
+                  classifier's calibrated [0,1] probability. For
+                  `source: "rule"` it is an EVIDENCE RANK: a monotone function
+                  of how many of the user's own filings back the candidate,
+                  written into this same column purely so both producers share
+                  one ordering — it carries no calibration at all. A client
+                  MUST NOT render a rule-sourced confidence as a percentage;
+                  see `source` and `reasons`.
+              source:
+                type: string
+                enum: [model, rule]
+                description: |
+                  Which producer wrote this suggestion — the field that
+                  makes `confidence`'s dual meaning renderable honestly.
+                  "model": a calibrated probability from the T1 classifier,
+                  safe to show as a percentage. "rule": an evidence rank from
+                  the rule inducer with no calibration behind it; a client must
+                  render this case from the evidence phrase in `reasons`
+                  instead of a percentage.
+              reasons:
+                type: [array, "null"]
+                description: |
+                  Same {label, weight, polarity} shape as priorityReasons, but
+                  the empty array is preserved rather than collapsed to null:
+                  label_suggestions.reasons is nullable specifically so "no
+                  record of why" (null) stays distinguishable from "explained,
+                  and nothing was above the noise floor" ([]). For a
+                  rule-sourced suggestion the LAST entry is the evidence
+                  phrase a client should show in place of a percentage (e.g.
+                  "backed by 4 messages you filed under this label").
+                items:
+                  type: object
+                  properties:
+                    label: { type: string }
+                    weight: { type: number }
+                    polarity: { type: string, enum: [up, down] }
+        listId:
+          type: [string, "null"]
+          description: |
+            urn:mailroom:rules (spec §8): the message's List-Id header value, or
+            null when it is not list mail.
+
+            It names the LIST rather than the sending domain, which is what
+            distinguishes a retailer's newsletter from that retailer's receipts —
+            the discriminator "create a rule from this mailing list" needs.
+            Opt-in; not in the default property set.
+        unsubscribe:
+          type: [object, "null"]
+          description: |
+            urn:mailroom:unsubscribe: List-Unsubscribe (RFC 2369) parsed
+            into `{url, email}` — `url` an https: link for the user's own
+            browser to open, `email` a mailto: split into
+            `{to, subject, body}` for the ordinary submission path. Null when
+            the message carries no header or nothing usable in it; either half
+            can be null on its own (a message can offer only one).
+
+            SURFACING ONLY: Mailroom never sends the unsubscribe itself and
+            does not implement RFC 8058 one-click (docs/hostile-content.md
+            §2.3). Plain http: links are refused rather than offered. Opt-in;
+            not in the default property set, and derived from the envelope
+            (List-Unsubscribe), not from body properties.
+          properties:
+            url: { type: string, description: 'https: only — plain http: is refused.' }
+            email:
+              type: object
+              properties:
+                to: { type: string }
+                subject: { type: string }
+                body: { type: string }
+        isSnoozed:
+          type: boolean
+          description: |
+            urn:mailroom:organize (spec §6): whether this message is still away.
+            DERIVED from snoozedUntil against the current time, so a message whose
+            wake time has passed reads false even before the server's wake job has
+            run. Read-only — patch snoozedUntil to change it.
+        snoozedUntil:
+          type: [string, "null"]
+          description: |
+            urn:mailroom:organize: UTCDate this message returns, or null when it is
+            not snoozed. The one settable half of the pair: Email/set accepts a
+            future UTCDate, or null to un-snooze; a wake time in the past is
+            rejected with invalidProperties.
+        attachmentScan:
+          type: [object, "null"]
+          description: |
+            urn:mailroom:attachmentscan (ADR-027 §8/§9): the malware
+            quarantine state of this message's attachment parts.
+
+            `{ parts: { "<partId>": { state, released, releasedAt } }, quarantined: [partId] }`
+            — `state` is 'unscanned'|'clean'|'flagged'|'unknown', and
+            `quarantined` lists the partIds the server WILL REFUSE to serve on
+            the download and preview routes. Both come from the same rule the
+            gate itself calls, so a client cannot render a working download link
+            for a part the server blocks.
+
+            `releasedAt` is the UTCDate the user released this part's
+            content, or null when there is no release. ⚠ IT IS THE USER'S OWN
+            ACTION, NOT A SCANNER FACT — unlike verdict age and signature-DB
+            version (see below), it only changes when the user releases or
+            revokes, never on a re-scan, which is what lets a client print
+            "released by you · <date>" without it going stale.
+
+            ⚠ KEYED BY partId, NOT ATTACHED TO `attachments`, and that is
+            forced: an `inline` CID image carries a verdict (it is a non-text
+            leaf) but RFC 8621 puts it in `htmlBody` and never in `attachments`
+            — so a property on that array would describe everything except the
+            parts that render with zero clicks, which is the case the gate
+            exists for.
+
+            ⚠ null means NOTHING IS PROJECTED, not "nothing is wrong": a message
+            with no attachment leaves and a message ingested before the
+            projection existed both land there. There is deliberately no
+            `state: "clean"` summary field to be misread as an all-clear (§1a: a
+            bare `clean` is worse than no claim, because it inverts the caution
+            that silence preserves). Verdict AGE and signature-DB version are
+            deliberately NOT here — they move on every re-scan, so syncing them
+            would churn change rows for facts that did not change; they are
+            served by Account/getHealth instead. Opt-in; a Postgres read, so it
+            costs no blob parse.
+        authResults:
+          type: [object, "null"]
+          description: |
+            urn:mailroom:senderauth: the Authentication-Results
+            header (RFC 8601) parsed per method into
+            `{present, spf, dkim, dmarc}` — `present` is whether the header
+            existed at all; `spf`/`dkim`/`dmarc` are each that method's sorted
+            result keywords, or null when the method did not appear.
+
+            REPORTING ONLY: Mailroom verifies nothing itself, it relays what
+            the servers that handled the message already wrote down.
+            THREE DISTINCT STATES, not a boolean: the whole property is null
+            when Mailroom itself authored the message (authentication never
+            applied); `present:false` when it arrived from outside carrying no
+            such header; `present:true` plus the per-method arrays otherwise.
+            Opt-in; requires the message bytes.
+          properties:
+            present: { type: boolean }
+            spf: { type: [array, "null"], items: { type: string } }
+            dkim: { type: [array, "null"], items: { type: string } }
+            dmarc: { type: [array, "null"], items: { type: string } }
+        senderWarnings:
+          type: [array, "null"]
+          description: |
+            urn:mailroom:senderauth: warnings about the SENDING DOMAIN,
+            worst first, or null when there is nothing to say — which is the
+            overwhelming majority of mail, deliberately.
+
+            Each entry is `{kind, domain, resembles?, unicode?}`. `kind` is
+            selfSpoof | lookalikeDomain | punycodeDomain; `resembles` names the
+            known domain a lookalike collides with; `unicode` is a punycode
+            domain decoded.
+
+            ⚠ NOT A REFINEMENT OF authResults. That says whether the mail really
+            came from the domain it claims; this says whether that domain is one
+            you have heard of. A lookalike passes SPF and DKIM perfectly.
+
+            ⚠ null is NOT an all-clear, and there is deliberately no "no problems
+            found" value to be rendered as one — the same restraint that keeps
+            authResults from emitting a green badge on the 99% that pass.
+
+            Opt-in; requires the message bytes, because the self-spoof case needs
+            the Authentication-Results header.
+          items:
+            type: object
+            required: [kind, domain]
+            properties:
+              kind: { type: string, enum: [selfSpoof, lookalikeDomain, punycodeDomain] }
+              domain: { type: string }
+              resembles: { type: string }
+              unicode: { type: string }
+        encrypted:
+          type: boolean
+          description: |
+            urn:mailroom:pgp (ADR-037): the stored message is RFC 3156
+            multipart/encrypted with protocol application/pgp-encrypted. A fact
+            about the bytes; asking for it alone reads the message but decrypts
+            nothing. Inline PGP (an armored block in a text body) is not
+            detected here and is shown as today.
+        decrypted:
+          type: [boolean, "null"]
+          description: |
+            urn:mailroom:pgp (ADR-037). `true`: the body properties in
+            this response are the decrypted plaintext (decrypted on this request,
+            never stored). `false`: the message could not be decrypted — no
+            reason is given, by design (one opaque failure, so the server is not
+            an oracle) — and the body properties describe the stored ciphertext
+            message. `null`: no decryption was attempted (not encrypted, or no
+            body property was requested).
+        pgpSignature:
+          type: [object, "null"]
+          description: |
+            urn:mailroom:pgp (ADR-039): what a PGP
+            signature on the message means, or null when it is not PGP/MIME
+            signed. ONE property for both shapes: a multipart/signed message
+            verified at Email/get (nothing is stored about it), and the
+            multipart/signed INSIDE a decrypted message (this replaces the
+            unreleased `encryptedSignature` of the decrypt-on-open increment;
+            the states are the same question for the same reader). Requested
+            with the body properties; asking for it on an encrypted message
+            decrypts it, like a body property. A signature inside the OpenPGP
+            layer itself (RFC 3156 §6.2, "combined", as Thunderbird and GnuPG
+            send it) is verified during the decryption against the keys held
+            for the From address and the user's own, and yields the same states
+            by the same rules (ADR-039 section 6). When the decrypted entity is
+            itself multipart/signed, that inner signature is the one reported.
+
+            `state` is one of:
+            `verified` — it checks out, by a key held for the From address that
+            has a valid user ID naming that address and is one the user may
+            rely on (imported, WKD, or Autocrypt from an authenticated
+            message; not refused), or by the user's own key, and (when an
+            earlier key is pinned for the address) is that key or one the user
+            imported/trusted. `bad` — there is a signature and it does not
+            check out (or cannot be read). `unknownKey` — well-formed but not
+            attributable to the sender: no key held, or the key that made it
+            does not name the From address, or it is a held key nobody has
+            vouched for and there is no earlier key to compare it with.
+            `keyChanged` — a good signature by a key that differs from the one
+            pinned for the address (or, with no pin, from the best eligible
+            key held). Never `verified` merely because the key arrived in the
+            same message: an Autocrypt header on forgeable mail proves nothing.
+
+            The first time an eligible key verifies for an address with no pin,
+            that key is pinned (trust on first use), so a later different key
+            is reported as `keyChanged` even for a correspondent never
+            encrypted to. That is the one write Email/get makes for this
+            property.
+          properties:
+            state: { type: string, enum: [verified, bad, unknownKey, keyChanged] }
+            address: { type: string, description: The From address the signature was judged against; what ContactKey/decide names. }
+            fingerprint:
+              type: string
+              description: |
+                The signing key (verified, keyChanged), or what the signature
+                says made it (unknownKey; the full fingerprint, or the 16-digit
+                key id when the signature carries only that). Absent for bad.
+            previousFingerprint: { type: string, description: keyChanged only; the key it differs from. }
+            refused: { type: boolean, description: keyChanged only; the user already chose to keep the old key. }
+            reason:
+              type: string
+              enum: [keyExpired]
+              description: |
+                bad only: the signature checked out over the content
+                and was refused only because the key that made it has expired.
+                Given only when that key is one the verified path would have
+                trusted for the From address (the user's own, or an eligible,
+                unrefused held key naming it); any other expired key is a plain
+                bad. `fingerprint` then names the expired key.
+            signedAt: { type: string, description: "reason keyExpired only; UTCDate the signature claims it was made." }
+            keyExpiredAt: { type: string, description: "reason keyExpired only; UTCDate the signing key expired." }
+            validWhenSigned: { type: boolean, description: "reason keyExpired only; signedAt is before keyExpiredAt. Context for wording, never an upgrade to verified: the date is the signer's own claim." }
+        sender: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" }, description: Present only when body properties were requested. }
+        to: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" } }
+        cc: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" } }
+        bcc: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" } }
+        replyTo: { type: [array, "null"], items: { $ref: "#/components/schemas/EmailAddress" } }
+        bodyStructure: { type: object, description: RFC 8621 §4.1.4 EmailBodyPart tree (when requested). }
+        textBody: { type: array, items: { type: object } }
+        htmlBody: { type: array, items: { type: object } }
+        attachments: { type: array, items: { type: object } }
+        bodyValues: { type: object, description: partId → EmailBodyValue (when requested). }
+
+    EmailAddress:
+      type: object
+      description: RFC 8621 §4.1.2 EmailAddress.
+      properties:
+        name: { type: [string, "null"] }
+        email: { type: string }
+
+    Mailbox:
+      type: object
+      description: |
+        RFC 8621 §2 Mailbox. Mailbox/set accepts `syncScope` (urn:mailroom:accounts)
+        and `feedsDesk` (urn:mailroom:desk) and nothing else.
+        Creating, renaming and destroying mailboxes are still refused
+        (notImplemented), and an update patch that mentions any other property is
+        refused WHOLE, including a `syncScope`/`feedsDesk` sitting next to it: a
+        rename that is silently dropped while its neighbour succeeds would leave
+        the client believing the rename landed.
+      properties:
+        id: { type: string }
+        accountId:
+          type: string
+          description: >-
+            urn:mailroom:accounts extension, read-only. The owning account.
+            Folder NAMES collide across accounts — every account has an INBOX, a
+            Sent, an Archive — so a client cannot filter or group mailboxes by
+            account without this.
+        name: { type: string }
+        parentId: { type: [string, "null"], description: Always null (flat mailbox space in this milestone). }
+        role: { type: [string, "null"], description: RFC 6154 role (inbox/archive/trash/…) or null. }
+        sortOrder: { type: integer }
+        totalEmails: { type: integer }
+        unreadEmails: { type: integer }
+        totalThreads: { type: integer, description: Approximated by email counts in this milestone. }
+        unreadThreads: { type: integer, description: Approximated by email counts in this milestone. }
+        isSubscribed: { type: boolean }
+        syncScope:
+          type: string
+          enum: [full, "off"]
+          description: >-
+            urn:mailroom:accounts extension. `full` = the server polls,
+            verifies and reaps this folder. `off` = it does not look at the folder
+            at all: no new mail, and — the property selective sync rests on — it is
+            never a reap candidate either, so everything already synced is FROZEN
+            rather than deleted. Settable via Mailbox/set; reversible, and turning it
+            back on catches up on new mail, on expunges, and across a UIDVALIDITY
+            roll. A third value `headers` was advertised in the schema for a long
+            time, never implemented, and is now refused — see ADR-020.
+        myRights:
+          type: object
+          description: RFC 8621 §2 rights; mayCreateChild/mayRename/mayDelete/maySubmit are false in this milestone.
+
+    Thread:
+      type: object
+      description: RFC 8621 §3 Thread.
+      properties:
+        id: { type: string }
+        emailIds:
+          type: array
+          items: { type: string }
+
+    Identity:
+      type: object
+      description: |
+        RFC 8621 §6 Identity — a verified send-as right. A wildcard (catchall)
+        identity renders as email `*@example.com`. accountId/isWildcard/enabled
+        are the urn:mailroom:compose extension; signingKeyId is the
+        urn:mailroom:pgp extension (see that capability for the "Will sign" rule).
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        replyTo: { type: [array, "null"] }
+        bcc: { type: [array, "null"] }
+        textSignature: { type: string }
+        htmlSignature: { type: string }
+        mayDelete: { type: boolean }
+        accountId: { type: string, description: 'urn:mailroom:compose: which account this identity submits through.' }
+        isWildcard: { type: boolean, description: 'urn:mailroom:compose: a catchall domain identity.' }
+        enabled: { type: boolean, description: 'urn:mailroom:compose.' }
+        signingKeyId:
+          type: [string, "null"]
+          description: |
+            urn:mailroom:pgp. READ-ONLY. The id of the UserKey bound as
+            this identity's signing key, and only while that key can still
+            sign — non-null requires private material held, not revoked, and
+            not decrypt-only. `null` otherwise, which is the ordinary case:
+            most identities have no key, including every alias derived under a
+            catchall.
+
+            Served by default and selectable through `properties`. It is the
+            SAME key the send path would use (one shared predicate in
+            `internal/store`), so a client is never told about a key that
+            submission would then decline to sign with. Never key material —
+            the id is what UserKey/get already publishes.
+
+            An `Identity/set` patch naming it is refused with
+            `invalidProperties`: a signing key is bound to an identity by the
+            crypto process (`mailroom-admin pgp-bind`), never over JMAP.
+            Rebinding is a JMAP-visible Identity change, so it arrives through
+            Identity/changes like any other.
+
+            ⚠ NOT SUFFICIENT ON ITS OWN for a "Will sign" badge — the server
+            must also advertise `urn:mailroom:pgp` `{signing: true}`.
+
+    EmailSubmission:
+      type: object
+      description: |
+        RFC 8621 §7 EmailSubmission — a send (Undo/Send-Later are the same durable
+        job). `mailroomState` is the urn:mailroom:compose extension exposing the
+        real submission state beyond RFC 8621's three undoStatus values.
+
+        `idempotencyKey` is a WRITE-ONLY urn:mailroom:compose extension that makes a
+        retried create safe: a repeat of a key this user has already used returns the
+        submission it already made, in `created`, rather than sending the message a
+        second time. It exists for the failure a client cannot distinguish from
+        success — the submission is created and the RESPONSE is lost — so an offline
+        action queue can replay a send. 8–200 characters; one outside that is
+        REFUSED (`invalidProperties`) rather than trimmed, because a truncated key
+        could collide with another send's and suppress it. Never returned by
+        EmailSubmission/get.
+
+        `archiveOnSuccess` is the urn:mailroom:compose Send & archive extension: Email ids to move to Archive when, and ONLY when, this submission
+        is actually sent. The send worker performs it in the transaction that
+        marks the submission sent, so a send that fails, is cancelled (Undo Send)
+        or runs out of retries archives nothing. At send time each Email is
+        re-checked: one that is gone, or no longer in an Inbox, is skipped. At
+        most 100 ids; a malformed one is REFUSED (`invalidProperties`). Echoed on
+        the object (null when empty), so a client can tell whether the server
+        understood it.
+      properties:
+        id: { type: string }
+        identityId: { type: string }
+        emailId: { type: string }
+        threadId: { type: [string, "null"] }
+        envelope:
+          type: object
+          properties:
+            mailFrom: { type: object, properties: { email: { type: string }, parameters: { type: [object, "null"] } } }
+            rcptTo:
+              type: array
+              items: { type: object, properties: { email: { type: string }, parameters: { type: [object, "null"] } } }
+        sendAt: { type: string, description: UTCDate. }
+        undoStatus: { type: string, enum: [pending, final, canceled] }
+        deliveryStatus:
+          type: object
+          description: recipient (or "*") → {smtpReply, delivered, displayed}.
+        dsnBlobIds: { type: array, items: { type: string } }
+        mdnBlobIds: { type: array, items: { type: string } }
+        mailroomState: { type: string, description: 'urn:mailroom:compose extension property.' }
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 200
+          writeOnly: true
+          description: 'urn:mailroom:compose extension, create-only: replaying it returns the existing submission instead of sending twice.'
+        encrypt:
+          type: boolean
+          writeOnly: true
+          description: 'urn:mailroom:pgp extension, create-only: sign and encrypt to every To/Cc recipient and to the sender. Refused with SetError `cannotEncrypt` (missing or changed key, Bcc, no sender key, no crypto process) and never downgraded to a plain send.'
+        archiveOnSuccess:
+          type: [array, "null"]
+          items: { type: string }
+          maxItems: 100
+          description: 'urn:mailroom:compose extension: Emails archived once this submission is SENT; never on failure or cancel.'
+        dismissedAt:
+          type: [string, "null"]
+          format: date-time
+          readOnly: true
+          description: |
+            urn:mailroom:compose extension: when the user dismissed this FAILED
+            send from the Outbox, or null. Set with the update patch
+            `{"dismissed": true}`, which is legal only while `mailroomState` is
+            `failed` (any other state is refused with `invalidProperties`) and is
+            not reversible. Nothing is deleted, the draft included.
+
+
+
+    Label:
+      type: object
+      description: |
+        urn:mailroom:labels Label (spec §6/§13). Labels are keywords on Email;
+        this object exposes their metadata. `keyword` is the server-assigned IMAP
+        mirror atom (read-only); `color`/`parentId` are local-only (do not mirror).
+      properties:
+        id: { type: string }
+        name: { type: string }
+        color: { type: [string, "null"] }
+        parentId: { type: [string, "null"] }
+        mirrorToImap: { type: boolean }
+        keyword: { type: [string, "null"], description: Read-only server-assigned mirror atom ("" → null when local-only). }
+
+    MailAccount:
+      type: object
+      description: |
+        urn:mailroom:accounts Account (spec §12) — a managed IMAP/SMTP mail
+        account. Credentials (username/password) are WRITE-ONLY: accepted by
+        Account/set, never returned by Account/get.
+      properties:
+        id: { type: string }
+        name: { type: string }
+        providerProfile: { type: string }
+        imapHost: { type: string }
+        imapPort: { type: integer }
+        smtpHost: { type: string }
+        smtpPort: { type: integer }
+        syncEnabled: { type: boolean }
+        outboundDailyQuota: { type: integer, description: Read-only provider send cap. }
+        color: { type: [string, "null"], description: "#RRGGBB or null." }
+
+    Contact:
+      type: object
+      description: |
+        urn:mailroom:contacts Contact (spec §10a), auto-derived from ingest
+        (ADR-041 for saved contacts, names, notes, merge and separate).
+
+        **Contact/set** changes ONLY the user's own state: isVip,
+        isBlocked, blockDestination, isSaved, userName (string, or null to
+        clear; trimmed, control and directional characters removed, at most
+        200 characters) and notes (at most 4,000 characters; newlines kept).
+        isVip:true also saves the contact; isBlocked does not; isSaved:false
+        deletes nothing (keys, history, VIP and block stay). isVip:true with
+        isSaved:false in one patch is invalidProperties. displayName (the
+        name learned from mail) is refused; create and destroy are refused.
+        One Contact change per real change, none for a no-op.
+
+        **Contact/query** filters (AND): text (address, learned name or
+        userName), hasKey, address (exact), isVip, isBlocked, isSaved,
+        onlyCoRecipient (true: no address has mail From it or was ever
+        written to). sort: one comparator, property `name` (displayed name,
+        case-insensitive) or `lastMailAt`; isAscending defaults to true. With
+        no sort the order is most-sighted first (autocomplete). position
+        (negative counts from the end) and limit (at most 100; `limit` is
+        returned when clamped); total is always computed.
+
+        **Contact/merge** `{accountId, into, from, ifInState?}` →
+        `{accountId, oldState, newState, id, destroyedId, addressesMoved,
+        keysMoved, keysCombined}`: every address and key of `from` moves to
+        `into`; saved and VIP if either; blocked if either, with the earlier
+        blockedAt and the stricter destination (trash over junk); notes joined
+        with a `---` separator; userName from `into` unless it has none.
+        Pins stay per address. `from` is reported destroyed. Errors:
+        invalidArguments (malformed id, into = from), notFound (absent, merged
+        away, or another user's), stateMismatch, notesTooLong (the joined
+        notes would pass 4,000 characters).
+
+        **Contact/separate** `{accountId, id, addressIds, ifInState?}` →
+        `{accountId, oldState, newState, id, created: [id],
+        addressContacts: {addressId: contactId}, keysMoved, restored,
+        keptFields: [property]}`: the named addresses move to new contacts
+        (one per contact they were merged in from), restored from that
+        contact's own state, block included; keys go with the last address of
+        their original contact. When the named addresses are every address a
+        merge moved, that merge is undone on `id`: each field it wrote
+        (displayName, userName, notes, isVip, isSaved, isBlocked) goes back to
+        its pre-merge value unless it was changed since; `keptFields` names
+        those kept, `restored` is true. A partial separate restores nothing
+        on `id` (`restored: false`), and a block on `id` that the merge did
+        not make (set after it) carries over to the new contacts. Errors:
+        invalidArguments (no addressIds, every address named, or an address
+        not on the contact), notFound, stateMismatch.
+
+        `keys` (urn:mailroom:pgp — see that capability's own
+        description) is served by default alongside displayName/addresses,
+        and selectable via `properties` like the others.
+      properties:
+        id: { type: string }
+        displayName: { type: string, description: The name learned from mail ("" when none). Never written by the user. }
+        name: { type: string, description: "The displayed name: userName when set, else displayName." }
+        userName: { type: [string, "null"], description: "The user's own name for the contact; ingest never writes it." }
+        notes: { type: string, description: "The user's notes, at most 4,000 characters." }
+        isSaved: { type: boolean, description: "Listed on the Contacts page: set by sending to the contact, by isSaved, or by isVip." }
+        savedAt: { type: [string, "null"], description: UTCDate it was saved; null while not saved. }
+        inboundCount:
+          type: integer
+          description: |
+            Statistic, not synced (ADR-041 §3): sightings on mail other than
+            the user's own sent mail, summed over the addresses.
+        outboundCount: { type: integer, description: "Statistic, not synced: messages the user sent to the addresses." }
+        firstMailAt: { type: [string, "null"], description: "Statistic, not synced: earliest first sighting over the addresses (UTCDate)." }
+        lastMailAt: { type: [string, "null"], description: "Statistic, not synced: latest sighting over the addresses (UTCDate); what the lastMailAt sort uses." }
+        addresses:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, description: "The address row id; what Contact/separate names." }
+              address: { type: string }
+              reachedMeAt:
+                type: [string, "null"]
+                description: The alias this correspondent reached the user at, or null.
+        keys:
+          type: array
+          description: |
+            One entry per app.contact_keys row this contact holds. Empty when
+            none. NEVER the key material — public_key bytes are not exposed.
+          items:
+            type: object
+            properties:
+              fingerprint: { type: string }
+              kind: { type: string, description: "app.key_kind, e.g. pgp." }
+              source:
+                type: string
+                enum: [wkd, autocrypt, manual, keyserver]
+              fetchedAt: { type: string, description: UTCDate. }
+        isVip: { type: boolean, description: "VIP marker: is:vip, VIP push modes, quiet-hours exception." }
+        isBlocked: { type: boolean, description: "Blocked: new mail from these addresses goes to blockDestination at ingest." }
+        blockDestination: { type: string, enum: [junk, trash] }
+        blockedAt: { type: [string, "null"], description: "UTCDate; null while not blocked." }
+
+    SenderStat:
+      type: object
+      description: |
+        One row of SenderStats/get (urn:mailroom:contacts): a sender, a
+        domain or a mailing list, ranked by volume or by neglect in a window.
+        Computed on demand; not a synced object (no state, no /changes).
+        Neglected = still unread, or archived from Mailroom before it was read
+        (an archive_unread feedback event). Trash and Junk are excluded by the
+        same rules a search applies. SenderStats/emailIds {groupBy, key, since,
+        position, limit<=1000} enumerates exactly the messages a row counted
+        (same predicate, same window) — what every clean-up action moves.
+        actionable is false for a key that does not name exactly one row.
+      properties:
+        key: { type: string, description: "Address, domain, or normalised List-Id (what list: searches for)." }
+        displayName: { type: string }
+        total: { type: integer }
+        unread: { type: integer }
+        neglected: { type: integer }
+        neglectShare: { type: number, description: "neglected / total, three decimals." }
+        lastReceivedAt: { type: string, description: UTCDate. }
+        addressCount: { type: integer }
+        addresses:
+          type: array
+          description: At most 20, newest first, with the contact's markers.
+          items:
+            type: object
+            properties:
+              address: { type: string }
+              contactId: { type: [string, "null"] }
+              isVip: { type: boolean }
+              isBlocked: { type: boolean }
+        unsubscribeEmailId:
+          type: [string, "null"]
+          description: A recent message from this row carrying List-Unsubscribe, for the client's existing unsubscribe affordance.
+
+    FollowUpItem:
+      type: object
+      description: |
+        One due follow-up nudge from FollowUp/get (urn:mailroom:desk).
+        Computed on read, never stored, so not a synced object (no state, no
+        /changes). kind "outbound" is "no one answered your mail" — the user's
+        message to people, with no human answer (not the user, not
+        Auto-Submitted) after seven days; on by default. kind "inbound" is "you
+        haven't replied to this" — from a person, to the user in To, decided
+        personal or itself a reply, unreplied and not \Answered after
+        DeskPreferences.followUp.inboundDays; opt-in. Both expire 30 days after
+        the message. Snoozed and dismissed messages are left out. The result
+        also carries settings (the followUp object), truncated (names of read
+        bounds that were hit) and unreadable (messages whose bytes could not be
+        read). FollowUp/set {dismiss: {emailId: kind}} records the user's Done:
+        a dismissal never resurfaces and appends one Email `updated` change;
+        another user's message is notFound.
+      properties:
+        emailId: { type: string }
+        threadId: { type: [string, "null"] }
+        kind: { type: string, enum: [outbound, inbound] }
+        since: { type: string, description: "UTCDate the message was sent or arrived." }
+        dueAt: { type: string, description: "UTCDate the nudge became due." }
+        subject: { type: string }
+        who:
+          type: object
+          description: Outbound, who it went to; inbound, who sent it.
+          properties:
+            name: { type: string }
+            email: { type: string }
+
+    UserKey:
+      type: object
+      description: |
+        urn:mailroom:pgp UserKey (spec §9) — the
+        login's OWN keys (app.user_keys), public facts only. Written by the
+        own-key methods (see the capability description). No UserKey/changes.
+        NEVER private_key_ct, dek_id, envelope_ver, or the public key bytes.
+      properties:
+        id: { type: string }
+        identityId:
+          type: [string, "null"]
+          description: The identity (address) this key signs for, or null if unbound.
+        kind: { type: string, description: "app.key_kind, e.g. pgp." }
+        fingerprint: { type: string }
+        wkdPublished: { type: boolean }
+        decryptOnly:
+          type: boolean
+          description: A retired key kept only so old mail stays readable; never chosen for signing.
+        createdAt: { type: string, description: UTCDate. }
+        revokedAt: { type: [string, "null"], description: UTCDate or null. }
+        expiresAt: { type: [string, "null"], description: "UTCDate the key stops being usable: the earlier of the primary key's and the encryption subkey's expiry (read from its packets at the call). Null = never, or unreadable." }
+        expired: { type: boolean, description: Its packets say it is past expiresAt. }
+        usable: { type: boolean, description: "Not retired or revoked, and its packets can still be encrypted to: what an outgoing Autocrypt header would carry." }
+        expiringSoon: { type: boolean, description: "usable and expiresAt within keyExpiryWarningDays." }
+        canSign: { type: boolean, description: "Not retired or revoked, a private half held, and the primary not expired: compose will sign with it." }
+        origin: { type: [string, "null"], enum: [generated, imported, null], description: "generated: Mailroom holds the only copy, so back it up. null: not recorded." }
+        wkdUrl: { type: [string, "null"], description: "The direct WKD URL a correspondent's client fetches for the bound fixed address; null when unbound or wildcard." }
+        wkdServable: { type: boolean, description: "This server answers WKD for that address's domain (MAILROOM_WKD_DOMAIN)." }
+        retiredAt: { type: [string, "null"], description: "UTCDate the key stopped being used (retired or revoked, whichever came first). Null while in use, and NOT RECORDED for a key retired before v1.93: read decryptOnly/revokedAt for whether." }
+        replacedBy: { type: [string, "null"], description: "The id of the key UserKey/replace put in this one's place." }
+        userIds:
+          type: array
+          description: "The key's self-signed user IDs, primary first. Untrusted text, cleaned (control and format characters removed, 256 runes per field, at most 32)."
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              email: { type: string }
+              revoked: { type: boolean }
+              primary: { type: boolean }
+        boundAddressListed: { type: [boolean, "null"], description: "Whether a valid, unrevoked user ID names the bound fixed address: what a correspondent's client checks. Null when unbound or bound to a wildcard." }
+
+    WebPushSubscription:
+      type: object
+      description: |
+        urn:mailroom:push WebPushSubscription (ADR-016). The endpoint and keys
+        (p256dh, auth) are write-only — accepted by /set, never returned by /get.
+        This object is NOT a change-logged type, so its /set emits no oldState/
+        newState. notifyMode is the one updatable property; it replaced
+        importantOnly, which nothing ever read and which is no longer returned.
+      properties:
+        id: { type: string }
+        deviceName: { type: string }
+        notifyMode:
+          type: string
+          enum: [all, above_line, vip, above_line_or_vip]
+          description: Which new mail this device is told about. Default all.
+        createdAt: { type: string, description: UTCDate. }
+        expiredAt: { type: [string, "null"], description: UTCDate or null. }
+
+    UploadResponse:
+      type: object
+      description: RFC 8620 §6.1 upload result.
+      required: [accountId, blobId, type, size]
+      properties:
+        accountId: { type: string }
+        blobId: { type: string, description: Content hash (hex). }
+        type:
+          type: string
+          description: The declared Content-Type, echoed (not trusted).
+        size: { type: integer, description: Plaintext byte length. }

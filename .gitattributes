@@ -1,0 +1,11 @@
+# Normalize to LF everywhere: schema.sql and shell scripts are consumed on
+# Linux (CI, containers); CRLF working copies break both.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff2 binary
+# iCalendar samples (#725) keep their CRLF line endings: RFC 5545 content lines
+# end in CRLF on the wire, and a fixture normalised to LF would stop testing that.
+internal/ical/testdata/*.ics -text

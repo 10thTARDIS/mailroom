@@ -1,0 +1,42 @@
+# golangci-lint v2 configuration. Standard linter set (errcheck, govet,
+# ineffassign, staticcheck, unused) — tighten as the codebase grows.
+version: "2"
+
+run:
+  # ⚠ WITHOUT THESE TAGS THE LINTER SEES ROUGHLY A THIRD OF THE TEST CODE AND
+  # NONE OF THE INTERESTING PART (Forgejo #311).
+  #
+  # A large and growing number of files in this repo carry
+  # `//go:build integration`, and that is where the RLS negative tests and
+  # every store DB-interaction test live — the suite the project treats as a
+  # merge gate. With no build-tags set, the Go loader constrains all of them
+  # out before any analysis begins, so errcheck, staticcheck,
+  # ineffassign and unused — the value golangci-lint adds over `go vet` — never
+  # ran against a single line of them. The gap was silent in exactly the way a
+  # green check is: nothing errored, because nothing was looked at.
+  #
+  # `interop` is one file (internal/pgpverify/interop_test.go, the GnuPG
+  # cross-check from #263) and got neither linter nor vet.
+  #
+  # `tantivy` is deliberately ABSENT. It is `//go:build tantivy && cgo` and
+  # needs a C toolchain plus the 58 MB prebuilt musl static library, which is
+  # precisely why the search engine is behind a tag at all (ADR-006): adding it
+  # here would make this job need a native artifact it has no other reason to
+  # fetch, and would go red on every machine without one. The tagged path is
+  # linted where the library already is — scripts/tantivy-test.sh, inside the
+  # musl container, which now runs golangci-lint as well as `go vet`.
+  # internal/search/tantivy keeps a `!tantivy || !cgo` fallback file, so the
+  # package is still type-checked here, just as the stub.
+  build-tags:
+    - integration
+    - interop
+    # internal/sieve/live_test.go (#50): pure Go, no native artifact, so it is
+    # linted here even though only scripts/sieve-live-test.sh runs it.
+    - sievelive
+
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt

@@ -1,0 +1,8 @@
+From: Bob Example <bob@example.com>
+To: Sync Tester <sync-tester@example.com>
+Subject: Second message
+Date: Tue, 02 Jan 2024 11:00:00 +0000
+Message-ID: <inbox-2@example.com>
+Content-Type: text/plain; charset=utf-8
+
+This is the second seeded INBOX message for the sync-test harness (issue #4).

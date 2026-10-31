@@ -1,0 +1,21 @@
+From: Alice Example <alice@example.com>
+To: Bob Example <bob@example.com>
+Subject: Mixed transfer encodings
+Date: Mon, 01 Jun 2026 10:10:00 +0000
+Message-Id: <qp-b64-001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mix-boundary"
+
+--mix-boundary
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+The price is =E2=82=AC10 (quoted-printable encoded euro sign, with a=
+ soft line break).
+--mix-boundary
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="hello.txt"
+
+SGVsbG8sIGF0dGFjaG1lbnQhCg==
+--mix-boundary--

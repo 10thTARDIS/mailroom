@@ -1,0 +1,90 @@
+-- SPDX-License-Identifier: AGPL-3.0-only
+--
+-- Reclaim writeback intents stranded in 'inflight' by a process that died
+-- between claiming an intent and completing it (#520).
+--
+-- ⚠ THIS IS #351's B3, IN THE ONE SUBSYSTEM WHERE THE SYMPTOM IS DIVERGENCE
+-- FROM THE USER'S REAL MAILBOX. Migration 00041 gave app.jobs a 15-minute lease
+-- for exactly this failure. Intents never got one:
+--
+--     ClaimPendingIntents selects `state = 'pending'` only, and
+--     MarkIntentApplied / MarkIntentFailed are both guarded on
+--     `state = 'inflight'`.
+--
+-- So an intent left inflight by a crash is never looked at again by anything.
+-- It is FAIL-SAFE — nothing re-fires, so no duplicate IMAP operation — but it
+-- is silent: the flag change, move or expunge the user made in Mailroom never
+-- reaches IMAP, no error is raised, and account health shows only 'dead'.
+-- internal/store/writeback.go said the row might have been "reset by a reaper"
+-- and internal/writeback/doc.go called that reaper "a follow-up". There was no
+-- reaper. This is it.
+--
+-- ⚠ THE COLUMN DID NOT EXIST, unlike 00041 where the fix was logic alone.
+-- app.writeback_intents recorded created_at and applied_at but never WHEN a row
+-- was claimed, so there was nothing to age against.
+--
+-- MEASURED BEFORE WRITING THIS, on a live instance, so the
+-- change is not sold as a repair it is not: no row was inflight and none was
+-- dead, and every applied row had attempts = 1 — the retry path had never once
+-- fired. The defect is LATENT
+-- here, not active: the claim->apply window is milliseconds wide and no restart
+-- has yet landed inside it. This migration is insurance against a failure whose
+-- consequence is silent, not a repair of damage already done.
+--
+-- ⚠ WHY RECLAIMING IS SAFE FOR EVERY OP, checked per op rather than assumed:
+--
+--   * flag / keyword — intrinsically idempotent. STORE +FLAGS \Seen on an
+--     already-seen message is a server-side no-op (writeback/doc.go).
+--   * expunge — +FLAGS \Deleted then EXPUNGE on an already-gone message is a
+--     no-op, and the header-addressed variant searches by Message-ID first
+--     (the #268 repair).
+--   * move — guarded by the provenance conflict check. A COMPLETED move leaves
+--     no live provenance at the old coordinate, so re-application is refused as
+--     a conflict rather than duplicating. Residual: the COPY fallback on a
+--     server with no MOVE extension can duplicate if the crash lands between
+--     COPY and EXPUNGE. Narrowed, not eliminated; the provider here advertises
+--     MOVE so that path is not exercised.
+--   * append — already carries a Message-ID existence probe. It was built as
+--     the Gmail self-append dedup (writeback/engine.go), but it is precisely
+--     the mechanism doc.go describes as the fix for a retried APPEND. Residual:
+--     a payload with an empty message_id_header skips the probe.
+--
+-- ⚠ THE LEASE CANNOT RACE A LIVE PASS, which is why 15 minutes is generous
+-- rather than risky. syncGate (internal/syncrunner/gate.go) guarantees at most
+-- one pass per account at any instant, so a reclaim only ever runs in a pass
+-- that started AFTER the previous one ended or died. The lease governs how long
+-- recovery waits after a death, not a contest between two live workers. (That
+-- guarantee is in-process; it would not hold for two server processes sharing
+-- one database, which this deployment does not do.)
+--
+-- attempts is incremented on reclaim exactly as on a fresh claim: the intent WAS
+-- attempted, and burning retries is what stops an intent that reliably kills its
+-- process from being retried forever. It reaches the engine's cap and
+-- dead-letters, which is surfaced.
+--
+-- The reclaim rides inside the claim query rather than arriving as its own
+-- periodic job, for 00041's three reasons: it is atomic with the claim it
+-- repairs, it needs no scheduling, and a reclaimer implemented as a job could be
+-- stranded by the very defect it fixes.
+
+-- +goose Up
+-- +goose StatementBegin
+ALTER TABLE app.writeback_intents ADD COLUMN claimed_at timestamptz;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+-- Rows already inflight when this lands were claimed by code that never wrote
+-- the column, so their claimed_at is NULL and the reclaim predicate — which
+-- requires NOT NULL, mirroring 00041 — would skip them forever. Stamping now()
+-- makes them eligible after one lease period rather than immediately: at
+-- migration time the server is not yet running (the migrate one-shot gates it
+-- via depends_on), so an inflight row here is stranded by definition, but
+-- waiting one lease is the conservative reading and costs a single 15-minute
+-- delay, once, on rows the measurement above says do not currently exist.
+UPDATE app.writeback_intents SET claimed_at = now() WHERE state = 'inflight';
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+ALTER TABLE app.writeback_intents DROP COLUMN claimed_at;
+-- +goose StatementEnd

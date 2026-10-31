@@ -1,0 +1,8 @@
+From: Sync Tester <sync-tester@example.com>
+To: Carol Example <carol@example.com>
+Subject: Sent message copy
+Date: Wed, 03 Jan 2024 12:00:00 +0000
+Message-ID: <sent-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+This is a seeded Sent message for the sync-test harness (issue #4).

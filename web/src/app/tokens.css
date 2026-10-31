@@ -1,0 +1,332 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* Mailroom design tokens (#376) — the ONE place every custom property this app
+ * uses is defined. Imported FIRST in main.tsx, before styles.css, so nothing that
+ * reads a token can ever load ahead of its definition.
+ *
+ * WHY THIS FILE EXISTS: CSS fails silently. v1.28.0 shipped a stylesheet using
+ * `--surface`, `--surface-hover`, `--text`, `--text-muted` — four of six
+ * undefined — and nothing errored; the tab strip just rendered wrong, in both
+ * themes, until someone noticed by eye. It is STILL happening: before this issue,
+ * `var(--surface)` was used 12 times in styles.css (9 with no fallback) while
+ * `--surface` was defined nowhere, and `--pane-split` was read in CSS but only
+ * ever given a value at RUNTIME, by app/prefs.ts's `style.setProperty` — so
+ * anything that read it before that line ran saw `initial`, not a real size.
+ * #372 pass 2 adds semantic tones (held, sealed, returned) and per-account/
+ * per-label colours that all have to survive both themes at equal contrast, which
+ * is exactly the kind of fact a comment promises and a build step actually keeps.
+ * So the token set is now the thing scripts/check-tokens.mjs checks on every
+ * `npm run build` — not the thing a comment promises. See
+ * web/src/core/tokens/checkTokens.ts for what it enforces and why.
+ *
+ * THE ONE INVENTORY: every token here is one of four shapes — `:root`, the three
+ * `html[data-density="…"]` blocks, or the two `html[data-theme="…"]` blocks. A
+ * custom property declared anywhere else (styles.css's `.list-pane
+ * { --tab-strip-h: … }` is the existing example) is an ordinary, component-scoped
+ * CSS variable, not a design token, and stays where it is — see the comment
+ * beside it for why it is scoped that way on purpose. The checker only treats the
+ * four shapes above as "the inventory"; it still tracks every OTHER declaration
+ * too, so a legitimate scoped variable's use is never mistaken for an undefined
+ * token, but redefining one of THESE names in one of THESE shapes anywhere but
+ * this file is an error.
+ */
+
+/* The contrast pairs this file promises hold at 4.5:1 (WCAG AA for text), in BOTH
+ * themes — parsed by checkTokens.ts, one pair per line, foreground/background.
+ * Adding a semantic tone or an account/label colour that gets used as text on a
+ * background belongs on this list; the checker only knows what it is told to
+ * check. */
+/* @contrast fg/bg */
+/* @contrast fg-muted/bg */
+/* @contrast fg/bg-raised */
+/* @contrast fg/bg-sunken */
+/* @contrast fg/bg-selected */
+/* ⚠ ADDED BY MEASUREMENT, NOT BY ANTICIPATION (#447). `--fg-muted` on
+ * `--bg-selected` was a pair NOBODY HAD DECLARED and it failed WCAG AA in dark
+ * at 4.21:1 — a muted sub-label on a selected row: the rail's unread count on the
+ * mailbox you are in (styles.css .nav-badge), the attachment viewer's file-type
+ * caption on the thumbnail you are on (viewer.css .viewer-thumb-kind), and every
+ * other `.is-selected`/`.is-current` row that has a muted second line. The
+ * accessibility lane found both instances on its first dark-theme pass
+ * (scripts/a11y-e2e.sh); this checker could not have, because it only ever
+ * examines the pairs named in this list, and muted text was declared against
+ * `bg` while the selected background was declared against `fg`. A pair that
+ * exists only because two rules meet in the cascade is invisible here and plain
+ * to a browser.
+ *
+ * So the pair is declared — which makes it a red build in BOTH themes from now on
+ * — and the dark `--bg-selected` moved with it (see below). */
+/* @contrast fg-muted/bg-selected */
+/* @contrast fg/bg-hover */
+/* ⚠ ADDED BY MEASUREMENT, NOT BY ANTICIPATION — AGAIN (#514), and by the same
+ * instrument that found the last one. `--fg-muted` on `--bg-hover` was another
+ * pair NOBODY HAD DECLARED: every muted second fact on a row a pointer happens
+ * to be over — the desk's preview, alias and time, the message list's sender,
+ * subject, preview and time. It clears AA (5.15:1 in light, and higher in dark)
+ * so nothing has to change about the palette; what was missing was the CHECK.
+ * The accessibility lane surfaced it the first time a run left the pointer
+ * parked on a row, which is to say by accident, which is to say it could have
+ * gone the other way. Declared here so it cannot. */
+/* @contrast fg-muted/bg-hover */
+/* @contrast accent-fg/accent */
+/* @contrast warn-fg/warn-bg */
+/* @contrast error-fg/error-bg */
+/* @contrast mark-fg/mark-bg */
+/* @contrast held/held-bg */
+/* @contrast returned/returned-bg */
+/* @contrast danger/bg */
+/* @contrast accent/bg */
+/* @contrast seal/bg */
+/* @contrast acct-1/bg */
+/* @contrast acct-2/bg */
+/* @contrast acct-off/bg */
+/* @contrast label-1/bg */
+/* @contrast label-2/bg */
+/* @contrast label-3/bg */
+/* @contrast label-4/bg */
+
+/* Known debt, not silently fixed here: #372 pass 2 fixed these exact hex values
+ * (this issue catalogues the palette and builds the check; it does not restyle
+ * it — see #375 for where the palette itself is applied). Measured against a
+ * white light-mode background, three of the new account/label tones land just
+ * under 4.5:1 as PLAIN TEXT; they are still fine for their actual use (a small
+ * dot/chip with a text label beside it, never text-on-background alone — see
+ * .label-dot / .health-dot's "never colour alone" comments), but the checker
+ * cannot see intended use, only the number, so it is named here rather than
+ * silently passing a check that would otherwise claim everything is AA-clean.
+ * Both dark-theme counterparts pass; label-3 shares acct-2's exact colour on
+ * purpose (#372 pass 2), so it repeats the same ratio. */
+/* @contrast-known-low light acct-2/bg 4.32 */
+/* @contrast-known-low light acct-off/bg 4.41 */
+/* @contrast-known-low light label-3/bg 4.32 */
+
+:root {
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --nav-w: 244px;
+  --radius: 8px;
+  --row-pad: 0.6429rem;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 24%);
+  --shadow-2: 0 6px 20px rgb(0 0 0 / 28%);
+  /* Read in styles.css's pane-splitter grid tracks, but only ever WRITTEN by
+   * app/prefs.ts's `applyPaneSplit` (`style.setProperty` on <html>, spec §12's
+   * "manual + system-follow" prefs, #61). A runtime-set custom property still has
+   * to be declared here: without a real value, anything that reads it before
+   * prefs.ts's first call sees `initial` — no track size at all — rather than a
+   * usable default. 380px matches prefs.ts's own vertical default
+   * (SPLIT_BOUNDS.vertical.def) so the very first paint already agrees with what
+   * `loadPaneSplit` will apply a moment later. */
+  --pane-split: 380px;
+  /* The desk's row height (#375). Declared here as well as per density for the
+   * same reason --pane-split is: `applyDensity` sets `data-density` from
+   * main.tsx, but anything that read this before that line ran would see
+   * `initial` — no height at all — rather than a usable default. The value
+   * matches the `cozy` block, which is prefs.ts's own default. */
+  --desk-row-h: 4rem;
+}
+
+/* THE FIVE TEXT SIZES (#514). This is the ONE declaration the whole app scales
+ * from: everything that fits text is in `rem` (see the note below), so setting
+ * the root font size here moves the type, the rows, the buttons and the
+ * toolbars together.
+ *
+ * ⚠ IT LIVES IN CSS, NOT IN JAVASCRIPT, and `applyTextSize` only sets the
+ * ATTRIBUTE (app/prefs.ts, called from main.tsx before the first render, the
+ * way density already is). A root size written with `style.setProperty` would
+ * necessarily arrive after the stylesheet, so every load would paint at 14px
+ * and then visibly resize.
+ *
+ * `m` IS 14px — the size this app has always drawn at — which is what makes
+ * the default a no-op for everyone who never opens the control, and what makes
+ * the `rem` conversion in web/scripts/px-to-rem.mjs an identity at the default
+ * step. The pairs are mirrored in prefs.ts's TEXT_SIZE_PX for the tests, and a
+ * unit test reads THIS FILE and compares, because two lists of five numbers in
+ * two languages is exactly the shape that drifts.
+ *
+ * The steps are not evenly spaced on purpose: 12 → 13 → 14 is one pixel at a
+ * time because that is where a pixel is a visible fraction of the line, and
+ * 14 → 16 → 18 is two because at that size it is not. */
+html[data-text-size="xs"] { font-size: 12px; }
+html[data-text-size="s"] { font-size: 13px; }
+html[data-text-size="m"] { font-size: 14px; }
+html[data-text-size="l"] { font-size: 16px; }
+html[data-text-size="xl"] { font-size: 18px; }
+
+/* ⚠ EVERY LENGTH THAT EXISTS TO FIT TEXT IS IN `rem`, AND THAT IS WHAT MAKES
+ * THE TEXT-SIZE CONTROL POSSIBLE (#514). `html[data-text-size]` sets the ROOT
+ * font size (12 / 13 / 14 / 16 / 18px, `m` = 14 = the size this app has always
+ * drawn at), so a `rem` here is "however tall a line of text is right now" and
+ * a row grows with its own contents. The numbers below are the historical
+ * pixel values divided by 14 — 4rem WAS 56px — which is why they are not
+ * round; web/scripts/px-to-rem.mjs holds the conversion and the reasoning, and
+ * keeps the arithmetic checkable instead of leaving it buried in a diff.
+ *
+ * A length that is about a POINTER or about LAYOUT (--nav-w, --pane-split, the
+ * 24% sender column, a 32px tap target, a colour swatch) is deliberately still
+ * in pixels: scaling those with the type would make this a zoom control, which
+ * is a different feature and a worse one.
+ *
+ * Row height per density. `--row-pad` is what an ORDINARY list row is padded
+ * by, and its height is whatever the content then comes to; the DESK's rows
+ * cannot work that way — it virtualises one flat list of headings, rows,
+ * drawers and the line, and the window arithmetic (core/desk.ts virtualWindow)
+ * places every item at `index * height`. So the height is declared, here, per
+ * density, and every kind of desk item obeys it: an item that rendered taller
+ * would put everything after it at the wrong offset, silently, with rows drawn
+ * over each other rather than an error. */
+html[data-density="comfortable"] { --row-pad: 1rem; --desk-row-h: 4.5714rem; }
+html[data-density="cozy"] { --row-pad: 0.6429rem; --desk-row-h: 4rem; }
+html[data-density="compact"] { --row-pad: 0.3571rem; --desk-row-h: 3.2857rem; }
+
+/* THE MULTI-LINE ROW IS TALLER, PER DENSITY (#514). A sixth and seventh shape
+ * in this file, and the checker deliberately does not treat them as a second
+ * definition of `--desk-row-h`: the four INVENTORY shapes are `:root`, the
+ * three densities and the two themes (see the header and
+ * core/tokens/checkTokens.ts), and a two-attribute selector is none of them.
+ * They are an enhancement layer over an already-defined token, exactly like
+ * desk.css's phone block and styles.css's `prefers-contrast: more` block.
+ *
+ * THE ARITHMETIC, because a row that clips its own third line is the failure
+ * this whole issue exists to remove. Everything inside the row is now in `rem`,
+ * so the CONTENT is a constant number of rem at every text size:
+ *
+ *   line 1  sender        1rem     x 1.45 line-height = 1.45rem
+ *   line 2  subject       1rem     x 1.45              = 1.45rem
+ *   line 3  snippet       0.9286rem x 1.45             = 1.35rem
+ *                                                        ------
+ *                                                        4.25rem
+ *
+ * plus the density's own breathing room, which is `--row-pad` top and bottom:
+ *
+ *   comfortable  4.25 + 2 x 1      = 6.25  ->  6.3rem
+ *   cozy         4.25 + 2 x 0.6429 = 5.54  ->  5.6rem
+ *   compact      4.25 + 2 x 0.3571 = 4.96  ->  5rem
+ *
+ * Rounded UP, never down: the cost of a tenth of a rem too much is a hair of
+ * white space, and the cost of a hundredth too little is clipped descenders on
+ * every row in the list. AND CHECKED BY RENDERING rather than by this sum
+ * alone — #514 screenshotted xl/comfortable and xs/compact, because the
+ * arithmetic cannot see a glyph whose ascender exceeds its line box.
+ *
+ * The three heights are the SAME at phone widths, and desk.css's phone block
+ * says why it does not restate them. */
+html[data-row-layout="multiLine"][data-density="comfortable"] { --desk-row-h: 6.3rem; }
+html[data-row-layout="multiLine"][data-density="cozy"] { --desk-row-h: 5.6rem; }
+html[data-row-layout="multiLine"][data-density="compact"] { --desk-row-h: 5rem; }
+
+html[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-sunken: #f1f3f4;
+  --bg-raised: #ffffff;
+  --bg-hover: #eceff1;
+  --bg-selected: #d7e5f8;
+  --bg-unread: #ffffff;
+  --bg-read: #f6f8fa;
+  --fg: #16191d;
+  --fg-muted: #5a6570;
+  --border: #d5d9de;
+  --border-strong: #a9b1b8;
+  --accent: #1a56c4;
+  --accent-fg: #ffffff;
+  --danger: #a1131a;
+  --warn-bg: #fbf1d6;
+  --warn-fg: #4a3708;
+  --error-bg: #fadcdc;
+  --error-fg: #6b1015;
+  --mark-bg: #ffe680;
+  --mark-fg: #2a2200;
+  --star: #b07d00;
+  /* Was used 12 times in styles.css (9 with no fallback) and defined nowhere —
+   * the #376 "why" above. Every one of the 12 rules is a quiet INSET panel or
+   * banner background (.priority-reasons, .queue-group, .suggestion-panel,
+   * .thread-muted, .thread-snoozed, .remote-banner, .rule-preview-result,
+   * .rule-tighten, .rule-apply, .auth-notice-failed, .sender-warning-selfSpoof,
+   * .sender-warning-punycodeDomain) — the same "this is a raised surface, not
+   * the base background" role --bg-raised already plays for cards/dialogs, so
+   * that is the value that matches what every one of those 12 rules is actually
+   * asking for. */
+  --surface: var(--bg-raised);
+
+  /* Semantic tones (#372 pass 2). Each one carries a MEANING no other token
+   * does — colour is a second channel here, never the only one (every place
+   * these are used pairs the colour with a word, an icon, or a shape, per
+   * spec's WCAG 1.4.1 rule already followed by e.g. .health-dot). */
+  /* held: a withheld attachment (quarantine/policy hold, #396/#412) is waiting
+   * on a decision, not merely denied — a distinct hue from --danger so "held"
+   * and "failed/blocked" never read as the same severity. */
+  --held: #5F5280;
+  --held-bg: #ECE8F3;
+  /* seal: a message that is signed or encrypted (OpenPGP/S-MIME) — a fact about
+   * its cryptographic state, unrelated to whether it is trusted, urgent, or
+   * flagged. */
+  --seal: #385A8A;
+  /* returned: a snoozed message that has come back, or a bounce notice — "this
+   * left and arrived again," distinct from --accent's "this WILL happen"
+   * (.tag-snoozed) and from --warn's "something needs attention." */
+  --returned: #6E6100;
+  --returned-bg: #F1ECC8;
+
+  /* Identity colour (#372 pass 2): spent ONLY on accounts and labels, and never
+   * as the sole carrier of either — an account is also its name/initial, a
+   * label is also its text, because "an area is a word, never a colour" (a
+   * folder, a view, a status is never identified by hue alone). Four label
+   * slots cycle for however many labels exist; three account slots (plus
+   * "off," below) is deliberately few, because an account picker with a colour
+   * per account and no other cue is a matching game past a handful of them. */
+  --acct-1: #3B6FB6;
+  --acct-2: #B5652A;
+  /* acct-off: an account that is paused/not syncing — a neutral, deliberately
+   * unsaturated tone so "no account colour is doing anything right now" reads
+   * as absence, not as a fourth account. */
+  --acct-off: #6F7B75;
+  --label-1: #2E6F62;
+  --label-2: #7A4E9C;
+  --label-3: #B5652A;
+  --label-4: #3B6FB6;
+}
+
+html[data-theme="dark"] {
+  --bg: #16191d;
+  --bg-sunken: #101317;
+  --bg-raised: #1e2228;
+  --bg-hover: #272c33;
+  /* #24405f until #447. It put `--fg-muted` at 4.21:1 — under AA — for every
+   * muted sub-label drawn on a selected row, and the fix belongs to the pair
+   * rather than to the dozen rules that create it (the `@contrast
+   * fg-muted/bg-selected` note at the top of this file). At #1d3450 the same
+   * pair is 5.00:1, `--fg` rises 8.83 -> 10.50:1 and `--accent` 4.64 -> 5.52:1,
+   * so every relationship this colour is in gets better and none gets worse. It
+   * is still plainly the blue selection it was; light is unchanged, because
+   * light already cleared the floor at 4.66:1. */
+  --bg-selected: #1d3450;
+  --bg-unread: #212a38;
+  --bg-read: #191d22;
+  --fg: #e8eaed;
+  --fg-muted: #9aa4af;
+  --border: #333941;
+  --border-strong: #5b646e;
+  --accent: #7cadf5;
+  --accent-fg: #10151c;
+  --danger: #f28b82;
+  --warn-bg: #4a3708;
+  --warn-fg: #fbf1d6;
+  --error-bg: #521418;
+  --error-fg: #fadcdc;
+  --mark-bg: #7a5c00;
+  --mark-fg: #fff8e1;
+  --star: #e0a800;
+  --surface: var(--bg-raised);
+
+  --held: #B3A6D1;
+  --held-bg: #2A2635;
+  --seal: #8FB0E0;
+  --returned: #D2C45E;
+  --returned-bg: #33301A;
+
+  --acct-1: #7FA8E8;
+  --acct-2: #E0925A;
+  --acct-off: #8C978F;
+  --label-1: #6FC0AD;
+  --label-2: #C4A6E6;
+  --label-3: #E0925A;
+  --label-4: #7FA8E8;
+}

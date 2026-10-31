@@ -1,0 +1,77 @@
+# Hosts a URL in this repository is allowed to name.
+# See scripts/portability-check.sh. One host per line; '#' comments; blank lines
+# ignored. Matching is exact and case-insensitive — a subdomain is NOT implied.
+#
+# ⚠ AN ALLOWLIST, NOT A DENYLIST, AND THAT IS THE WHOLE DESIGN. The thing this
+# guards against is a URL naming infrastructure the operator personally hosts,
+# and nobody can enumerate those in advance — least of all in a file that ships
+# with the repository, where writing them down would itself be the leak. What
+# CAN be enumerated is the small set of hosts this project has a reason to name.
+# So every new external host is a deliberate line in this file rather than a
+# thing that slipped past a list of forbidden words.
+#
+# Reserved and unroutable forms are accepted structurally and need no entry
+# here: *.example / *.test / *.invalid / *.localhost (RFC 2606, RFC 6761),
+# example.com|net|org|edu and their subdomains, and any single-label host
+# (docker-compose service names like `postgres` or `crypto` — a name with no
+# dot cannot be a public domain).
+
+# Project + licence
+github.com
+# Go module infrastructure. The toolchain fetches from proxy.golang.org and
+# verifies every module against sum.golang.org on each `go install`, so these
+# are named in scripts/go-install-retry.sh, whose whole reason for existing is
+# that they intermittently fail. Public services this project depends on to
+# build at all — not anything the operator hosts.
+sum.golang.org
+proxy.golang.org
+www.gnu.org
+fsf.org
+keepachangelog.com
+docs.renovatebot.com
+
+# Specifications and prior art this code cites
+jmap.io
+www.jwz.org
+
+# Third-party endpoints and fixtures that must be the real thing to be worth
+# testing: the FCM push endpoint the web-push client actually talks to.
+fcm.googleapis.com
+
+# The Autocrypt Level 1 specification, cited in internal/autocrypt's package doc
+# (#48). A public standards document, not anything the operator hosts.
+autocrypt.org
+
+# IP literals, all deliberate test fixtures. NOT blanket-allowed by range: a
+# public address is exactly the shape a leaked VPS would take, so each one is
+# listed.
+127.0.0.1            # loopback
+127.1.2.3            # loopback beyond .1: all of 127/8 is loopback (egress guard, MCP setup)
+169.254.169.254      # cloud metadata endpoint — the egress guard MUST block it
+93.184.216.34        # a stable public literal, for resolve-then-dial tests
+10.0.0.1             # RFC 1918, egress fixtures
+10.0.0.5
+
+# Mail-provider OAuth (#52, ADR-046): the fixed endpoints and scope URLs of the
+# two providers in internal/oauthmail's registry. Public services of Google and
+# Microsoft, not anything the operator hosts. (IMAP/SMTP hosts are written
+# without a scheme and need no entry.)
+accounts.google.com
+oauth2.googleapis.com
+mail.google.com
+login.microsoftonline.com
+outlook.office.com
+# Microsoft's legacy (v1) token issuer: named only in a test that proves an ID
+# token carrying it is REFUSED (internal/oauthmail/connect_test.go).
+sts.windows.net
+# The vendored go-imap fork (#52, ADR-047; third_party/go-imap): public
+# reference links in the upstream library's own README and comments, kept
+# verbatim so the copy stays diffable against upstream.
+pkg.go.dev
+web.libera.chat
+www-archive.mozilla.org
+www.iana.org
+www.rfc-editor.org
+# Operator guide docs/oauth-providers.md (#52): the consoles where the operator registers their OAuth apps.
+console.cloud.google.com
+entra.microsoft.com

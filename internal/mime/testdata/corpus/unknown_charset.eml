@@ -1,0 +1,9 @@
+From: Alice Example <alice@example.com>
+To: Bob Example <bob@example.com>
+Subject: Unknown charset body
+Date: Mon, 01 Jun 2026 10:20:00 +0000
+Message-Id: <unknown-charset-001@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=x-mailroom-hostile-9000
+
+Known ASCII text, then one hostile byte: [é] end of body.

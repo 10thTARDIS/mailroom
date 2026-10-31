@@ -1,0 +1,401 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* DAY-ONE SETUP (#446) — the four-step wizard.
+
+   Imported ONCE, from the route component (ui/setup/SetupRoute.tsx), rather than
+   from main.tsx beside the other five stylesheets: the only file that depends on
+   these rules is the one surface that uses them, and a wizard seen once per login
+   has no business in the list every other screen has to read to find its own
+   styles. That is a statement about WHERE THE DEPENDENCY IS DECLARED, not about
+   bytes: this build emits one stylesheet for the app (no code splitting), so
+   nothing here is deferred at runtime today.
+
+   NO NEW DESIGN TOKENS. tokens.css is the one inventory (#376) and the build
+   refuses a definition anywhere else; every colour below is an existing token,
+   which is also what makes both themes work with no second palette here.
+
+   NO STATE BY COLOUR ALONE. The chosen card carries a word ("recommended to
+   start") and a thicker border; the current step carries `aria-current="step"`
+   and a mark on its leading edge. Colour is only ever the third signal.
+
+   THE IDIOM IS THE SETTINGS PAGE'S, which is the desk's: words rather than
+   glyphs, one muted line of facts under each heading, and a heading that is a
+   heading. */
+
+/* ---- the surface -------------------------------------------------------- */
+
+/* It takes the whole content area — no list, no reading pane — and scrolls as one
+   column. `.content` is a grid with a single track (styles.css), so nothing has to
+   be re-declared for that; what is needed is a readable measure inside it, because
+   a five-column table and a paragraph of explanation want very different widths. */
+.setup-content {
+  overflow-y: auto;
+}
+
+.setup {
+  width: min(920px, 100%);
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.setup-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.setup-head h2 {
+  margin: 0 0 8px;
+  font-size: 1.4286rem;
+}
+
+/* The step list reads as a row of steps on a wide screen and stacks on a phone —
+   `flex-wrap` rather than a media query, because the wrap point is the content's
+   own, not a device's. */
+.setup-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9286rem;
+  color: var(--fg-muted);
+}
+
+.setup-step-n {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The current step: full-strength text, a leading mark, and `aria-current` in the
+   markup. Three signals, one of which is not visual at all. */
+.setup-step.is-current {
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-left: 8px;
+}
+
+.setup-step-heading {
+  margin: 12px 0 0;
+  font-size: 1.1429rem;
+}
+
+/* Focus is MOVED here on a step change; the ring is what makes that visible. */
+.setup-step-heading:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-lead {
+  margin: 0;
+  max-width: 68ch;
+  line-height: 1.5;
+}
+
+.setup-note {
+  margin: 16px 0;
+  color: var(--fg-muted);
+}
+
+/* ---- the census table --------------------------------------------------- */
+
+.setup-account {
+  display: block;
+}
+
+.setup-account-name {
+  margin: 8px 0;
+  font-size: 1rem;
+}
+
+.setup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9286rem;
+}
+
+/* The caption names the table for a reader arriving at it directly. Visible
+   rather than hidden: it is one short line and it says what the table is for,
+   which the column headings alone do not. */
+.setup-table-caption {
+  text-align: left;
+  padding-bottom: 6px;
+  color: var(--fg-muted);
+}
+
+.setup-table th,
+.setup-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-table thead th {
+  color: var(--fg-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.setup-table tbody th {
+  font-weight: 600;
+}
+
+/* Counts are read down the column, so they are aligned and tabular — a column of
+   proportional digits cannot be scanned. */
+.setup-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A cell that states a fact instead of offering a control (the inbox's area and
+   label). Muted, so the difference between "you choose" and "this is how it is"
+   is visible before anything is clicked. */
+.setup-fixed {
+  color: var(--fg-muted);
+}
+
+.setup-label-input {
+  width: 12ch;
+  min-width: 8ch;
+}
+
+/* ---- the two cards ------------------------------------------------------ */
+
+.setup-cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  cursor: pointer;
+}
+
+.setup-card.is-chosen {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.setup-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-card-title {
+  font-weight: 600;
+}
+
+.setup-card-note,
+.setup-card-body {
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+  line-height: 1.5;
+}
+
+/* ---- per-folder rows (step 2) ------------------------------------------- */
+
+.setup-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-row-name {
+  font-weight: 600;
+  min-width: 12ch;
+}
+
+.setup-row-count {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the "This would…" sentence and the progress panel ------------------ */
+
+/* ONE `role="status"` REGION for both, because they are the same thing at two
+   moments: what the plan would do, and what the run is doing. Two live regions
+   would talk over each other on the click that turns one into the other. */
+.setup-status {
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  line-height: 1.5;
+}
+
+.setup-status-sentence {
+  margin: 0;
+}
+
+.setup-status-note {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+.setup-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- step 3, the proposals ---------------------------------------------- */
+
+.setup-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-proposal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-proposal-conditions {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--fg);
+}
+
+.setup-proposal-numbers {
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+/* The word an accepted proposal wears. A word, not a tick: a glyph alone is not a
+   state anybody can read out. */
+.setup-accepted {
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/* ---- step 4, the dials -------------------------------------------------- */
+
+.setup-dials {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-dial-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.setup-dial-note {
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+}
+
+.setup-nag-input {
+  width: 6ch;
+}
+
+/* ---- the footer --------------------------------------------------------- */
+
+/* The way out on the left, the primary action on the right, always in that order:
+   the button that writes is the last thing the eye reaches. */
+.setup-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.setup-footer .button-primary {
+  margin-left: auto;
+}
+
+/* ---- the phone ---------------------------------------------------------- */
+
+/* One screen, no side padding to spare, and the table becomes rows: five columns
+   of numbers do not fit, and a table that scrolls sideways hides the column the
+   decision is in. The header cells are turned into labels with `::before` so each
+   cell still says what it is. */
+@media (max-width: 759px) {
+  .setup {
+    padding: 12px 12px 32px;
+  }
+
+  .setup-table thead {
+    display: none;
+  }
+
+  .setup-table,
+  .setup-table tbody,
+  .setup-table tr,
+  .setup-table th,
+  .setup-table td {
+    display: block;
+  }
+
+  .setup-table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .setup-table td {
+    border-bottom: 0;
+    padding: 2px 0;
+  }
+
+  .setup-num {
+    text-align: left;
+  }
+
+  .setup-footer .button-primary {
+    margin-left: 0;
+  }
+}

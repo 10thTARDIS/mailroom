@@ -1,0 +1,217 @@
+name: Restore Drill
+
+# "A backup that hasn't restored is a hypothesis." (spec §11, ADR-005, #40)
+#
+# Weekly, because the thing that rots is not the backup script — it is the
+# SCHEMA underneath it. A migration that breaks pg_restore, a new table that
+# nobody thought to back up, a key derivation that changed: none of those show up
+# in a backup job, they show up in a RESTORE. So this job takes a real backup and
+# actually restores it, every week, against whatever main looks like now.
+#
+# It runs in FIXTURE mode: scripts/restore-drill.sh builds its own Mailroom (real
+# migrations, real envelope-encrypted mail, its own master key and its own age
+# keypair), takes a real backup with scripts/backup.sh, DESTROYS THE SOURCE, and
+# restores the artifact into a scratch container — then proves the restore is
+# alive by decrypting a message with the escrowed key, rebuilding the search
+# index from Postgres, and running a search that must return a hit.
+#
+# That means NO PRODUCTION SECRETS ARE NEEDED HERE, which is the point: the drill
+# that runs unattended every week is the one that cannot leak anything. Drilling a
+# real production artifact needs the real master key from offline escrow and is a
+# deliberate, human-run act — see docs/backup-restore-runbook.md.
+#
+# --self-test runs the ten failure injections first (corrupt artifact, missing
+# escrowed keys, wrong escrowed keys, schema skew, search that returns nothing, ...) and
+# requires each to FAIL the drill, before running a clean drill that must PASS. A
+# drill that cannot fail is not a drill, and a green job that could never go red
+# is just a light that is always on.
+
+on:
+  schedule:
+    # Weekly, Sunday 05:23 UTC — off the hour so it does not pile onto the
+    # common top-of-hour schedules.
+    - cron: "23 5 * * 0"
+  workflow_dispatch:
+  # Also on every push, so this workflow ALWAYS reports a commit status and can
+  # therefore be a required check (#273).
+  #
+  # ⚠ THE `paths:` FILTER THAT USED TO LIVE HERE IS WHY THIS DRILL BLOCKED
+  # NOTHING. It found two real defects in migration 00035 while that PR's 16
+  # required checks were all green — a role-creating migration that worked on an
+  # UPGRADE and failed on a RESTORE, which is a defect you find on a
+  # disaster-recovery day or not at all. It could not be made required, because a
+  # path-filtered workflow does not report on the commits it filters out, and a
+  # required context that never reports wedges every unrelated PR forever.
+  #
+  # So the filtering moved INTO the job, one step down. The workflow always runs,
+  # the job always completes, the context is always present and honest; when the
+  # commit cannot affect a restore the job says so and exits in seconds. Note
+  # this deliberately does NOT use a job-level `if:` — a skipped job reports
+  # `skipped`, which is not `success`, and would wedge merges exactly the way the
+  # path filter did.
+  #
+  # ⚠ `branches: ["**"]` IS DELIBERATE, NOT A NARROWING (#356). A bare `push:`
+  # matches every ref a push can name, tags included, and this workflow had no
+  # tag-awareness at all — so a release (which pushes `main`, then the
+  # `vX.Y.Z` tag) ran the whole drill TWICE against byte-identical code,
+  # alongside the same defect in ci.yml (two CI runs). The concurrency group
+  # below is keyed on github.ref, so the tag's run is a different group from
+  # main's and neither cancels nor queues behind the other. Measured: every
+  # tagged merge got two restore-drill runs. `branches: ["**"]` matches every
+  # branch name, including one containing `/` (a `renovate/...` branch, where
+  # a bare `*` would stop at the slash) — while a `branches` filter of ANY
+  # pattern structurally excludes tag refs: Forgejo's push matcher only
+  # evaluates a `branches` pattern against a ref that IS a branch (see
+  # forgejo.org/modules/actions/workflows.go, matchPushEvent — a tag ref fails
+  # `refName.IsBranch()` before any pattern is even compared), so this is not
+  # a narrower branch allowlist, it is "every branch, no tags". A tag run
+  # verified nothing branch protection gates (only `main` is protected), and
+  # the one guarantee worth keeping — that a tag was cut from a commit that
+  # actually passed CI on main — now lives in its own job, which is the only
+  # workflow in this repo that still triggers on `tags:`:
+  # .forgejo/workflows/tag-provenance.yml.
+  push:
+    branches: ["**"]
+
+# ⚠ QUEUED, NOT CANCELLED — the opposite setting from ci.yml, on purpose (#346).
+#
+# `cancel-in-progress: false` still collapses the QUEUE: at most one drill waits
+# behind the running one, so a burst of pushes no longer stacks N full drills.
+# That is where the capacity saving is, and this workflow is expensive — it
+# builds Postgres twice, compiles the CGO search engine, and does it six times
+# under --self-test, with a 60-minute budget.
+#
+# What it does NOT do is kill a drill mid-flight, and that asymmetry is
+# deliberate. This job's whole subject is whether a RESTORE completes; killing
+# one part-way and reporting nothing tells you less than letting it finish. It
+# also creates the longest-lived side containers in the repo
+# (mailroom-drill-srcpg-*, mailroom-drill-dstpg-*), and while their cleanup now
+# traps EXIT INT TERM, the cheapest way to not leak a container is not to
+# interrupt the thing holding it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    # The fixture builds Postgres twice, applies migrations, compiles the CGO
+    # Tantivy engine, and does it once per injection under --self-test.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # FULL HISTORY IS REQUIRED (#236). The --migrate-forward phase builds its
+          # older fixture from the revision that predates the head migration —
+          # because seeding an old schema with today's store code writes columns
+          # that schema does not have. A shallow clone cannot name that revision,
+          # and the drill fails loudly rather than skipping the phase.
+          fetch-depth: 0
+
+      # No setup-go and no service containers: every step runs inside containers
+      # driven through the Docker API (docker cp + docker exec), because the
+      # CI runner executes jobs in containers with the Docker socket mounted, where
+      # host paths and host ports do not resolve. Same shape as
+      # scripts/integration-test.sh and scripts/tantivy-test.sh.
+      # The path filter that used to sit on the trigger, moved here so the job
+      # still reports (#273). The ONE rule that matters: when we cannot work out
+      # what changed, we DRILL. Skipping on uncertainty is how a check quietly
+      # stops checking, which is the failure this whole issue is about.
+      - name: Decide whether this commit can affect a restore
+        id: relevance
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+
+          # A scheduled or hand-dispatched run is the weekly drill itself.
+          if [ "$EVENT" != "push" ]; then
+            echo "event=$EVENT — drilling unconditionally"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          DEFAULT="${DEFAULT_BRANCH:-main}"
+          NULL_SHA=0000000000000000000000000000000000000000
+          BASE=""
+
+          # ⚠ ON A BRANCH, COMPARE AGAINST THE MERGE BASE WITH THE DEFAULT
+          # BRANCH — NOT against the previous push.
+          #
+          # Branch protection gates on the HEAD commit's status, so the only
+          # drill result that can block a merge is the one attached to the tip.
+          # Diffing tip-against-previous-push would ask "did the LAST COMMIT
+          # touch a migration?", and a PR that adds a migration and then fixes a
+          # typo in the README answers no — the tip would report a clean skip
+          # over a migration that no required check had drilled. That is the
+          # exact hole this workflow exists to close, so the question has to be
+          # "does this BRANCH touch a migration?", which the merge base answers.
+          if [ "${GITHUB_REF_NAME:-}" != "$DEFAULT" ] \
+             && git rev-parse --verify -q "origin/$DEFAULT" >/dev/null 2>&1; then
+            BASE=$(git merge-base "origin/$DEFAULT" "$GITHUB_SHA" 2>/dev/null || true)
+            [ -n "$BASE" ] && echo "comparing against the merge base with origin/$DEFAULT"
+          fi
+
+          # On the default branch itself there is no merge base to use: the
+          # meaningful question is what this push introduced, which is exactly
+          # what before..sha describes.
+          if [ -z "$BASE" ] && [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$NULL_SHA" ] \
+             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            BASE="$BEFORE"
+            echo "comparing against the previous head $BEFORE"
+          fi
+
+          if [ -z "$BASE" ]; then
+            # New branch, force push, or a base this clone cannot resolve.
+            echo "cannot determine a base to diff against — drilling"
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$GITHUB_SHA")
+          echo "changed files:"
+          echo "$CHANGED" | sed 's/^/  /'
+
+          # ⚠ THE SET IS DERIVED, NOT LISTED (#306).
+          #
+          # This used to be a five-entry regex — scripts/backup.sh,
+          # scripts/restore-drill.sh, cmd/mailroom-drill/, db/migrations/, this
+          # file — written against the migration-00035 incident that motivated
+          # the filter and never widened to the drill's real dependency set.
+          # cmd/mailroom-drill imports ten first-party packages directly
+          # (internal/store and internal/crypto among them) and links 26 once
+          # they are followed transitively, and both drill phases run
+          # cmd/mailroom-migrate; NONE of that was in the regex. v1.34.4 proved
+          # it: that release changed internal/store and this step reported
+          # relevant=false. The skip was right on the merits, but the filter
+          # could not have told the difference.
+          #
+          # scripts/drill-relevance.sh walks the import graph out of the
+          # checked-out source instead, so adding an import widens the filter on
+          # the same commit. It also PRINTS THE SET IT MATCHED AGAINST on a
+          # skip, so a wrong skip is diagnosable from the log afterwards rather
+          # than being a bare "nothing here can affect a restore".
+          #
+          # Its own --self-test runs in CI (build-test), together with a
+          # --check-go-list pass that proves the walk is a superset of what
+          # `go list -deps -tags tantivy` says the drill actually links.
+          RELEVANCE=$(printf '%s\n' "$CHANGED" | sh scripts/drill-relevance.sh --decide 2>&1 || true)
+          printf '%s\n' "$RELEVANCE"
+
+          # The ONE rule that matters, restated as code: when we cannot work out
+          # what changed, we DRILL. If the script died, or printed anything that
+          # is not a verdict, the honest answer is not "false" — a filter that
+          # errors into a skip is a check that stops checking, which is the
+          # whole subject of #273 and #306.
+          VERDICT=$(printf '%s\n' "$RELEVANCE" | grep -E '^relevant=(true|false)$' | tail -1 || true)
+          if [ -z "$VERDICT" ]; then
+            echo "⚠ scripts/drill-relevance.sh printed no verdict — DRILLING rather than guessing"
+            VERDICT="relevant=true"
+          fi
+          echo "$VERDICT" >> "$GITHUB_OUTPUT"
+
+      - name: Prove the drill can fail, then restore a real backup and prove it is alive
+        if: steps.relevance.outputs.relevant == 'true'
+        run: sh scripts/restore-drill.sh --self-test

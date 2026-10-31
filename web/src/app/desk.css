@@ -1,0 +1,1724 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* THE DESK (#375 increment 3). Loaded after styles.css, so it can lean on the
+   shared component classes there (.button, .list-pane, .modal-backdrop, .sheet)
+   rather than restating them.
+
+   NO NEW DESIGN TOKENS. tokens.css is the one inventory (#376) and the build
+   refuses a definition anywhere else; every colour below is an existing token,
+   which is also why both themes work without a second palette here.
+
+   ONE RULE RUNS THROUGH ALL OF THIS: every item in the virtualised list is
+   EXACTLY `--desk-row-h` tall. The window arithmetic places items at
+   `index * height` (core/desk.ts virtualWindow), so an item that grew would
+   push everything below it out of alignment — silently, as rows drawn on top of
+   one another rather than as an error. Hence `height`+`overflow: hidden` on
+   `.desk-item` and `white-space: nowrap` on the things inside it. */
+
+/* ---- the pane ----------------------------------------------------------- */
+
+/* It IS `.list-pane` (the class is kept deliberately): that is the element the
+   responsive rules hide when a message is open on a narrow screen, and the one
+   that already declares `container-type: inline-size` so rows lay themselves
+   out from the LIST's width rather than the viewport's. */
+.desk-pane {
+  padding: 0;
+}
+
+/* The header sentence, the strip, the tabs and the selection toolbar are chrome
+   ABOVE the virtualised region, not items in it. One sticky wrapper rather than
+   four sticky children: stacking several `top: 0` elements means offsetting each
+   by the height of the ones above it (see `--tab-strip-h` in styles.css), and
+   these four change height as the strip opens and the selection appears. */
+.desk-chrome {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- the header sentence ------------------------------------------------ */
+
+.desk-header {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.9286rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Offline, or the last request failed. A tone, never the only signal — the
+   sentence itself carries the words. */
+.desk-header.is-warn {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  /* IT WRAPS, unlike the ordinary sentence above. The ok sentence is a row of
+     short counts and truncating its tail costs nothing; the warning sentence
+     ends in a BUTTON (Retry / Details), and `text-overflow: ellipsis` on a
+     nowrap line would clip the one control the state exists to offer. A
+     warning you cannot act on is worse than no warning. */
+  white-space: normal;
+}
+
+/* The block the sentence and its note share (#375 increment 6). It exists
+   because the stale state has a second line — a <p> cannot contain one, and the
+   note has to be OUTSIDE the live region so it is not re-announced with every
+   tick of the sentence above it. */
+.desk-header-block {
+  display: flex;
+  flex-direction: column;
+}
+
+/* "Everything you do is saved here…" — the reassurance under the stale
+   sentence. Muted and smaller: it is context, not news, and it says the same
+   thing every time it appears. */
+.desk-header-note {
+  margin: 0;
+  padding: 0 12px 8px;
+  font-size: 0.8571rem;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+/* The Retry / Details buttons sit inside the warning sentence, so they inherit
+   its colour rather than the accent — an accent link on --warn-bg is a contrast
+   pair nobody declared (tokens.css @contrast). Underlined so it still reads as
+   a control without colour doing the work. */
+.desk-header.is-warn .link-button {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Ingest-only mode's persistent banner (ADR-028 §5, #521, ui/desk/ShadowBanner
+   .tsx). Several short facts rather than one sentence — the contract has four
+   distinct clauses, and folding them into one paragraph would bury the one
+   that matters (the suppressed count) in a run-on nobody finishes reading. */
+.shadow-banner p {
+  margin: 2px 0;
+}
+.shadow-banner-title {
+  font-weight: 600;
+}
+
+/* Your key is about to expire, or has (#795, ui/desk/KeyExpiryBanner.tsx). */
+.key-expiry-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+.key-expiry-banner p {
+  margin: 0;
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.key-expiry-banner-actions {
+  display: flex;
+  gap: 12px;
+}
+.key-expiry-banner .link-button {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* ---- the in-tray strip -------------------------------------------------- */
+
+.desk-tray {
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.desk-tray.is-empty {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 0.9286rem;
+  color: var(--fg-muted);
+}
+
+.desk-tray-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+}
+
+.desk-tray-toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9286rem;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-tray-toggle:hover {
+  color: var(--accent);
+}
+
+.desk-tray-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.desk-tray-caret {
+  display: inline-block;
+  transition: transform 120ms ease;
+}
+
+/* The disclosure is the only animated thing on the desk, and it is switched off
+   for anyone who asked for that. */
+@media (prefers-reduced-motion: reduce) {
+  .desk-tray-caret {
+    transition: none;
+  }
+}
+
+.desk-tray-rows {
+  border-top: 1px solid var(--border);
+}
+
+/* A tray preview row is a desk row of the same height, so the strip opening
+   does not change what a row looks like. */
+.desk-tray-row {
+  height: var(--desk-row-h);
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---- follow up (#58) ---------------------------------------------------- */
+
+/* Under the tray strip, in the same sunken band: it is the same kind of thing
+   (mail to come back to), and it is drawn only when something is due. */
+.desk-followup {
+  border-top: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+
+.desk-followup-title {
+  margin: 0;
+  padding: 6px 12px 2px;
+  font-size: 0.9286rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* --fg, not --fg-muted: muted text on the sunken band is AA but not the AAA
+   the a11y lane measures, and nothing here earns an allowlist entry. */
+.desk-followup-count {
+  font-weight: 400;
+  color: var(--fg);
+}
+
+.desk-followup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.desk-followup-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px 4px;
+}
+
+.desk-followup-open {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desk-followup-open:hover .desk-followup-why {
+  color: var(--accent);
+}
+
+.desk-followup-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* `max-width: 100%` (#798): in the Chromium this project's e2e lane pins (124),
+   a nowrap line inside the flex-column BUTTON keeps its full text width and
+   never reaches its ellipsis. The line was 392 px inside a 375 px phone, and the
+   whole desk scrolled sideways. Newer engines clamp it anyway; this makes the
+   clamp explicit. */
+.desk-followup-why,
+.desk-followup-subject {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.desk-followup-why {
+  font-size: 0.9286rem;
+}
+
+.desk-followup-subject {
+  font-size: 0.8571rem;
+  color: var(--fg);
+}
+
+.desk-followup-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* ---- the two halves ----------------------------------------------------- */
+
+.desk-tabs {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--border);
+}
+
+.desk-tab {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.55rem 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.desk-tab:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.desk-tab.is-selected {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.desk-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.desk-tab-count {
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+
+/* ---- the selection toolbar ---------------------------------------------- */
+
+.desk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-selected);
+}
+
+.desk-toolbar-count {
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+
+.desk-refile {
+  position: relative;
+}
+
+.desk-refile-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 12;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+
+.desk-refile-item {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desk-refile-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.desk-refile-item:disabled {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+.desk-refile-none {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+
+/* ---- the virtualised list ----------------------------------------------- */
+
+.desk-list {
+  flex: 0 0 auto;
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.desk-item {
+  height: var(--desk-row-h);
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Only once the row height has actually been measured. Before that the list
+   lays out in ordinary flow, which is a correct first paint that needs no
+   measurement at all. */
+.desk-list.is-virtual .desk-item {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+/* FOCUS ON THE LIST ITSELF (#447). The list is a `role="grid"` with one tab stop,
+   so focus lands on this element and not on a row — and a focus that cannot be
+   seen is a focus a sighted keyboard user cannot follow. Two edges, because they
+   answer two different questions: the list says "the keyboard is here", and the
+   cursor row (`.desk-row.is-cursor`, already outlined) says "this is the row it
+   will act on". */
+.desk-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Every item kind except a message row is one full-width cell: the element that
+   was the item's own root sits inside it and still fills the row-height box, so
+   this wrapper is invisible to the layout and visible only to a screen reader. */
+.desk-cell-full {
+  height: 100%;
+  min-width: 0;
+}
+
+/* The height probe: it declares the row height and nothing else. Zero-width and
+   out of flow, so it can never be mistaken for a row or affect one. */
+.desk-probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: var(--desk-row-h);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ---- a row -------------------------------------------------------------- */
+
+/* THE SINGLE LINE, REDRAWN (#514). The sender column is `9em` at its narrowest
+   rather than 110px, so it holds the same NUMBER OF CHARACTERS at every text
+   size instead of the same number of pixels, and 22% rather than 24% at its
+   widest, because the two things a row is about are the sender and the subject
+   and the subject is the longer of them. */
+.desk-row {
+  display: grid;
+  grid-template-columns: minmax(9em, 22%) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 12px;
+  background: var(--bg-read);
+}
+
+/* ---- the row's three ARIA cells (#447) ----------------------------------
+   The list is a `role="grid"`, so a row's three regions are its `gridcell`s, and
+   a cell has to be a real element: `display: contents` would generate no box and
+   is missing from the accessibility tree in some engines, which is the one thing
+   these exist for. So the CELL is the grid item now and the control inside it
+   fills the cell — the same rectangle the control occupied when it was the grid
+   item itself, which is why nothing above this needs to change. */
+.desk-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+}
+
+.desk-cell > .desk-sender,
+.desk-cell > .desk-main {
+  flex: 1 1 auto;
+}
+
+.desk-row.is-unread {
+  background: var(--bg-unread);
+}
+
+.desk-row:hover {
+  background: var(--bg-hover);
+}
+
+.desk-row.is-selected {
+  background: var(--bg-selected);
+}
+
+.desk-row.is-open {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.desk-row.is-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Unread is bold plus a dot — shape and weight, not colour alone, exactly as
+   `.message-row.is-unread` does it in styles.css. */
+.desk-row.is-unread .desk-sender-name,
+.desk-row.is-unread .desk-subject {
+  font-weight: 600;
+}
+
+.desk-row.is-unread .desk-sender-name::before {
+  content: "";
+  display: inline-block;
+  width: 0.5714em;
+  height: 0.5714em;
+  margin-right: 0.5em;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* Clicking the sender is what selects, so it is a control and looks like a
+   target on hover — but never like a button at rest, because it is most of the
+   time simply the row's first column. */
+.desk-sender {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desk-sender:hover .desk-sender-name {
+  text-decoration: underline;
+}
+
+.desk-sender:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.desk-sender-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* Each half of a hostile display name is isolated, so a directional override
+     in one cannot reorder the other (#307). */
+  unicode-bidi: isolate;
+}
+
+.desk-sender-address {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  unicode-bidi: isolate;
+}
+
+/* The sender-domain warning (#397). A glyph plus a title/aria-label sentence —
+   the colour is the second channel, never the only one. */
+.desk-warning {
+  flex: 0 0 auto;
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-radius: var(--radius);
+  padding: 0 4px;
+  font-size: 0.8571rem;
+}
+
+/* An account's colour, cycling over the two account tones; `--acct-off` is an
+   account that is not syncing. Always accompanied by the account NAME in the
+   title/aria-label — an area, an account or a status is never identified by hue
+   alone (tokens.css). */
+.desk-acct-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.desk-acct-dot.is-acct-1 { background: var(--acct-1); }
+.desk-acct-dot.is-acct-2 { background: var(--acct-2); }
+.desk-acct-dot.is-acct-off { background: var(--acct-off); }
+
+/* ⚠ `align-items: center`, NOT `baseline` — FOUND BY LOOKING AT A SCREENSHOT
+   (#514's rendering check), not by reading the CSS. In a flex container with a
+   fixed height, baseline alignment lines the items up with EACH OTHER and then
+   puts the whole group at the START of the cross axis: the subject was drawn
+   near the top of the row while the sender and the time beside it — in cells
+   that centre — sat in the middle. About 8px of misalignment on every desk row
+   at the default size, on a line whose entire job is to read as one line. It
+   predates this issue (nothing in #514 touched cross-axis alignment); what #514
+   changed is that somebody finally photographed the row and looked at it.
+
+   Centre rather than baseline costs half a pixel between the 14px subject and
+   the 13px snippet, and keeps `height: 100%` — which is what makes the WHOLE
+   row height a click target for "open this message" rather than just the strip
+   the text happens to occupy.
+
+   `gap: 0` because the separator between subject and snippet is now generated
+   content that carries its own spaces (see .desk-preview::before); a flex gap
+   as well put a wider space before the dash than after it. */
+.desk-main {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desk-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ⚠ `flex: 0 0 auto`, NOT `0 1 auto` (#514). THE SUBJECT IS NEVER SACRIFICED TO
+   THE SNIPPET. With a shrink factor the subject gave up width to a sibling that
+   is, by definition, the less important of the two — the operator complaint
+   this issue exists for was "no matter what we do, we're cutting off the
+   subject with the first line". At `0 0 auto` the subject asks for exactly its
+   own text; the snippet (basis zero, below) takes what is left; and the subject
+   truncates ONLY when the subject alone does not fit, which is when there is
+   genuinely nothing else to give.
+
+   `max-width: 100%` is the other half and is not decoration: without it a
+   subject longer than the column would overflow the flex line rather than
+   ellipsing, because a `0 0 auto` item is not allowed to shrink. */
+.desk-subject {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  unicode-bidi: isolate;
+}
+
+.desk-preview {
+  /* Basis ZERO, not auto. With `auto` the snippet's basis is its own text width
+     (a long snippet is well over a thousand pixels of nowrap text), and flex
+     shrinks siblings in proportion to their basis — so the longer the snippet,
+     the more of the deficit the SUBJECT absorbed, down to "Emerge..." beside a
+     screen-wide snippet. From zero the snippet only ever takes the space the
+     subject leaves, and the subject truncates only when it alone would
+     overflow the line. Found by the operator on the first day of v1.66.0. */
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+  unicode-bidi: isolate;
+}
+
+/* THE SEPARATOR IS GENERATED, so it exists only where it makes sense and never
+   reaches the accessibility tree or a copy-paste (generated content is not in
+   the DOM, which is what makes `aria-hidden` unnecessary rather than merely
+   omitted). `:not(:empty)` is what keeps a dangling en dash off a message with
+   no preview text: React renders `{""}` as no child at all, so the span really
+   is empty in that case.
+
+   It lives on the SNIPPET rather than after the subject because the subject's
+   own box is what ellipses — a separator appended there would be the last thing
+   truncated away, leaving "Re: the quarterly rep…" with no dash and a snippet
+   that reads as part of the subject.
+
+   ⚠ THE LEADING SPACE IS A NON-BREAKING ONE, AND IT HAS TO BE. `content: " - "`
+   renders as `subject- snippet`: the snippet is its own box (a flex item here, a
+   grid item in the message list), so a space at the START of its first line box
+   is stripped by white-space processing — `nowrap` does not save it, because
+   that is line-start collapsing rather than wrapping. Seen in the first
+   screenshot of #514's rendering check and invisible in the CSS. */
+html:not([data-row-layout="multiLine"]) .desk-preview:not(:empty)::before {
+  content: "\00a0– ";
+}
+
+/* The snippet is the first thing worth losing when the reading pane narrows the
+   list — better than squeezing the subject to four characters. Measured against
+   the LIST's width (`.list-pane` is the container), not the viewport's.
+
+   ⚠ `44em`, NOT `620px` (#514). In a container query `em` is the CONTAINER's own
+   font size, which follows the root, so the threshold moves with the text size:
+   at the largest step the same pixel width holds fewer characters and the
+   snippet has to go sooner. 44em IS 620px at the default size, so nothing
+   changes for anyone who never touches the control.
+
+   ⚠ AND ONLY IN THE SINGLE-LINE LAYOUT. In multi-line the snippet has a line to
+   itself and is not competing with the subject for width at all, so there is
+   nothing to win by dropping it — and dropping it would leave the third line
+   empty rather than absent, since the row keeps its height either way. The
+   `:not()` covers the layout being `oneLine` AND the attribute not being set
+   yet, which is the state of the document for the moment before prefs.ts runs. */
+@container (max-width: 44em) {
+  html:not([data-row-layout="multiLine"]) .desk-preview {
+    display: none;
+  }
+}
+
+.desk-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.desk-alias {
+  overflow: hidden;
+  max-width: 12ch;
+  text-overflow: ellipsis;
+}
+
+@container (max-width: 520px) {
+  .desk-alias {
+    display: none;
+  }
+}
+
+/* How many messages are in the conversation. A pill, so a bare number beside a
+   time is not read as part of it. */
+.desk-thread {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+}
+
+.desk-glyph.is-flag {
+  color: var(--star);
+}
+
+/* TABULAR NUMERALS (#514): a column of times where the digits do not line up
+   reads as a ragged edge on every row, and `5ch` only reserves a fixed WIDTH —
+   it does nothing about the glyphs inside it. Right-aligned so the column has
+   one edge whatever the string is ("09:14", "Mon", "12 Aug"). */
+.desk-time {
+  min-width: 5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the multi-line row (#514) ------------------------------------------ */
+
+/* THREE LINES, THE SAME DOM. Nothing below changes an element, a role or an
+   accessible name: the row is still `role="row"` with three `gridcell`s, its
+   name is still built by ui/desk/rowName.ts, and every mark still says what it
+   is. Only the grid placement moves — which is what lets web/ACCESSIBILITY.md's
+   contract and the accessibility lane's assertions hold in both layouts, and
+   why the lane audits the multi-line desk as a surface rather than trusting
+   that claim.
+
+   line 1  sender ……………………………… marks · time
+   line 2  subject
+   line 3  snippet (muted)
+
+   The marks stay in the meta cell, on line 1, where the time is: they are in
+   the same place on every row that way, which is the Outlook flag column's
+   point without a fourth column to keep aligned. */
+html[data-row-layout="multiLine"] .desk-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 0 8px;
+}
+
+html[data-row-layout="multiLine"] .desk-cell-sender {
+  grid-row: 1;
+  grid-column: 1;
+  height: auto;
+}
+
+html[data-row-layout="multiLine"] .desk-meta {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+html[data-row-layout="multiLine"] .desk-cell-main {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  height: auto;
+}
+
+html[data-row-layout="multiLine"] .desk-sender {
+  height: auto;
+}
+
+/* The subject and the snippet stack instead of sharing a line, so the flex
+   arrangement the single line needs (a subject that never shrinks, a snippet
+   with basis zero) is replaced by two rows of one column each. */
+html[data-row-layout="multiLine"] .desk-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 0;
+  height: auto;
+}
+
+html[data-row-layout="multiLine"] .desk-subject {
+  max-width: 100%;
+}
+
+/* ⚠ THE THIRD LINE KEEPS ITS SPACE WHEN IT IS EMPTY, and that is deliberate.
+   The virtualised list places every item at `index * --desk-row-h`
+   (core/desk.ts virtualWindow) and reads the height off a probe, so THERE IS
+   EXACTLY ONE HEIGHT PER LAYOUT: a row that shrank because its message has no
+   preview would put every row below it at the wrong offset — silently, as rows
+   drawn over one another. `min-height` on an empty line costs one blank strip
+   on the handful of messages with no body text and buys an alignment that
+   cannot drift. */
+html[data-row-layout="multiLine"] .desk-preview {
+  display: block;
+  flex: none;
+  min-height: 1.45em;
+}
+
+/* ---- headings, the line, drawers ---------------------------------------- */
+
+.desk-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  margin: 0;
+  padding: 0 12px;
+  background: var(--bg-sunken);
+  font-size: 0.9286rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The heading IS a button now (#375 increment 7) — it fills the item, because
+   the item is the row-height box and a control that filled less of it would
+   leave a dead strip that looks tappable. Transparent and inheriting: at rest
+   it must read as a heading, not as a button. */
+.desk-heading-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.desk-heading-button:hover .desk-heading-name {
+  text-decoration: underline;
+}
+
+.desk-heading-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.desk-heading-caret {
+  flex: 0 0 auto;
+  font-size: 0.7143rem;
+  color: var(--fg-muted);
+}
+
+.desk-heading-count {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+.desk-heading-hint {
+  color: var(--fg-muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-heading.is-unsorted {
+  box-shadow: inset 3px 0 0 var(--border-strong);
+}
+
+.desk-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 12px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  font-size: 0.9286rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.desk-line-side {
+  color: var(--fg-muted);
+}
+
+.desk-line-move {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9286rem;
+  cursor: pointer;
+}
+
+.desk-line-move:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.desk-line-move:disabled {
+  color: var(--fg-muted);
+  cursor: not-allowed;
+}
+
+/* The threshold itself, always printed: "stricter" and "looser" say which way,
+   not where. */
+.desk-line-value {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* It is a `role="slider"` and therefore focusable (#447), so it needs the edge
+   every other focusable thing on this surface has. */
+.desk-line-value:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.desk-line-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desk-line-preview-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-drawer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.desk-drawer.is-open {
+  background: var(--bg-sunken);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.desk-drawer-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-drawer-count,
+.desk-drawer-sweep {
+  color: var(--fg-muted);
+  font-size: 0.8571rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desk-drawer-sweep {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ---- the remaining item kinds ------------------------------------------- */
+
+.desk-more {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+}
+
+.desk-more:hover {
+  background: var(--bg-hover);
+}
+
+/* A section that could not be loaded, in place of its rows. It is an alert, not
+   an empty list: "this area has no mail" and "we could not ask" are different
+   facts and only one of them is good news. */
+.desk-section-error {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin: 0;
+  padding: 0 12px;
+  background: var(--error-bg);
+  color: var(--error-fg);
+  font-size: 0.9286rem;
+  overflow: hidden;
+}
+
+.desk-nothing {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--fg-muted);
+}
+
+/* ---- the archive-all confirmation --------------------------------------- */
+
+.desk-confirm {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  width: min(460px, 92vw);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+}
+
+/* ---- the rail's account switcher (#375 increment 4) --------------------- */
+
+/* One line at the top of the rail, and the panel it opens. It lives in
+   desk.css rather than styles.css because it belongs to the desk's chrome —
+   the scope it names is the scope every desk number is measured in. */
+.rail-switcher {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.rail-switcher-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 0.9286rem;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.rail-switcher-line:hover { background: var(--bg-raised); }
+.rail-switcher-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.rail-switcher-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-switcher-caret { flex: none; font-size: 0.7143rem; color: var(--fg-muted); }
+
+/* The trailing "· 1 failing". Muted, and words rather than a colour: the line
+   is a statement, not a warning light. */
+.rail-switcher-trouble {
+  flex: none;
+  font-size: 0.8571rem;
+  color: var(--fg-muted);
+}
+
+/* NOT A FLOATING POPOVER. Spec §12: nothing is layered on top of anything else
+   and no surface is translucent — so the switcher pushes the rail down rather
+   than covering the entries beneath it. */
+.rail-switcher-panel {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+
+.rail-switcher-list { padding: 4px; }
+.rail-switcher-list:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.rail-switcher-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.9286rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rail-switcher-option:hover { background: var(--bg-sunken); }
+/* Where the arrow keys are. A background, plus the aria-activedescendant that
+   tells a screen reader the same thing. */
+.rail-switcher-option.is-active { background: var(--bg-sunken); }
+.rail-switcher-option[aria-selected="true"] .rail-switcher-option-name { font-weight: 600; }
+
+.rail-switcher-option-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Keeps "All accounts" aligned with the account names below it, which each
+   carry a dot. An empty box rather than a dot: there is no colour that means
+   "every account". */
+.rail-switcher-nodot { width: 8px; height: 8px; flex: none; }
+
+.rail-switcher-status { flex: none; font-size: 0.8571rem; color: var(--fg-muted); }
+
+.rail-switcher-health {
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- the rail's own additions ------------------------------------------ */
+
+/* The folder disclosure's heading is a button now (#375): the folder list is
+   collapsed by default and #374 moves it into Settings → Accounts. */
+.nav-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  /* .nav-heading gives every heading an 8px margin each side. On a button that
+     is 100% wide that margin is OUTSIDE the width, so the rail scrolled sideways
+     by 16px (#896). The 8px goes inside as padding instead (plus the button's
+     own 6px, so the label does not move). */
+  margin-inline: 0;
+  padding: 1px 14px;
+  font: inherit;
+  font-size: 0.7857rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+/* An area's badge is TWO numbers ("4 / 19") — what it is asking of you, and
+   what it has kept. The separator is dimmer so the pair reads as one badge. */
+.nav-badge-split { white-space: nowrap; }
+.nav-badge-sep { opacity: 0.55; }
+
+/* ---- offline: what one row can and cannot say (#375 increment 6) --------- */
+
+/* A row the section listed and the store has no message for. Faint, one line,
+   and the same height as a real row — the list is virtualised on a fixed
+   `--desk-row-h` (tokens.css), so anything taller would put every row after it
+   at the wrong offset. */
+.desk-row.is-not-loaded {
+  display: flex;
+  align-items: center;
+  height: var(--desk-row-h);
+  margin: 0;
+  padding: 0 12px;
+  font-size: 0.9286rem;
+  font-style: italic;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* "waiting to send", in the meta column beside the alias and the glyphs. A tag,
+   not a glyph: it is a sentence about this client's connection rather than a
+   property of the message, and a symbol for it would be one more thing to
+   learn. */
+.desk-tag.is-queued {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 0.7857rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* ---- the swipe reveal (#375 increment 7) -------------------------------- */
+
+/* The row and the words it slides to reveal, in one box exactly as tall as the
+   item. The wrapper only exists when the row actually HAS the gestures (the
+   route passes `onSwipe` below the phone breakpoint, and only while nothing is
+   selected), so a desktop row is the same single element it always was. */
+.desk-row-swipe {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* BEHIND the row, filling the item: whichever end the row uncovers is the end
+   whose word is read. Both words are always laid out and only the one the
+   current travel would actually commit to has any text (ui/desk/DeskRow.tsx),
+   so the reveal never promises an action the release will not perform. */
+.desk-row-reveal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
+  font-size: 0.9286rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The row sits ON the reveal and is opaque, which is what makes the reveal a
+   reveal rather than a backdrop showing through — no surface in this design is
+   translucent (spec 12). */
+.desk-row.is-swipeable {
+  position: relative;
+  /* Vertical panning stays the browser's — that is how the list scrolls — and
+     the horizontal axis is left to the pointer handlers. This one declaration
+     is why the two gestures do not fight over the same finger. */
+  touch-action: pan-y;
+  /* A long press on text is the platform's "select this word" gesture, and it
+     would put a selection highlight over the row that the row's own long press
+     is trying to use. */
+  user-select: none;
+}
+
+/* The snap back to zero is a transition; the follow is not. `is-swiping` is
+   present only while a finger is actually on the row, so the transform that
+   tracks the pointer is never animated (that would lag the finger by 140ms)
+   and the release is. The reduced-motion case is decided in the component
+   instead — the row simply does not follow at all — because a transform set
+   inline cannot be un-set from here. */
+.desk-row.is-swiping {
+  transition: none;
+}
+
+.desk-row.is-swipeable:not(.is-swiping) {
+  transition: transform 140ms ease-out;
+}
+
+/* The reading pane's phone top line — "← Inbox · 3 of 6" — is RENDERED at every
+   width and shown at one. Rendered rather than conditioned on the breakpoint in
+   JavaScript because there must be exactly one answer to "is this a phone", and
+   this file already holds it; hidden by default rather than shown, because
+   above the breakpoint the list is beside the pane (so "3 of 6" restates what
+   the eye can see) and the toolbar's own ← is the back affordance. `display:
+   none` also takes it out of the accessibility tree, so it is not a second back
+   button a screen reader finds on a desktop. */
+.pane-topline {
+  display: none;
+}
+
+/* ---- the phone (#375 increment 7) --------------------------------------- */
+
+/* 759px IS WRITTEN IN THREE PLACES AND CANNOT BE WRITTEN IN ONE: here,
+   app/styles.css's one-pane-at-a-time block, and `PHONE_QUERY` in
+   app/ui/useMediaQuery.ts — the same number in a language CSS cannot read. The
+   handful of things the phone does that are not styling (the bottom bar
+   EXISTS; the in-tray line navigates instead of expanding; Mute moves INTO
+   More; the sender popover is placed by this file instead of by arithmetic)
+   are decided by that constant. If the two drift the result is a bottom bar
+   over a two-pane layout: visible at once, but only to someone who looks. */
+@media (max-width: 759px) {
+  /* THE ROW IS TWO LINES NOW, so it needs more height — and the height is a
+     TOKEN, because the virtualised list places every item at
+     `index * --desk-row-h` (core/desk.ts virtualWindow) and reads the number
+     back off a probe element that declares it. Restated PER DENSITY rather
+     than on `:root`, because `html[data-density="..."]` scores (0,1,1) and
+     `:root` scores (0,1,0): a `:root` override here would lose the cascade to
+     tokens.css and do nothing at all, silently. It is an enhancement layer over
+     three already-defined tokens, exactly like styles.css's
+     `prefers-contrast: more` block, and scripts/check-tokens.mjs deliberately
+     does not treat a token selector nested in a media query as a second
+     definition of the inventory. */
+  html[data-density="comfortable"] { --desk-row-h: 5.4286rem; }
+  html[data-density="cozy"] { --desk-row-h: 4.8571rem; }
+  html[data-density="compact"] { --desk-row-h: 4.1429rem; }
+
+  /* ⚠ THE MULTI-LINE HEIGHTS ARE NOT RESTATED HERE, AND THAT IS THE CONSISTENT
+     ANSWER RATHER THAN AN OMISSION (#514). tokens.css declares them as
+     `html[data-row-layout="multiLine"][data-density="…"]`, which scores (0,2,1)
+     against these rules' (0,1,1) — so they win inside this media query too,
+     without being repeated. They should: the multi-line row shows the SAME
+     THREE LINES at every width, so it wants the same height at every width.
+     What the three rules above exist for is the phone's SINGLE-line row, which
+     is two lines here and one line on a desktop and therefore genuinely
+     different. Copying the multi-line numbers in would be two places to keep in
+     step for no difference in what is drawn. */
+
+  /* -- the header: the scope, and how fresh it is ------------------------- */
+
+  .desk-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 12px 4px;
+  }
+
+  /* The account name IS the switcher here. Large enough to read as the
+     screen's title, because that is what it is: it says whose mail everything
+     below it belongs to. */
+  .desk-scope-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: 1.2143rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .desk-scope-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .desk-scope-name {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .desk-scope-caret {
+    flex: 0 0 auto;
+    font-size: 0.7857rem;
+    color: var(--fg-muted);
+  }
+
+  /* The freshness line under it. The SAME class as the wide screen's sentence,
+     so it is muted by the same rule rather than by a second one; only the
+     padding differs, because the block above already supplies it. */
+  .desk-scope .desk-header-synced {
+    padding: 0;
+  }
+
+  /* -- the in-tray line --------------------------------------------------- */
+
+  .desk-tray.is-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg-sunken);
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.9286rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .desk-tray.is-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .desk-tray-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .desk-tray-chevron {
+    flex: 0 0 auto;
+    color: var(--fg-muted);
+  }
+
+  /* -- the two halves, as one segmented control --------------------------- */
+
+  /* Still `role="tablist"` with two `role="tab"` children — only the styling
+     changes (ui/desk/DeskTabs.tsx). A full-width pill, because on this screen
+     the two halves are the primary navigation and a two-pixel underline is not
+     a target a thumb can find. */
+  .desk-tabs {
+    gap: 4px;
+    margin: 8px 12px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 999px;
+    background: var(--bg-sunken);
+  }
+
+  .desk-tab {
+    flex: 1 1 50%;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 8px 10px;
+    border-bottom: 0;
+    border-radius: 999px;
+  }
+
+  .desk-tab.is-selected {
+    /* On a segmented control the FILL is the state. It uses the declared
+       accent/accent-fg pair rather than inventing a tone, so the contrast is
+       one tokens.css already promises and checks (@contrast). */
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-bottom-color: transparent;
+  }
+
+  .desk-tab.is-selected .desk-tab-count {
+    color: inherit;
+  }
+
+  /* -- rows: two lines, sender and time over subject ---------------------- */
+
+  .desk-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-content: center;
+    gap: 2px 8px;
+  }
+
+  /* The CELLS are the grid items (#447), so the placement is theirs; the control
+     inside each one is what the two rules after them size. */
+  .desk-cell-sender {
+    grid-row: 1;
+    grid-column: 1;
+    height: auto;
+  }
+
+  .desk-cell-main {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    height: auto;
+  }
+
+  .desk-sender {
+    height: auto;
+    font-size: 0.9286rem;
+  }
+
+  .desk-main {
+    align-items: center;
+    /* 0 for the desktop rule's reason: the subject/snippet separator is
+       generated content with its own spaces. */
+    gap: 0;
+    height: auto;
+  }
+
+  /* The meta column keeps the time and the glyphs on the FIRST line, beside the
+     sender: the second line belongs to the subject, which is the longest string
+     on the row and the one worth the width. */
+  .desk-meta {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  /* On one column the alias is the least of the four facts on the row, and the
+     one that repeats most (a catch-all account delivers everything to a handful
+     of them). The reading pane still states it in full. */
+  .desk-alias {
+    display: none;
+  }
+
+  /* -- the selection toolbar docks to the bottom -------------------------- */
+
+  /* At the thumb, above the bar. A toolbar at the TOP of a phone screen is a
+     toolbar reached with a second hand. Taking it out of `.desk-chrome`'s flow
+     entirely is deliberate rather than incidental: the virtualised list
+     measures that chrome to place its items (ui/desk/VirtualList.tsx), so a
+     toolbar that stayed in the flow at a different height would shift every row
+     by its own height each time a selection appeared. Out of flow, the chrome
+     simply does not change. */
+  .desk-toolbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--bottom-bar-h, 0px) + env(safe-area-inset-bottom, 0px));
+    z-index: 4;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-strong);
+    box-shadow: var(--shadow-2);
+  }
+
+  /* -- the reading pane --------------------------------------------------- */
+
+  /* Back, and where you are in the list. The pane has REPLACED the list here
+     (styles.css's `data-pane="thread"` rules), so this line is the only thing
+     on screen that says how much is left. */
+  .pane-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+    font-size: 0.9286rem;
+  }
+
+  .pane-topline-back {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .pane-topline-back:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .pane-topline-position {
+    flex: 0 0 auto;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* THE TOOLBAR DOCKS TO THE BOTTOM, at the thumb — `order`, not a different
+     DOM position. The markup order is the order the Tab key and a screen reader
+     walk, and it is right where it is; only where the row is PAINTED changes.
+     `.thread-pane` is already the scroll container (styles.css), so sticking to
+     its bottom edge is sticking to the bottom of the screen. */
+  .thread-pane .thread-body {
+    order: 2;
+    padding-bottom: 16px;
+  }
+
+  .thread-pane .thread-toolbar {
+    order: 3;
+    top: auto;
+    /* The DOCUMENT scrolls while reading on a phone (styles.css, #798), so this
+       row sticks to the window, and the bottom bar is sticky at the very bottom.
+       It sits above the bar by the bar's height, the same offset the desk's
+       docked selection toolbar (`.desk-toolbar`) uses. */
+    bottom: calc(var(--bottom-bar-h, 0px) + env(safe-area-inset-bottom, 0px));
+    justify-content: space-between;
+    gap: 4px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+    background: var(--bg-raised);
+  }
+
+  /* THE ROW NEVER OUTGROWS THE SCREEN (#798). Four buttons and More fit
+     375 px with their words on one line (measured; 360 px is the narrowest
+     tight fit). Narrower than that, or with a longer label ("Remove from
+     tray") or the largest text size, they truncate with an ellipsis. They no
+     longer wrap into two-line buttons or push More off the edge. The
+     accessible name is the element's text, so truncation does not change it. */
+  .thread-pane .thread-toolbar > .button,
+  .thread-pane .thread-toolbar > .pane-more {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  /* The row is at the BOTTOM here, so More opens upwards over the message.
+     Opening downwards would put it under the bottom bar and off the screen. */
+  .thread-pane .thread-toolbar .pane-menu {
+    top: auto;
+    bottom: calc(100% + 4px);
+  }
+  .thread-pane .thread-toolbar .button {
+    max-width: 100%;
+    padding-inline: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* One back affordance, not two: the top line carries it here, and the
+     toolbar has moved to the other end of the screen. */
+  .pane-back {
+    display: none;
+  }
+
+  /* -- the sender popover becomes a bottom sheet -------------------------- */
+
+  /* THE ONE PLACE THIS DESIGN LAYERS, and deliberately: a panel about the
+     sender has to be over the message it is about, because there is no room
+     beside it. Solid, never translucent (spec 12), and capped at well under
+     the screen so the message stays visible above it.
+
+     No inline `top`/`left` ever reaches this — SenderPopover skips the
+     placement arithmetic entirely below this breakpoint, because an inline
+     style would beat every rule here. */
+  .sender-popover.is-sheet {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: auto;
+    max-width: none;
+    max-height: 62vh;
+    overflow-y: auto;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* The drag handle. Decorative: the close button beside it and Escape are the
+     ways out that do not require a gesture. */
+  .sender-popover-grip {
+    display: block;
+    width: 36px;
+    height: 4px;
+    margin: 2px auto 8px;
+    border-radius: 999px;
+    background: var(--border-strong);
+  }
+
+  /* -- the account switcher, as a bottom sheet ---------------------------- */
+
+  .switcher-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    max-height: 72vh;
+    overflow-y: auto;
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--border-strong);
+    border-radius: var(--radius) var(--radius) 0 0;
+    background: var(--bg-raised);
+    box-shadow: var(--shadow-2);
+  }
+
+  .switcher-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .switcher-sheet-title {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-weight: 600;
+  }
+
+  /* Inside the sheet the panel IS the content, rather than a thing that pushed
+     the rail down — so it drops the border it wore in the rail. */
+  .rail-switcher-panel.is-sheet {
+    margin-top: 8px;
+    border: 0;
+  }
+
+  /* Every option is a target here, not a line of text. */
+  .rail-switcher-option {
+    padding: 10px 8px;
+  }
+}
+
+/* Under 520px the snippet goes (#375 increment 7). What is left on the second
+   line is the subject, which is the one string worth the width — a preview
+   squeezed into the remainder of a 320px screen is three words nobody reads.
+
+   A VIEWPORT query rather than the container query further up, and the two are
+   not redundant: the container query drops the snippet when a READING PANE
+   narrows the list on a wide screen, this one drops it when the SCREEN is
+   narrow. Below this width the list is the whole viewport, so either would
+   fire — above it, only one of them should. */
+@media (max-width: 519px) {
+  /* Single-line only, for the reason the container query above states: on the
+     multi-line row the snippet has a line of its own and takes nothing from the
+     subject, so there is nothing to gain by dropping it. */
+  html:not([data-row-layout="multiLine"]) .desk-preview {
+    display: none;
+  }
+}

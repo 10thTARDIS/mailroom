@@ -1,0 +1,21 @@
+# Redocly lint configuration for the hand-authored JMAP OpenAPI document
+# (docs/openapi.yaml), used by the `openapi-lint` CI job.
+#
+# The full structural ruleset stays ON — it is what catches a real schema
+# mistake (e.g. a malformed component). Three purely-stylistic rules are turned
+# off because they conflict with an accurate, documentation-only spec:
+#
+#   - no-path-trailing-slash: the real routes DO end in a slash
+#     (POST /jmap/upload/{accountId}/ and GET /jmap/eventsource/), so the doc
+#     must keep them to match the server.
+#   - info-license: the project's license is deliberately deferred until
+#     pre-publication (spec §18 / CLAUDE.md), so there is no license to declare.
+#   - no-unused-components: the object schemas (Email, Mailbox, …) document the
+#     surface; the single generic POST /jmap operation references the shared
+#     envelopes rather than each object, so they read as "unused".
+extends:
+  - recommended
+rules:
+  no-path-trailing-slash: off
+  info-license: off
+  no-unused-components: off

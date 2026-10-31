@@ -1,0 +1,112 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+
+/* Account-health panel (mailroom#43). Presentation only; every color is a theme
+ * token from styles.css so the panel is correct in light and dark, and high-
+ * contrast, without any palette of its own. Imported by AccountHealthPanel.tsx. */
+
+/* The Accounts-section heading row that carries the panel's trigger button. */
+.nav-accounts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--bg-raised);
+}
+
+.health-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.health-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Status dot: a text label always accompanies it (never color alone). */
+.health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--border-strong);
+}
+.health-dot-ok {
+  background: #2e7d32;
+}
+.health-dot-warn {
+  background: var(--star);
+}
+.health-dot-error {
+  background: var(--danger);
+}
+
+.health-section {
+  margin: 8px 0 0;
+}
+.health-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin: 0 0 4px;
+}
+.health-line {
+  font-size: 13px;
+  margin: 2px 0;
+}
+.health-muted {
+  color: var(--fg-muted);
+}
+
+.health-reasons {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.health-reasons li {
+  margin: 2px 0;
+}
+
+/* Send-quota meter: the native <progress> element, styled but still accessible. */
+.health-meter {
+  width: 100%;
+  height: 8px;
+  margin-top: 4px;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.health-meter::-webkit-progress-bar {
+  background: var(--bg-sunken);
+}
+.health-meter::-webkit-progress-value {
+  background: var(--accent);
+}
+.health-meter::-moz-progress-bar {
+  background: var(--accent);
+}
+.health-meter-full::-webkit-progress-value {
+  background: var(--danger);
+}
+.health-meter-full::-moz-progress-bar {
+  background: var(--danger);
+}

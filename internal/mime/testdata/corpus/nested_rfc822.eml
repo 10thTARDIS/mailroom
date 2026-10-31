@@ -1,0 +1,43 @@
+From: Alice Example <alice@example.com>
+To: Bob Example <bob@example.com>
+Subject: Top-level message with nested forwards
+Date: Mon, 01 Jun 2026 10:05:00 +0000
+Message-Id: <nested-rfc822-001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="top-boundary"
+
+--top-boundary
+Content-Type: text/plain; charset=utf-8
+
+Top-level body.
+--top-boundary
+Content-Type: message/rfc822
+Content-Disposition: attachment; filename="level1.eml"
+
+From: Level One <level1@example.com>
+To: Alice Example <alice@example.com>
+Subject: Level 1 nested
+Date: Mon, 01 Jun 2026 09:00:00 +0000
+Message-Id: <level1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="level1-boundary"
+
+--level1-boundary
+Content-Type: text/plain; charset=utf-8
+
+Level 1 body.
+--level1-boundary
+Content-Type: message/rfc822
+Content-Disposition: attachment; filename="level2.eml"
+
+From: Level Two <level2@example.com>
+To: Level One <level1@example.com>
+Subject: Level 2 nested
+Date: Mon, 01 Jun 2026 08:00:00 +0000
+Message-Id: <level2@example.com>
+Content-Type: text/plain; charset=utf-8
+
+Level 2 body -- deepest.
+--level1-boundary--
+
+--top-boundary--
