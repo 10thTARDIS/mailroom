@@ -394,8 +394,13 @@ if [ "$SELF_TEST" -eq 1 ]; then
   echo "###############################################################################"
   echo "# SELF-TEST: restore an OLDER snapshot then migrate forward — the drill MUST pass"
   echo "###############################################################################"
-  if sh "$0" --migrate-forward; then
+  rc=0
+  sh "$0" --migrate-forward || rc=$?
+  if [ "$rc" -eq 0 ]; then
     echo "--- self-test OK: an older backup restores and migrates forward to HEAD"
+  elif [ "$rc" -eq 3 ]; then
+    echo "::warning::migrate-forward phase SKIPPED: the head migration is in the root commit, so there is no older revision to restore from"
+    echo "--- self-test SKIPPED (not passed): migrate-forward has no older revision in this history"
   else
     echo "!!! SELF-TEST FAILED: restore-then-migrate-forward did not pass"
     fails=$((fails + 1))
@@ -610,6 +615,17 @@ if [ "$MIGRATE_FWD" -eq 1 ]; then
   }
   OLD_REV="$(git_at rev-parse --verify "${ADD_COMMIT}^" 2>/dev/null || true)"
   [ -n "$OLD_REV" ] || {
+    # A full-history clone whose ROOT commit already contains the head migration
+    # (the public repository starts from a single squashed commit) has no older
+    # revision to build the fixture from. That is a property of the history, not
+    # a defect: say so loudly and exit 3, which --self-test reports as SKIPPED.
+    # A shallow clone is told apart so it still fails.
+    if [ "$(git_at rev-parse --is-shallow-repository 2>/dev/null || echo true)" = "false" ]; then
+      echo "restore-drill: $HEAD_MIG was added by the root commit $ADD_COMMIT; there is no older" >&2
+      echo "  revision to build the migrate-forward fixture from. SKIPPING this phase until a" >&2
+      echo "  migration lands after the root commit." >&2
+      exit 3
+    fi
     echo "restore-drill: $HEAD_MIG was added by $ADD_COMMIT, which has no parent in this" >&2
     echo "  clone. Check out with full history (fetch-depth: 0)." >&2
     exit 1
