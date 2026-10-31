@@ -800,6 +800,8 @@ services:
       MAILROOM_TRASH_RETENTION: ${MAILROOM_TRASH_RETENTION:-}
       MAILROOM_PURGE_INTERVAL: ${MAILROOM_PURGE_INTERVAL:-}
       MAILROOM_CHANGE_LOG_RETENTION: ${MAILROOM_CHANGE_LOG_RETENTION:-}
+      MAILROOM_JOB_RETENTION: ${MAILROOM_JOB_RETENTION:-}
+      MAILROOM_DEAD_JOB_RETENTION: ${MAILROOM_DEAD_JOB_RETENTION:-}
 
       # --- Public key publication (WKD, #48) --------------------------------
       # The mail domain whose keys this instance publishes. UNSET DISABLES IT,

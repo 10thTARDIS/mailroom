@@ -115,6 +115,8 @@
 //	map-label-tabs     --user-id --plan FILE [--apply]   (mailroom#219 point labels at tabs)
 //	classify-tabs      --user-id [--apply] [--batch N]   (mailroom#228 fill in stored tab verdicts)
 //	blob-report        [--user U] [--verbose]   (mailroom#300 blob/file reconciliation, read-only)
+//	jobs-report                                 (background job rows per kind and state, and what
+//	                   the daily job sweep would delete today. Read-only.)
 //	mailbox-roles      [--user U] [--verbose]   (#351: which SPECIAL-USE roles a provider
 //	                   actually advertises. Read-only; EXITS NON-ZERO when a required role
 //	                   (drafts, sent) is missing, so it can gate a provider cutover.)
@@ -406,6 +408,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"collapse-duplicates":       runCollapseDuplicates,
 	"collapse-provenance":       runCollapseProvenance,
 	"blob-report":               runBlobReport,
+	"jobs-report":               runJobsReport,
 	"backfill-model-blobs":      runBackfillModelBlobs,
 	"css-report":                runCSSReport,
 	"auth-report":               runAuthReport,
