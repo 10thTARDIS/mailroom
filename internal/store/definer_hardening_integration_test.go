@@ -130,8 +130,20 @@ func TestEveryDefinerPinsPgTempLast(t *testing.T) {
 	// reason and nothing else, so it discloses no row, id or user. Its tests
 	// (TestSweepSessions, TestSweepSessionsOwnerPolicies) fail if the owner SELECT
 	// policy is removed, because a DELETE without it succeeds on zero rows.
-	if seen != 14 {
-		t.Errorf("schema app has %d SECURITY DEFINER functions, want 14. If a definer was "+
+	//
+	// The fifteenth and sixteenth are the job sweep (migration 00084).
+	// app.sweep_terminal_jobs deletes finished job rows across users, the third
+	// definer that destroys rows. It takes a clock, two retention windows and a
+	// batch size, deletes only 'done' and 'dead' rows older than those windows
+	// (never 'pending' or 'running', so no live idempotency key is freed), and
+	// returns a count per state and nothing else. Job rows are already the
+	// deliberate cross-user surface dequeue_due_jobs hands to the same caller,
+	// and mailroom_owner's existing ALL policy on app.jobs is what it runs under;
+	// no new policy was added. app.job_census is its read-only report, STABLE,
+	// returning counts per (kind, state) and the oldest finish time per group:
+	// less than dequeue_due_jobs already discloses, the count_due_jobs shape.
+	if seen != 16 {
+		t.Errorf("schema app has %d SECURITY DEFINER functions, want 16. If a definer was "+
 			"added deliberately, bump this number in the same commit that argues for the new "+
 			"cross-user surface", seen)
 	}

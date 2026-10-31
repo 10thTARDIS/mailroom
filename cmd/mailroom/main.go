@@ -298,6 +298,9 @@ func run() error {
 	// Revoked sessions older than 7 days and sessions unseen for 45 are deleted
 	// daily (#937, ADR-048 section 7), with the count per reason logged.
 	go runSessionSweep(ctx, st, sessionSweepInterval, logger)
+	// Finished job rows past their retention windows are deleted daily
+	// (migration 00084), with the count per state logged.
+	go runJobSweep(ctx, st, jobSweepInterval, cfg.JobRetention, cfg.DeadJobRetention, logger)
 
 	// Readiness is "can we reach the database": SystemTx opens a real
 	// transaction on the pool with no user identity attached (the

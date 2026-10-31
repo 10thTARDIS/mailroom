@@ -9,6 +9,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Housekeeping
+
+- **Old background-job records are cleaned up automatically.** Every snooze, scheduled send, attachment scan, Trash purge and drawer sweep leaves a small record behind when it finishes, and until now nothing ever removed them, so the table only grew. Mailroom now deletes finished records after 30 days, and records of jobs that failed for good after 90 days, once a day. Jobs that are still waiting or running are never touched.
+- **You can change how long they are kept** with `MAILROOM_JOB_RETENTION` and `MAILROOM_DEAD_JOB_RETENTION` (at least 24 hours each).
+- **The person who runs your Mailroom can see what is there** with `mailroom-admin jobs-report`, which lists the records by kind and state and how many the daily clean-up would remove. It changes nothing.
+- **A job that fails for good now records when it failed**, so the clean-up can age it.
+
+### Upgrading
+
+- One database migration (00084). It changes a foreign key so a sent message's record no longer blocks clean-up, and adds the clean-up functions. It is quick and needs no downtime.
+
 ### Under the hood
 
 - **Dependency updates come from Dependabot**, weekly, with security fixes as soon as an advisory is published. Code is also scanned with CodeQL on every change.
