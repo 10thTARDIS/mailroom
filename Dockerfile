@@ -74,7 +74,7 @@
 # upstream can repoint whenever it likes, so a rebuild — or a fresh VM standing
 # up this image for the first time — must get the exact bytes that were built
 # and tested, not whatever `node:24-alpine` currently resolves to. The tag stays
-# alongside the digest so this file is still readable, and Renovate proposes the
+# alongside the digest so this file is still readable, and Dependabot proposes the
 # bump when upstream moves the tag rather than the FROM silently drifting.
 FROM node:24-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS web
 

@@ -1,0 +1,50 @@
+# Dependency updates. Security updates for known-vulnerable packages are also
+# on, and arrive outside this schedule.
+#
+# Pinned images (`tag@sha256:...`) are bumped as tag and digest together, so a
+# rebuild always gets the bytes that were tested.
+#
+# Not covered: golangci-lint, which CI installs with `go install ...@vX.Y.Z`
+# (.github/workflows/ci.yml). No ecosystem here can see that pin; bump it by
+# hand, as its own pull request.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule: &weekly
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule: *weekly
+    open-pull-requests-limit: 5
+    labels: [dependencies]
+    groups:
+      web-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: *weekly
+    labels: [dependencies]
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule: *weekly
+    labels: [dependencies]
+
+  - package-ecosystem: docker-compose
+    directories: [/, /deploy]
+    schedule: *weekly
+    labels: [dependencies]

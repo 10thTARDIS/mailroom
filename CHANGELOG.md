@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Under the hood
+
+- **Dependency updates come from Dependabot**, weekly, with security fixes as soon as an advisory is published. Code is also scanned with CodeQL on every change.
+
 ## [1.98.1] — 2026-10-31
 
 **Mailroom is now developed in the open on GitHub.** This release adds no new features and changes nothing in how Mailroom behaves. It is the first release published from the public repository: the server image now comes from GitHub's container registry, release notes appear on the GitHub releases page, and the README has been rebuilt to show what Mailroom is and where it is going. Every earlier release, back to the first, is described in the project's CHANGELOG.md.

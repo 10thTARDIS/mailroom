@@ -84,9 +84,9 @@
 # instance pulled the bytes it is actually running — so a rebuild or a fresh
 # VM must get the SAME bytes that were tested, not whatever the tag currently
 # resolves to. Each digest is the one this instance is running, so the pin is
-# a no-op deploy; the upstream rebuild then arrives as an ordinary Renovate
+# a no-op deploy; the upstream rebuild then arrives as an ordinary Dependabot
 # PR someone reviews, instead of silently following the tag. The tag stays
-# next to the digest so the line is still readable and Renovate can bump it.
+# next to the digest so the line is still readable and Dependabot can bump it.
 # ---------------------------------------------------------------------------
 
 name: mailroom-deploy

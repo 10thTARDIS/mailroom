@@ -8,7 +8,7 @@
 #
 # Pinned `tag@sha256:...`, matching deploy/compose.yml (#535): a tag is a
 # pointer upstream can repoint, so this stays the exact bytes that were
-# tested rather than whatever `postgres:18` currently resolves to; Renovate
+# tested rather than whatever `postgres:18` currently resolves to; Dependabot
 # proposes the bump when it moves.
 services:
   postgres:

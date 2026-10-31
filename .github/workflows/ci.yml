@@ -161,7 +161,7 @@ jobs:
       # The JS half of the dependency-vulnerability gate (#351). Go has had
       # govulncheck as a required job since early on; the web client — a SHIPPED
       # artifact, built into /srv/web by the Dockerfile — had no equivalent, so
-      # Renovate could open its weekly PRs and a known-vulnerable package would
+      # Dependabot could open its weekly PRs and a known-vulnerable package would
       # still merge and ship.
       #
       # ⚠ IT IS NOT govulncheck, AND THE DIFFERENCE DECIDES THE THRESHOLD.
@@ -173,7 +173,7 @@ jobs:
       # everything would therefore mean a standing red for reasons nobody can
       # act on, which is how a check stops being read (#104 was six weeks of
       # exactly that). High and critical block; moderate and low are printed by
-      # the step above and are a Renovate problem, not a merge problem.
+      # the step above and are a dependency-update problem, not a merge problem.
       #
       # It runs the FULL tree, not --omit=dev, even though only react and
       # react-dom reach the browser: a compromised build tool compromises the
@@ -313,10 +313,10 @@ jobs:
         # it sits badly next to a project where a tag plus a changelog is supposed
         # to say exactly what a version contains.
         #
-        # This does not mean falling behind: renovate.json has a rule for this
-        # dependency, so an upgrade arrives as a PR that runs the new linter
-        # against the whole tree and can be read before it is merged — which is
-        # the same bargain every other dependency here already gets.
+        # Pinning means bumping it by hand: Dependabot cannot see a `go install`
+        # pin (.github/dependabot.yml says so). An upgrade is its own PR that runs
+        # the new linter against the whole tree and can be read before it is
+        # merged — the same bargain every other dependency here gets.
         # ⚠ RETRIED, because this fetches ~150 modules and any one stream failing
         # fails the job — twice observed, most recently going red on a PR whose
         # only change was deleting a dead function. The helper announces every

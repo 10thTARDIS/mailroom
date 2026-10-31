@@ -58,7 +58,7 @@ on:
   # below is keyed on github.ref, so the tag's run is a different group from
   # main's and neither cancels nor queues behind the other. Measured: every
   # tagged merge got two restore-drill runs. `branches: ["**"]` matches every
-  # branch name, including one containing `/` (a `renovate/...` branch, where
+  # branch name, including one containing `/` (a `dependabot/...` branch, where
   # a bare `*` would stop at the slash) — while a `branches` filter of ANY
   # pattern structurally excludes tag refs: a `branches` filter is only
   # evaluated against a ref that IS a branch, so this is not
