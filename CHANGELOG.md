@@ -9,11 +9,34 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.98.1] — 2026-10-31
+
+**Mailroom is now developed in the open on GitHub.** This release adds no new features and changes nothing in how Mailroom behaves. It is the first release published from the public repository: the server image now comes from GitHub's container registry, release notes appear on the GitHub releases page, and the README has been rebuilt to show what Mailroom is and where it is going. Every earlier release, back to the first, is described further down this changelog.
+
+### Where to get it
+
+- **The image is `ghcr.io/10thtardis/mailroom:1.98.1`.** Pin it by digest, as before; `:latest` is published only as a convenience and is never a pin.
+- **No registry login is needed** to pull it.
+- **Each release has a page on GitHub** whose notes are the matching section of this changelog. Releases up to 1.98.0 were published before the move and are recorded only here.
+
+### Upgrading
+
+- Point `MAILROOM_IMAGE` at `ghcr.io/10thtardis/mailroom:1.98.1` (by digest) and recreate the stack.
+- There are no database migrations and no configuration changes. Going back to 1.98.0 is safe.
+
 ### Documentation
 
 - **A new front page.** The README now shows what Mailroom is and does at a glance, with screenshots, a picture of how it fits together, the roadmap with links to each planned feature, and an invitation to contribute.
 - **New guides:** a contributing guide, a developer guide, a documentation index and a page on the licence. Running and development instructions moved out of the README into these.
 - **Documentation brought up to date.** The feature list reflects what has actually shipped (Send & archive, the MCP server and API keys, Outlook sign-in and more were still listed as planned), every planned feature points at its issue on the public tracker, and references to the old private tracker are gone.
+
+### Under the hood
+
+- **Issues and pull requests are public.** Planned work is tracked as GitHub issues under the 1.x, 2.x and 3.x milestones, and contributions are welcome (see CONTRIBUTING.md).
+- **Every pull request runs the full test suite on GitHub Actions** before it can merge, including the database isolation tests, the end-to-end browser checks and the accessibility checks.
+- **A release is published only from a commit whose tests passed on `main`.** The image must report the tagged version before it is pushed.
+- **Privacy checks before anything is published.** Pull request titles and commit messages are checked, along with the code, so nothing about a particular installation reaches the public repository.
+- **More reliable accessibility checks.** A timing problem could make the contrast check report a false failure while a pop-up was still drawing.
 
 ## [1.98.0] — 2026-10-30
 
