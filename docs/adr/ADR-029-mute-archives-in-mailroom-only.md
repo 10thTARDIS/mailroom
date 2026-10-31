@@ -1,6 +1,6 @@
 # ADR-029: Mute archives a new reply in Mailroom only, with no writeback and no push
 
-**Status:** Accepted (Forgejo #629, v1.76.0; a deliberate deviation from spec §6)
+**Status:** Accepted (v1.76.0; a deliberate deviation from spec §6)
 
 ## Context
 
@@ -9,7 +9,7 @@ locally with writeback where representable".
 
 Until v1.76.0, mute stored `threads.muted_at` and showed a banner saying new
 replies "won't be surfaced". Nothing else read `muted_at`: replies still landed
-in the inbox and still sent a push. The wiki review (#622) found the banner
+in the inbox and still sent a push. The wiki review found the banner
 promising something the code did not do.
 
 What mute does to a new reply *is* representable on the server, as a move to

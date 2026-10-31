@@ -1,7 +1,7 @@
 # ADR-021: A message's category tab is derived, and the label→tab mapping is data
 
-**Status:** Accepted (Forgejo #219; reverses the "explicitly not Gmail's tabs"
-position taken in #156, within spec §8 rather than against it)
+**Status:** Accepted (reverses the "explicitly not Gmail's tabs"
+position taken earlier in the classification epic, within spec §8 rather than against it)
 
 > **⚠ Amended by [ADR-022](ADR-022-tab-query-stores-the-classifier-verdict-only.md).**
 > "A message's tab is DERIVED, never stored" is narrowed to **the mapping half is
@@ -14,15 +14,15 @@ position taken in #156, within spec §8 rather than against it)
 ## Context
 
 Gmail-style category tabs — Primary, Social, Promotions, Updates, Forums — were
-rejected in #156 as *"a content classifier bootstrapped from a corpus we do not
+rejected in the classification epic as *"a content classifier bootstrapped from a corpus we do not
 have, learning nothing from the individual user."* That objection is correct
 about Gmail's implementation and does not apply to this one, by the epic's own
-reasoning: #156 also says the global tier *"needs **public knowledge**, which
+reasoning: it also says the global tier *"needs **public knowledge**, which
 spec §8 permits"*, and spec §8's isolation rule says global priors are permitted
 when trained on public data.
 
-The distinction that unblocked it, measured twice from opposite directions in
-#169, is **function versus topic**:
+The distinction that unblocked it, measured twice from opposite directions,
+is **function versus topic**:
 
 - **Function** is what a message *does* — marketing, receipt, notification, list
   traffic. It is legible from message *form*: `List-Id` (RFC 2919),
@@ -37,7 +37,7 @@ The distinction that unblocked it, measured twice from opposite directions in
 **All five of Gmail's tabs are function categories.** So tabs and labels are two
 orthogonal axes, each with its own mechanism, and neither blocks the other.
 
-This ADR does not re-argue that; #219 holds it. It records the two *structural*
+This ADR does not re-argue that. It records the two *structural*
 decisions that argument leaves open, because both are the kind a later reader
 would otherwise reverse by accident.
 
@@ -82,7 +82,7 @@ transaction (the load-bearing invariant). `app.labels.tab` gets that for free �
 
 A compiled mapping would need a release to change, which defeats the requirement
 outright, and would be wrong for the second user the moment there is one. The
-operator's current mapping is recorded in #219 and applied as **data**, never
+operator's current mapping is kept outside this repository and applied as **data**, never
 seeded by a migration: it hard-codes one person's label names, which the
 portability rule forbids in this repo and which would be meaningless to anyone
 else.
@@ -122,7 +122,7 @@ else.
   narrowest function first — Forums, Social, Promotions, Updates, Primary. One
   pair of it, **Promotions before Updates, is arbitrary** and is flagged as such
   in the code. It currently fires on zero messages (every labelled message carries
-  exactly one label after #223), so `mailroom-admin tabs` counts how often it
+  exactly one label), so `mailroom-admin tabs` counts how often it
   actually arbitrates rather than leaving the question to argument.
 - Nothing here decides an unlabelled message yet. The classifier over the function
   signals is separate work, and it must be built on the **facts**, not on

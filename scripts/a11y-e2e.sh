@@ -1491,7 +1491,7 @@ set +e
 docker start -a "$CHKC" 2>&1 | tee "$WORK/check.out"
 set -e
 CHK_RC="$(docker wait "$CHKC" 2>/dev/null || echo 99)"
-# Screenshots of the API keys screens (#49), only when asked for: a directory
+# Screenshots (every surface, plus the API keys screens), only when asked for: a directory
 # on the host to copy them into. CI never sets it.
 if [ -n "${A11Y_SHOT_DIR:-}" ]; then
   mkdir -p "$A11Y_SHOT_DIR"

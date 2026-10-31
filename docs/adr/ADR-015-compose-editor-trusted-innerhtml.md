@@ -1,7 +1,7 @@
 # ADR-015: The rich-text compose editor is the one allowed `innerHTML` site
 
 **Status:** Accepted (narrow, enforced exception to the no-`innerHTML` web
-invariant; raised by rich-text compose, Forgejo #46)
+invariant; raised by rich-text compose)
 
 ## Context
 
@@ -17,9 +17,9 @@ The rule exists because injecting attacker HTML into our live (non-sandboxed)
 DOM executes it: a `<script>` inserted via `innerHTML` does not run, but an
 `<img onerror=…>` or `<svg onload=…>` **does**.
 
-Rich-text compose (#46, feature-matrix §6 "Rich-text (WYSIWYG) compose", v1.0)
+Rich-text compose (feature-matrix §6 "Rich-text (WYSIWYG) compose", v1.0)
 is a `contentEditable` editor. Reading and seeding a `contentEditable` surface
-is done through `innerHTML` — there is no equivalent API. So #46 cannot satisfy
+is done through `innerHTML` — there is no equivalent API. So rich-text compose cannot satisfy
 the blunt, grep-based ban as written, even though what it handles is **not**
 attacker-controlled message HTML.
 

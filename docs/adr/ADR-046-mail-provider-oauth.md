@@ -1,6 +1,6 @@
 # ADR-046: Mail-provider OAuth — grants, flow, registry
 
-**Status:** Accepted (Forgejo #52, v1.96.0; every decision below was
+**Status:** Accepted (#3, v1.96.0; every decision below was
 taken as the design spike recommended). Increment 2
 (XOAUTH2, the token store, migration 00078) implements §2, §4, §5 and §7;
 increment 3 implements the connect flow (§3), disconnect (§6) and the §9
@@ -236,7 +236,7 @@ existing action.
   sent the challenge first.
 - **Classified by what it is, not by which step wrapped it.** A refusal of
   AUTHENTICATE (the challenge path, or Microsoft's bare `NO AUTHENTICATE
-  failed.`) is an authentication error on every op — the bug #888 fixes for
+  failed.`) is an authentication error on every op — the bug fixed for
   LOGIN cannot recur on this path. A server that does not advertise
   AUTH=XOAUTH2 is never sent the token and is a configuration error.
 - **SMTP XOAUTH2 refuses a connection without TLS** unless the server is
@@ -295,7 +295,7 @@ existing action.
 
 ### 9. Increment 3 obligations
 
-Recorded by the security review of #894 so they are not lost; none is built
+Recorded by a security review so they are not lost; none is built
 by increment 2.
 
 - **(a) A reject hook.** Replace `xoauth2.TokenFunc` with a source offering
@@ -392,7 +392,7 @@ Recorded where the build made a choice the sections above leave open.
   API-key approval sweep's shape), and each `Start` clears the starting user's
   expired flows.
 
-**Security review of #897** (independent, at `5db215f`): no high findings.
+**Security review** (independent, at `5db215f`): no high findings.
 - **M1, fixed:** deleting an OAuth account (`Account/set` destroy) now
   revokes its grant at the provider (Google). A restored backup would
   otherwise re-arm a still-live grant. What to revoke is read before the delete
@@ -472,7 +472,7 @@ the design leave open.
   OAuth account with no grant (`Account.AwaitingReconnect()`, and its SQL twin
   in `store.ListSyncableAccounts`) is treated exactly like one whose grant is
   `needs_reauth` everywhere below: not dialled, intents held, new sends
-  refused, accepted ones held. (Review of #903, MEDIUM-2: a disconnected
+  refused, accepted ones held. (Review finding MEDIUM-2: a disconnected
   account's sends otherwise claimed, failed on `ErrNoGrant` and requeued every
   pass, two change rows each time, for ever.)
 - **The sync runner never dials an account waiting for a reconnect.** The
@@ -485,8 +485,8 @@ the design leave open.
   holds the account it was started with, so before every session it re-reads
   the account (`AccountReader`, one query) and ends without a dial if it now
   waits for a reconnect; without that it would redial until `reconcileIdle`
-  next dropped it (review of #903). Each scheduled pass names the waiting
-  accounts at WARN (`ReconnectLister`), as #435 does for disabled ones.
+  next dropped it (review finding). Each scheduled pass names the waiting
+  accounts at WARN (`ReconnectLister`), as is done for disabled ones.
   `operator_error` is listed and dialled as before, on the normal backoff. The
   one connection still possible is the IMAP session of a pass that was already
   running when the transition happened.
@@ -510,15 +510,15 @@ the design leave open.
     `FOR UPDATE` under `state = 'scheduled'`). The worker's first read is not
     locked, and an Undo Send can commit after it; an unguarded write put the
     cancelled submission back to `scheduled` and sent it after the reconnect
-    (review of #903, MEDIUM-1). Now that cancel stands and nothing is requeued;
+    (review finding MEDIUM-1). Now that cancel stands and nothing is requeued;
     a cancel arriving after the lock waits for it and cancels the job the hold
     linked. A claimed submission returns to `scheduled` only from the
     `'sending'` state it claimed (`HoldClaimedSubmission`).
   - If the token refresh hears `invalid_grant` during the send, the error
     carries `ErrReauthRequired` (checked before `ErrPermanent`), and the claimed
     submission returns to `scheduled` the same way.
-  - **`operator_error` holds instead of failing** (decision recorded on review
-    of #903). The provider refusing this server's client — an expired or
+  - **`operator_error` holds instead of failing** (decision recorded on
+    review). The provider refusing this server's client — an expired or
     rotated secret — used to reach the worker as `ErrProviderMisconfigured`,
     which the SMTP layer wraps as `ErrPermanent`, so every user's queued mail on
     that provider failed for good: the opposite of "waiting outgoing mail
@@ -609,7 +609,7 @@ Outlook.com and a real Microsoft 365 mailbox.
   server sends SPECIAL-USE on a localised folder AND the user also has an
   English-named one (say "Sent Items" next to a server-marked "Gesendete
   Elemente"), two folders can carry the same role; role lookups then pick one.
-- **Non-mail folders need evidence, not just a name** (review M3 of #910).
+- **Non-mail folders need evidence, not just a name** (review finding M3).
   A folder whose top-level name is on the profile's non-mail list (Calendar,
   Contacts, Journal, Notes, Tasks, Outbox, Sync Issues, Conversation History,
   RSS Feeds/Subscriptions, and anything nested under them) is set
@@ -684,7 +684,7 @@ Outlook.com and a real Microsoft 365 mailbox.
     reading would undo a local edit whose writeback is still pending.
   - Applies nothing from a command that failed. The schedule is in memory: a
     restart only makes it run sooner.
-  - Review of #910: it runs AFTER the new-message walk and its failure is
+  - Review: it runs AFTER the new-message walk and its failure is
     recorded, never fatal (M5), so a server that refuses its FETCH cannot
     hold back new mail. On a mailbox not known to keep user keywords (no
     PERMANENTFLAGS `\*` from this SELECT or the recorded probe) only system
@@ -692,7 +692,7 @@ Outlook.com and a real Microsoft 365 mailbox.
     carried through (M4): a server's silence about a keyword it cannot store
     is not a removal. A copy whose message has a flag or keyword writeback
     still pending or inflight is skipped until it drains (L6).
-- **#909 (absent versus empty FLAGS).** go-imap patch 2 makes `FLAGS ()`
+- **Absent versus empty FLAGS.** go-imap patch 2 makes `FLAGS ()`
   non-nil; every refresh path skips a message whose reply carried no FLAGS.
   A new message whose body arrived without FLAGS is still ingested, and its
   flags are re-read once the command has finished. A CONDSTORE pass that met
@@ -736,7 +736,7 @@ Outlook.com and a real Microsoft 365 mailbox.
 
 ## References
 
-- Forgejo #52; the v1.96 design spike (posted on #52).
+- #3.
 - ADR-013 (HKDF-derived credentials key), ADR-014 (the change-row narrowing
   this follows), ADR-028 (ingest-only mode), ADR-047 (the Gmail sync model).
 - Spec §3 (anti-corruption layers), §9 (threat table), §18.4.

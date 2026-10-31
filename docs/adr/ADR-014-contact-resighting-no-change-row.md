@@ -1,7 +1,7 @@
 # ADR-014: Contact re-sightings bump internal counters without a change_log row
 
 **Status:** Accepted (deliberate narrowing of the load-bearing change_log
-invariant for one field group; raised by internal-contacts work, Forgejo #37)
+invariant for one field group; raised by internal-contacts work)
 
 ## Context
 
@@ -13,7 +13,7 @@ The load-bearing invariant (CLAUDE.md, spec §13/§14, data-model §3) is:
 That single ordered stream drives JMAP `/changes`, the search indexer, and
 client sync cursors.
 
-Contacts (#37) are **auto-derived from mail flow**: every ingested message runs
+Contacts are **auto-derived from mail flow**: every ingested message runs
 `UpsertContactsFromMessage`, which for each correspondent either creates a
 contact or re-sights an existing one. A re-sighting updates two bookkeeping
 columns on `app.contact_addresses` — `seen_count` (incremented) and
@@ -71,7 +71,7 @@ through `/changes`.
   machinery (a debounce/rollup) than the value of a live `seen_count` justifies;
   can be added later under the "future feature" clause above if needed.
 
-## Amendment (2026-10-17, #59, #747): four more contact columns, all synced
+## Amendment (2026-10-17): four more contact columns, all synced
 
 v1.89.0 added four columns to the contact (`internal/store/contact_flags.go`):
 

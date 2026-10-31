@@ -1,7 +1,7 @@
 # ADR-040: PGP key lifecycle: merge on renewal, two-year expiry, retire vs revoke, WKD serves revocations
 
-**Status:** Accepted (Forgejo #795, v1.93 increment A; amended for #796,
-increment B1, and for #815, #813, #812, #817 and #818, increment C1; builds on
+**Status:** Accepted (v1.93 increment A; amended at increment B1 and at
+increment C1; builds on
 ADR-024, ADR-037, ADR-038 and ADR-039)
 
 ## Context
@@ -68,7 +68,7 @@ own row in every case, so its merge adds none: one logical change, one row.
 
 ### 2. New keys expire after two years
 
-Decision (#795): keys should expire.
+Decision: keys should expire.
 `pgp-generate` creates keys whose primary key **and encryption subkey** expire
 `pgpwire.DefaultKeyLifetimeDays` (730) days after creation. That is one named
 constant. go-crypto's `NewEntity` applies the lifetime to the primary key only,
@@ -164,7 +164,7 @@ told apart from one that holds no keys. This is read-only, and it is how the
   can send mail (and so put a key in an Autocrypt header) cannot strip a
   revocation or shorten a key by replaying an old copy.
 - Keys made from now on stop working after two years unless extended. The
-  client-side warnings that make that visible are increment B of #795.
+  client-side warnings that make that visible are increment B.
 - ~~A JMAP Identity's signing facts (`signingKeyId`, shown as "Will sign") still
   follow the columns and not the packets' expiry.~~ Closed by the amendment
   below (increment B1).
@@ -172,7 +172,7 @@ told apart from one that holds no keys. This is read-only, and it is how the
   implement the draft handle this. A client that reads only the first block
   still gets the live key, because it is always first.
 
-## Amendment (v1.93 increment B1, #796): the JMAP surface
+## Amendment (v1.93 increment B1): the JMAP surface
 
 ### 7. `signingKeyId` reads the packets, as a read-time projection
 
@@ -213,7 +213,7 @@ eligible keys (ADR-038 rules 1 and 3) have lapsed.
 
 ### 9. Signatures by an expired key: `bad`, with a reason
 
-ADR-039 §6 put "an expired or revoked key" in `bad`, and #792 kept that. This
+ADR-039 §6 put "an expired or revoked key" in `bad`, and a later change kept that. This
 amendment keeps the state and adds a reason. go-crypto returns `ErrKeyExpired`
 only after the signature has verified over the content, in both the detached
 and the embedded readers (`checkMessageSignatureDetails` runs after
@@ -270,9 +270,9 @@ publish and retire are store writes, as in `mailroom-admin`. Rules:
   is a soft delete.) There is no
   `ContactKey/changes`: keys are part of the Contact, and Contact rows already
   carry their changes, except that a brand-new key from ingest or discovery
-  writes none (unchanged since #48).
+  writes none (unchanged since key publication).
 
-## Amendment (v1.93 final scope, increment C1: #815, #813, #812, #817, #818)
+## Amendment (v1.93 final scope, increment C1)
 
 ### 11. Key history: nothing is deleted, and a re-sighting revives
 
@@ -373,7 +373,7 @@ primary}]`, with the primary first.
   key does not name succeeds, and `updated[id]` is `{boundAddressListed:
   false, warning: "addressNotInKey"}`. A key that does name the address gets
   `{boundAddressListed: true}`. Refusing would block the Kleopatra-made keys
-  #812 was found with, which are legitimate and only mislabelled.
+  this was found with, which are legitimate and only mislabelled.
 
 ### 14. Replace
 
@@ -400,7 +400,7 @@ superseded), and a wildcard binding. All of these are refused before
 anything is generated. It spends the generate rate-limit token. WKD
 afterwards serves the new key and not the old one. The old one stays
 unserved even if revoked later, because a retired key is not published
-(§4). The old key certifying the new one is out of scope (#817).
+(§4). The old key certifying the new one is out of scope (#31).
 
 ### 15. Refresh
 
@@ -416,7 +416,7 @@ unserved even if revoked later, because a retired key is not published
   `UpsertContactKeyDetail`, which merges with `pgpkeys.Merge`.
 - **Results:** `renewed`, `revoked`, `updated`, `unchanged`, `differentKey`,
   `notFound`, `unreachable`. `revoked` and `updated` are additions to the five
-  that #818 named, so that a revocation is never reported as a renewal and a
+  first proposed, so that a revocation is never reported as a renewal and a
   change is never reported as `unchanged`. `unreachable` covers every case in
   which an address could not be reached. It is never folded into `notFound`
   or `unchanged`.
@@ -429,7 +429,7 @@ unserved even if revoked later, because a retired key is not published
   minutes, using `contact_keys.checked_at`, claimed by one conditional UPDATE
   before the network is touched. A refused call touches nothing. `checked_at`
   is bookkeeping that is not on the wire, so it writes no change row.
-- **No background refresh from compose.** #818 offered it as optional. It is
+- **No background refresh from compose.** It was offered as optional. It is
   not built. `RecipientKey/lookup` runs as the user types, and a refresh from
   there would make a read path mutate state and spend the per-domain budget
   on recipients the user never sends to. The explicit action and compose's
@@ -437,7 +437,6 @@ unserved even if revoked later, because a retired key is not published
 
 ## References
 
-- Forgejo #795 (issue and comments); #796 (the Settings UI).
 - RFC 9580 §5.2.3.23 (reason for revocation), §5.2.3.13 (key expiration time).
 - draft-koch-openpgp-webkey-service §3.1 (returning revoked keys).
 - Code: `internal/pgpkeys/lifecycle.go`, `internal/pgpkeyd/lifecycle.go`,

@@ -1,11 +1,11 @@
 # ADR-048: Server-side sessions, silent renewal and signed-in devices
 
-**Status:** Accepted (Forgejo #937, v1.98.0; §9 measured against a real
+**Status:** Accepted (v1.98.0; §9 measured against a real
 OIDC provider, results in §9). The decisions
 are in §1. Implements spec §10's "short-lived access tokens +
 rotating refresh", which the stateless session cookie stood in for since v0.x
 (`internal/auth/doc.go`, `Config.SessionTTL`). Revised after an adversarial
-design review (recorded on #937); §4's locking, §4a's identity refresh and
+design review; §4's locking, §4a's identity refresh and
 §3's 503 rule are the substantive changes it caused.
 
 ## Context
@@ -93,7 +93,7 @@ provider. That has three costs.
 - **A legacy cookie** (the signed v0.x format) is no longer accepted. Everyone
   signs in once after the upgrade (§8).
 - **Sign-in replaces, never reuses.** The callback always mints a fresh secret.
-  The anti-fixation rule (#310) is unchanged, and
+  The anti-fixation rule is unchanged, and
   `TestCallbackHandler_ReplacesAPreExistingSession` stays. If the request also
   carried a valid session cookie, that row is revoked as `replaced`. This
   covers a second tab's login, and a cookie planted before the login, which
@@ -261,7 +261,7 @@ A renewal re-establishes who the user is, as a login does.
   subscriptions are deleted (§6). The refresh token is revoked at the provider
   through RFC 7009 when discovery advertises a `revocation_endpoint`; a failure
   there is logged, never shown.
-- **RP-initiated logout** (`end_session_endpoint`, #314) is kept. Its
+- **RP-initiated logout** (`end_session_endpoint`) is kept. Its
   `id_token_hint` now comes from the session row's `id_token_ct`, which every
   renewal updates. The path-scoped logout cookie is **retired**: it expired
   after 12 hours, and from then on logout would silently have fallen back to
@@ -403,7 +403,7 @@ methods, named to avoid RFC 8620's Session object:
 ### 9. Unverified provider behaviour, measured before release
 
 These are checked against a real provider before
-release, and recorded on #937. §4's serialisation is designed for the worst
+release. §4's serialisation is designed for the worst
 case, so no answer weakens it. The user-facing claims, however, depend on them:
 
 1. **Reuse.** Is a refresh token single-use, so that a second use is refused
@@ -423,7 +423,7 @@ case, so no answer weakens it. The user-facing claims, however, depend on them:
    they come only from UserInfo?
 
 
-**Results (Authentik as the test provider; detail on #937):**
+**Results (Authentik as the test provider):**
 
 - **Issued and silent.** Refresh tokens are issued with `offline_access`.
   Renewal is silent, and the role is re-read on every renewal.
@@ -505,7 +505,7 @@ case, so no answer weakens it. The user-facing claims, however, depend on them:
   refresh tokens. Those can only mint Mailroom sign-in tokens for this client,
   not mailbox access: no worse than ADR-046's mailbox tokens, and strictly
   narrower.
-- #887 (OAuth for AI tools) builds its consent and revocation on this session
+- #34 (OAuth for AI tools) builds its consent and revocation on this session
   model, not on the stateless cookie.
 
 ## Alternatives considered
@@ -531,5 +531,4 @@ case, so no answer weakens it. The user-facing claims, however, depend on them:
 
 Spec §10. ADR-013 (sealing), ADR-016 (push), ADR-042 (token hashing, the lookup
 function's pattern, the scope table), ADR-046 (failure classes, redaction).
-RFC 6749 §6 (refresh), RFC 7009 (revocation), OpenID Connect Core §12. Forgejo
-#937, #314, #310, #887.
+RFC 6749 §6 (refresh), RFC 7009 (revocation), OpenID Connect Core §12. #34.

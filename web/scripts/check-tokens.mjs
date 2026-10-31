@@ -6,7 +6,7 @@
 // and the text/background pairs the file declares meet WCAG AA (4.5:1). Plain
 // Node, no dependencies — `npm run build` runs this before `tsc`/`vite build`
 // (package.json), so CI's existing "Typecheck + build" step in
-// .forgejo/workflows/ci.yml is the gate; no new job.
+// .github/workflows/ci.yml is the gate; no new job.
 //
 // All the actual logic is in ../src/core/tokens/checkTokens.ts (pure functions,
 // unit-tested in checkTokens.test.ts). This file only walks the tree, reads the

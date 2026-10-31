@@ -115,7 +115,7 @@ goose prints `OK` and moves on. `scripts/migrate-check.sh` cannot catch it
 either: it applies migrations to a freshly created, empty database, where
 every backfill's true row count is zero anyway.
 
-This actually shipped (#505). Migration `00050`'s
+This actually shipped. Migration `00050`'s
 
     UPDATE app.desk_preferences SET setup_completed_at = updated_at;
 
@@ -123,7 +123,7 @@ and `00047`'s
 
     UPDATE app.messages SET flagged_at = received_at WHERE is_flagged AND flagged_at IS NULL;
 
-both matched zero rows on the deployed instance. `00050`'s backfill existed
+both matched zero rows on a deployed instance. `00050`'s backfill existed
 specifically so an established desk would never read `setup_completed_at`
 as NULL — the exact state the day-one wizard treats as "never set up" — and
 it silently left every existing login in that state. `00047` had no
@@ -229,7 +229,7 @@ the schema owner (spec §10, RLS design).
 
 CI should run `sh scripts/migrate-check.sh` as its own job (mirroring the
 existing `schema-apply` and `isolation-tests` jobs in
-`.forgejo/workflows/ci.yml`): it applies `db/migrations/*.sql` to a clean
+`.github/workflows/ci.yml`): it applies `db/migrations/*.sql` to a clean
 PostgreSQL 18 via goose and asserts success, then drift-checks that result
 against a database built straight from `db/schema.sql`. A failure here means
 the migration history and the reference schema have diverged — merge should
@@ -250,7 +250,7 @@ constraint — `app.sha256` and `app.ulid` both do — because it must verify th
 constraint against every existing row. That is a full rewrite under an
 `ACCESS EXCLUSIVE` lock, and this codebase sets no `lock_timeout`.
 
-Measured (#417), not inferred:
+Measured, not inferred:
 
 | what | time |
 |---|---|

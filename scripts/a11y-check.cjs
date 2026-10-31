@@ -6506,6 +6506,9 @@ async function main() {
         await injectAxe(page);
         await axeAA(page, surface.name, theme.name);
         await axeContrastAAA(page, surface.name, theme.name);
+        // Every surface, on the synthetic fixture: the README's screenshots come
+        // from here, so they never show anyone's real mail.
+        if (SHOTS) await page.screenshot({ path: "/tmp/shots/surface-" + theme.name + "-" + surface.name + ".png" });
         if (surface.after) await surface.after(page);
         if (theme === THEMES[0]) tally.surfaces += 1;
       }

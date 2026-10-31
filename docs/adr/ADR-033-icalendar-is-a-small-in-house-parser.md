@@ -1,10 +1,10 @@
 # ADR-033: iCalendar invitations are read by a small in-house parser, not a library
 
-**Status:** Accepted (Forgejo #725, v1.90.0).
+**Status:** Accepted (v1.90.0).
 
 ## Context
 
-#725 shows a calendar invitation (iTIP, RFC 5546, carried in mail by iMIP, RFC 6047)
+Mailroom shows a calendar invitation (iTIP, RFC 5546, carried in mail by iMIP, RFC 6047)
 as a card above the message body and lets the user answer it with Accept / Maybe /
 Decline. That needs two things from iCalendar (RFC 5545):
 
@@ -21,18 +21,18 @@ components, properties, nesting — and must never fetch anything named in it (U
 ATTACH, TZURL, ALTREP). Recurrence rules must not be expanded: `RRULE:FREQ=SECONDLY;
 COUNT=2000000000` is a valid line.
 
-Spec §3 requires third-party protocol libraries to sit behind our own interface. #74
+Spec §3 requires third-party protocol libraries to sit behind our own interface. #15
 (3.x) will later want CalDAV, which is where a full iCalendar library genuinely earns
 its keep.
 
 ### ⚠ This moves part of a 3.x roadmap item into 1.x — a stated deviation
 
 Spec §17 lists "CalDAV/calendar hooks (iTIP accept/decline)" under **3.x**, and §1
-calls calendar "a v3 hook". #725 (a feature request) splits the iTIP half
-out of #74 and ships it now. This ADR records that deviation, and its limit: what
+calls calendar "a v3 hook". This feature splits the iTIP half
+out of #15 and ships it now. This ADR records that deviation, and its limit: what
 moves forward is the *hook* §1 describes — an invitation answered from the message it
 arrived in — not groupware. There is no calendar view, no event store and no sync;
-those stay with #74 in 3.x, and §1's "full groupware is out" is unchanged.
+those stay with #15 in 3.x, and §1's "full groupware is out" is unchanged.
 
 ## Options
 
@@ -90,7 +90,7 @@ surface. The compiled-in zone database is the Go standard library's `time/tzdata
 
 - **What this does not do**, and must not grow into: CalDAV, free/busy, VTODO or
   VJOURNAL invitations, COUNTER/DECLINECOUNTER, delegation, RDATE/EXDATE, or any
-  occurrence expansion. When #74 (3.x) brings CalDAV it should **revisit this ADR**:
+  occurrence expansion. When #15 (3.x) brings CalDAV it should **revisit this ADR**:
   two-way sync needs a full, round-tripping object model, and that is the point at
   which a library (go-ical is the likely candidate, being the go-webdav author's) is
   worth its unbounded parse — behind this same package's interface, with these limits
@@ -115,4 +115,4 @@ surface. The compiled-in zone database is the Go standard library's `time/tzdata
 ## References
 
 RFC 5545 (iCalendar), RFC 5546 (iTIP), RFC 6047 (iMIP); spec §3 (anti-corruption
-layers), §11 (security); docs/hostile-content.md §2.11; Forgejo #725, #74.
+layers), §11 (security); docs/hostile-content.md §2.11; #15.

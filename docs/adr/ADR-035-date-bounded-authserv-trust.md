@@ -1,7 +1,6 @@
 # ADR-035: An authserv-id may be trusted only for mail received before a date
 
-**Status:** Accepted (Forgejo #766; amends the `MAILROOM_AUTHSERV_IDS` rule of
-#414 and #625)
+**Status:** Accepted (amends the earlier `MAILROOM_AUTHSERV_IDS` rule)
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR-028: Ingest-only mode is a per-account writeback switch, and it declares which local state is authoritative
 
-**Status:** Accepted (Forgejo #521, milestone v1.70.0 "Ready for a real inbox";
+**Status:** Accepted (milestone v1.70.0 "Ready for a real inbox";
 does **not** supersede or amend ADR-020)
 
 ## Context
@@ -36,7 +36,7 @@ The sole production construction of an `IMAPWriter` is
 `internal/writeback/runner.go`, inside `DrainAccount` — which already returns
 early, **before** `r.dial`, when nothing is pending. That is the chokepoint.
 
-⚠ **No longer the only path (#647).** `mailroom-admin consolidate-folders` moves
+⚠ **No longer the only path.** `mailroom-admin consolidate-folders` moves
 whole folders and DELETEs folders on the provider through `sync.FolderAdmin`, a
 separate interface obtained only from `sync.DialFolderAdmin`; `SyncSession` is
 unchanged and still has no `Create`/`Delete`/`Rename`. The command is
@@ -204,9 +204,9 @@ tested as such.
 never claimed**. Switching the mode on transitions that account's outstanding
 `pending` intents to `suppressed` in the same transaction as the flag change.
 
-#521 proposed *dropping* accumulated intents as "the honest default". This ADR
-takes the other path, because dropping is the option that reproduces #520's
-disease by design: at lift, local state and the server disagree permanently,
+The original proposal was to *drop* accumulated intents as "the honest default". This ADR
+takes the other path, because dropping is the option that reproduces the stranded-`inflight`
+lease's disease by design: at lift, local state and the server disagree permanently,
 with nothing recording it.
 
 Instead, **the suppressed queue is the shadow run's most valuable artifact** — a
@@ -267,7 +267,7 @@ tracked rather than done here.
 A hazard that exists **today, unguarded, and is NOT fixed here**:
 `sync_enabled=false` stops the pass but not the enqueue, so intents accumulate
 `pending` and re-enabling the account fires the whole set in one drain. That is
-#521's "mass mutation nobody reviewed", already shipped.
+the "mass mutation nobody reviewed" the proposal warned of, already shipped.
 
 ⚠ **The drain-side self-heal above does not reach it, and that is worth stating
 because the shapes look identical.** The self-heal runs inside `DrainAccount`,
@@ -360,7 +360,7 @@ That failure is recorded with a cause written for a person rather than for the
 schema — *"this account is in ingest-only mode: Mailroom is observing the
 mailbox and will not send from it"* — the reserved daily quota is given back,
 and the draft itself is untouched, so re-sending after the mode is lifted is one
-deliberate action rather than a recovery. Until #589 the row was recorded and
+deliberate action rather than a recovery. Until this was fixed the row was recorded and
 shown to nobody: the message sat in Drafts, which reads as *"I never sent it"*
 rather than *"it was refused"*, and the last thing the interface had said about
 it was that it was on its way. A failed submission now appears in the Outbox
@@ -369,7 +369,7 @@ user scheduled days earlier, dispatched into a mode that exists precisely
 because the instance is not trusted yet, is not a send anyone should make on
 their behalf.
 
-### 7. Consequences for purge, which #521 did not anticipate
+### 7. Consequences for purge, which the original proposal did not anticipate
 
 Purge is two-phase: phase 1 enqueues an EXPUNGE for a due message that still has
 live provenance (`internal/purge/purge.go, enqueueExpunge`), and phase 2 hard-deletes only
@@ -419,7 +419,7 @@ Three consequences worth stating:
   used to leave the message due, and phase 1 would then expunge it from
   wherever it still sat.
 - `bool_and`, not `bool_or`: re-delivered mail can have several live copies in
-  one account (#206) and the engine applies an intent to every one of them, so
+  one account and the engine applies an intent to every one of them, so
   a single copy still in INBOX disqualifies the account.
 - An account with no `\Trash` mailbox can never satisfy this. That is correct
   rather than a gap — its trash MOVE already dead-letters for want of a
@@ -509,12 +509,12 @@ of Trash is re-trashed. The engine treats only missing or stale provenance as a
 conflict — a copy that simply moved is not one. Moves are the op class that
 decides *where mail lives*, so they deserve more scrutiny than flags, not less.
 The report should flag intents whose provenance changed after the intent's
-`created_at` (#554 item 5).
+`created_at` (#24).
 
-Per-op selection on `--apply` is deferred (#554); until it exists, read the
+Per-op selection on `--apply` is deferred (#24); until it exists, read the
 per-op report and decide deliberately rather than replaying the ledger whole.
 There is also no `--discard`, so "decide not to replay" is a standing state
-rather than a terminal one (#554 item 4).
+rather than a terminal one (#24).
 
 **Expect noise between steps 1 and 3.** Every shadow-trashed message that comes
 due in that window reports `unlanded` and logs the per-message Warn whose text
@@ -524,7 +524,7 @@ step 3 lands them.
 
 ### 8. `sync_scope='off'` is a read control, not a write control
 
-#521 asked this to be settled here. It is now answered from the code rather than
+The original proposal asked this to be settled here. It is now answered from the code rather than
 inferred: **yes, an `off` mailbox is a fully live writeback target.**
 `liveAccountIDs` (`jmap_email.go:1712`) has no join to `app.mailboxes`, and
 `MessageProvenanceTargetsForAccount` (`store/writeback.go, MessageProvenanceTargetsForAccount`) joins it only to
@@ -567,7 +567,7 @@ never be corrected. That is acceptable for a read-cost control and is now stated
 
 ## Verification
 
-Per #521, an integration test that turns the mode on and performs **every
+As the original proposal asked, an integration test that turns the mode on and performs **every
 mutation class** — flag, keyword, label add/remove, move, trash, draft save,
 draft destroy — then asserts:
 
@@ -580,8 +580,8 @@ no write was issued.
 
 **Negative control, required in both halves:** with the mode off, the same test
 must see every one of those writes reach the fake server. A test that cannot
-fail is documentation (#62), and three assertions about a sandbox once passed
-against a page that could not have loaded at all (#131).
+fail is documentation, and three assertions about a sandbox once passed
+against a page that could not have loaded at all.
 
 ### The probe, and what it caught
 
@@ -640,7 +640,7 @@ implying the probe covered it.
 Additional coverage this ADR obliges:
 
 - The `suppressed` state is never claimed — including by the 15-minute stranded-
-  `inflight` reclaim arm added for #520.
+  `inflight` reclaim arm added for the stranded-`inflight` lease.
 - Lifting the mode does not **replay** the ledger; only the explicit `--apply`
   does. (Not "drains nothing" — see §4 on deterministically-keyed rows.)
 - A trashed message in a shadowed account does not accumulate expunge intents
@@ -650,7 +650,7 @@ Additional coverage this ADR obliges:
   (§7).
 - A row left `pending` on an already-shadowed account is moved into the ledger by
   the next drain, and a `pending` row on a **live** account is not (§4).
-- `sync_scope='off'` as a writeback target, the test #521 found missing (§8).
+- `sync_scope='off'` as a writeback target, the test the original proposal found missing (§8).
 - `Account/set` refuses `writebackEnabled: true` while the instance flag is set.
 - **The `provider.Sender` seam itself refuses** (§6) — not just
   `EmailSubmission/set`. This one was omitted from this list for three review
@@ -687,9 +687,9 @@ one account's evidence, not two.
 
 ## References
 
-- Forgejo #521 (this issue), #519 (production readiness), milestone v1.70.0
-- #520 — the stranded-`inflight` lease, whose silent-divergence framing §4 follows
-- #296 — every copy, not one; the OR-merge that makes flags server-authoritative
+- Milestone v1.70.0 (production readiness)
+- The stranded-`inflight` lease, whose silent-divergence framing §4 follows
+- Every copy, not one: the OR-merge that makes flags server-authoritative
 - ADR-020 — `sync_scope` is two values (**not** amended by this ADR)
 - ADR-009 — deletion semantics, the two-phase purge §7 depends on
 - spec §4/§4a (writeback and reconciliation), §12 (account health)

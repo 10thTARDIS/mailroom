@@ -1,8 +1,8 @@
 # ADR-041: Saved contacts, the user's own name and notes, merge by tombstone, and a report-first date backfill
 
-**Status:** Accepted (Forgejo #816, v1.94 server increment; revisits ADR-014's
+**Status:** Accepted (v1.94 server increment; revisits ADR-014's
 "if a future feature promotes seen_count/last_seen_at" clause; builds on ADR-040
-for keys). Amended for #834 (§4: separating gives back what the merge borrowed,
+for keys). Amended (§4: separating gives back what the merge borrowed,
 and the block goes back with the address that had it; migration 00073).
 
 ## Context
@@ -14,7 +14,7 @@ had ever been written to, none had a second address, and the stored
 the last 30 days" after a bulk import). Many had no
 mail found from or to them at all: co-recipients on other people's mail.
 
-Decisions on #816:
+Decisions:
 
 - Only **saved** contacts appear on the Contacts page.
 - A contact is saved automatically when the user **sends** to it.
@@ -48,7 +48,7 @@ Decisions on #816:
   so its `created` row covers it. An existing one gets one Contact `updated`
   row, folded with any other synced change of the same message (name fill,
   reached-me-at). **These are Contact rows, not the Email `created` row**: the
-  established ingest convention for contacts (since #37) is a Contact row of its
+  established ingest convention for contacts is a Contact row of its
   own, because Contact is a separate JMAP type with its own state string. A
   re-send to a saved contact changes nothing and writes nothing. A contact the
   user un-saved is saved again by their next message to it: sending is the
@@ -157,7 +157,7 @@ is this contact get a copy of its learned name, saved, VIP and block (not its
 notes or the user's name, which describe the merged person). A home's keys go
 with the last of its addresses to leave. A contact keeps at least one address.
 
-**Separating gives back what the merge borrowed** (amended for #834). As
+**Separating gives back what the merge borrowed** (amended). As
 first shipped, the contact left behind kept its combined state: a learned name
 it had borrowed because its own mail carried none, the joined notes (so the
 other person's notes ended up on both contacts), VIP and saved OR-ed in, and
@@ -251,7 +251,7 @@ as stale, never forced. A rerun plans 0.
   be rerun; making ingest stamp the message date instead is a follow-up, not
   done here.
 - Tombstones accumulate, one per merge; they are tiny, invisible, and deleted
-  with the user. Merge records (#834) accumulate likewise until their merge is
+  with the user. Merge records accumulate likewise until their merge is
   undone, and go with either contact.
 - A merge made on v1.94.0-rc.1 (before migration 00073) has no record, so
   separating it restores nothing on the contact it was merged into; what it

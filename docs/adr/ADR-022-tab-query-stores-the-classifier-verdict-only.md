@@ -1,6 +1,6 @@
 # ADR-022: Filtering by tab stores the CLASSIFIER'S VERDICT, never the tab — amends ADR-021
 
-**Status:** Accepted (amends ADR-021; raised by Forgejo #228, the tab client surface)
+**Status:** Accepted (amends ADR-021; raised by the tab client surface)
 
 ## Context
 
@@ -8,21 +8,21 @@ ADR-021 says a message's category tab is **derived at read time, never stored**,
 load-bearing: it is what makes re-pointing one label move all of its mail on the next read,
 with no backfill, no job, and no window where the mailbox disagrees with itself.
 
-Then #228 needs `Email/query` to filter by tab, because a tab strip that cannot narrow the
+Then the tab client surface needs `Email/query` to filter by tab, because a tab strip that cannot narrow the
 list is decorative. And filtering happens in **SQL** (`store.EmailQuery` is a struct of
 predicates assembled into a `WHERE` clause) while the classifier is **Go**
 (`internal/tabs.Classify`, a first-match decision list over `kind.Facts`).
 
-Those two facts are in direct tension, and resolving it badly has a known cost. #155 settled
+Those two facts are in direct tension, and resolving it badly has a known cost. An earlier decision settled
 the analogous case for `Rule/preview`: it must use the *same* matcher as ingest, because "a
 preview that can disagree with the engine is worse than none". Here a disagreement would be
 between what the tab strip **counts** and what the list **shows** — visible, and corrosive in
-exactly the way #156's invariants warn about.
+exactly the way the classification epic's invariants warn about.
 
 ## Options considered
 
 1. **Re-express the classifier's rules in SQL.** Two implementations of one decision list,
-   guaranteed to drift the first time either is touched. Rejected on #155's precedent.
+   guaranteed to drift the first time either is touched. Rejected on the `Rule/preview` precedent.
 2. **Materialise the tab.** Contradicts ADR-021 outright and reinstates the
    backfill-on-every-mapping-edit problem the derived design exists to avoid.
 3. **Compute in Go over a candidate set.** Viable only when the tab filter is always paired
@@ -82,7 +82,7 @@ So the fold has exactly one implementation too, in Go, and SQL only ever sees a 
 Only the **shape** of `COALESCE(mapping, classified)` plus the precedence `ORDER BY`. That is
 pinned by a **differential test**: over a fixture corpus, every message's tab computed by the
 Go resolver must equal the tab the SQL predicate selects it under, for all five tabs. A
-disagreement fails the build. This is the #155 remedy adapted to a boundary that cannot share
+disagreement fails the build. This is the `Rule/preview` remedy adapted to a boundary that cannot share
 code — we cannot make one implementation, so we make disagreement a red build.
 
 ## Consequences
@@ -97,7 +97,7 @@ code — we cannot make one implementation, so we make disagreement a red build.
 - **A message with no stored verdict and no mapped label is invisible to a tab filter.** That
   is the honest failure mode of a nullable column, and it is why `mailroom-admin tabs` must
   report the count of messages with `classified_tab IS NULL` rather than let a partial backfill
-  read as a complete answer. A bounded result reports its bound (#155).
+  read as a complete answer. A bounded result reports its bound.
 - **Ingest gains a classifier call.** Cheap — it is a first-match list over facts ingest has
   already parsed — and it introduces no train/serve gap, because there is exactly one
   classifier and it reads the same `kind.Facts` on both paths.

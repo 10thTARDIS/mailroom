@@ -1,6 +1,6 @@
 # ADR-031: Areas' own labels are local-only, and local labels are applied by id
 
-**Status:** Accepted (Forgejo #704; a deliberate deviation from spec §6)
+**Status:** Accepted (a deliberate deviation from spec §6)
 
 ## Context
 
@@ -8,7 +8,7 @@ Spec §6 makes labels hybrid and IMAP-sync by default: "by default each label
 mirrors to IMAP keywords so other clients and backups see them … Default = sync;
 local-only is the exception, not a per-label chore."
 
-Every desk area owns a label (#442: placing mail in an area is applying that
+Every desk area owns a label (placing mail in an area is applying that
 label). The labels Mailroom mints for areas are minted **local-only**: no
 `label_keyword_map` row and `mirror_to_imap = false`. That covers the default
 areas (`store.labelForAreaName`, used when the default set — Primary, Social,
@@ -17,7 +17,7 @@ Promotions, Updates, Forums, Notes — is materialised), a new area
 (`store.setupEnsureLabelAndArea`). On a long-used instance tens of thousands of
 messages can carry such labels, most of them applied by the classifier.
 
-Until #704 the JMAP surface knew labels only as keyword atoms. Email/get joined
+Before this decision the JMAP surface knew labels only as keyword atoms. Email/get joined
 labels through `label_keyword_map` with an inner join, and Email/set routed a
 label only by `keywords/<atom>`. A local-only label was therefore on the
 message, deciding its area, and impossible for any client to see or change. The
@@ -49,8 +49,8 @@ make local labels **applicable inside Mailroom**:
    another user's id indistinguishable from a missing one), otherwise the
    update is refused with `invalidPatch` naming the patch key. The patch goes
    to the same `EmailUpdate.AddLabelIDs/RemoveLabelIDs` fields as the keyword
-   path, so it gets the same change_log row, suggestion clearing (#169), rule
-   corrections (#170) and, **for a label that has an atom**, the same writeback.
+   path, so it gets the same change_log row, suggestion clearing, rule
+   corrections and, **for a label that has an atom**, the same writeback.
    A whole-object `labelIds` replacement is refused, because it would need a
    diff against labels the client may never have fetched.
 4. **Re-file is a swap.** The area resolver picks the label-fed area by
@@ -61,7 +61,7 @@ make local labels **applicable inside Mailroom**:
 ## Why not mirror them
 
 - **Volume on someone else's server.** Mirroring would write keywords onto
-  ~24.7k messages in the user's mailbox. It would also write one per
+  every message in the user's mailbox, tens of thousands on a long-used one. It would also write one per
   classifier decision from then on, for a sorting scheme that only means
   something inside Mailroom. Other clients would show `MailroomLabel-Updates`
   atoms that the user never asked for.
@@ -98,7 +98,7 @@ make local labels **applicable inside Mailroom**:
   message stays there.
 - Spec §6 records this as an exception alongside ADR-029.
 
-## Correction (#728)
+## Correction
 
 The Context above lists "Notes" as one of the default areas. It is not. The
 default set is five areas, one per category tab (`areas.Default()` over
@@ -109,7 +109,6 @@ covers every area's label whatever the area is called.
 ## References
 
 - Spec §6 (label model), §13 (labels are keywords).
-- Forgejo #442 (areas own labels), #704 (this decision).
 - ADR-029 (the precedent for Mailroom-only behaviour).
 - `internal/store/jmap_email.go` (`attachLabelKeywords`, `ApplyEmailUpdate`),
   `internal/api/email.go` (`applyLabelIDPatches`), `web/src/core/refile.ts`.

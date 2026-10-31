@@ -1,6 +1,6 @@
 # ADR-047: Gmail live sync is All Mail plus X-GM-LABELS
 
-**Status:** Accepted (Forgejo #52, v1.96.0; this model, the
+**Status:** Accepted (#3, v1.96.0; this model, the
 pinned go-imap fork, and full-history newest-first import were chosen).
 **Deviates from spec §4's worked example (a)** for live Gmail OAuth accounts
 only. Implemented in increments 5a (read path, ingest-only) and 5b
@@ -28,7 +28,7 @@ model:
   message is deleted" IMAP settings; delete-to-Trash per provenance makes every
   other copy vanish and land in the dead-letter queue as noise.
 - **Observation cost scales with the label count**: one SEARCH per mailbox per
-  pass, the shape of #638.
+  pass.
 
 Gmail offers a better primitive. X-GM-EXT-1 gives every message a 64-bit
 `X-GM-MSGID`, a thread id `X-GM-THRID`, and its labels as `X-GM-LABELS`
@@ -78,7 +78,7 @@ response that contains them.
   they wrote. It is the attribution the Takeout importer already gives the
   same labels, and it makes years of the person's own sorting evidence for
   what learns from filings (learned placement, the label model, rule
-  induction). It is not the #169 fixed point that keeps `rule`/`desk`/
+  induction). It is not the training-procedure fixed point that keeps `rule`/`desk`/
   `learned` out of the evidence: nothing Mailroom decided is fed back to
   itself. Gmail's own automatic signals are never imported, so they cannot
   masquerade as filings: `\Important`, the category tabs and every other
@@ -205,7 +205,7 @@ forced ingest-only (ADR-028).
   points are settled, then lift writeback after the live test of the points
   below. Tests run the Gmail path with the hold injected off
   (`writeback.WithGmailWritebackHold`).
-- **Hardened after the mail-safety review (#911):**
+- **Hardened after the mail-safety review:**
   - **Draft retirement only destroys an unsent draft.** The Drafts-view
     match must have a label reading that carries `\Draft` and not `\Sent`,
     or the intent is dead-lettered.
@@ -328,7 +328,7 @@ in increment 6.)*
   UIDNEXT−1 and its floor (`app.mailboxes.backfill_floor_uid`) to UIDNEXT.
   History is walked downward from the floor in chunks; within a chunk the
   server answers in its own order. The floor is persisted per chunk.
-- **The gap backfill is bounded by the floor**: a #93 gap is a UID at or
+- **The gap backfill is bounded by the floor**: a gap is a UID at or
   above it. Below it is history not yet imported. Gap refetches are sized
   before they are fetched and taken only as far as the budget allows; a
   mailbox with a gap left over stays unverified and unreaped, as any
@@ -399,7 +399,7 @@ in increment 6.)*
 - **Full history, newest first.** The first sync starts the cursor near
   UIDNEXT, so new mail flows within minutes; history backfills downward in
   budgeted chunks below an explicit per-mailbox backfill floor (without the
-  floor, the #93 gap backfill would treat all of history as gaps and fetch it
+  floor, the gap backfill would treat all of history as gaps and fetch it
   unpaced).
 - Progress is messages done out of the server's count, **with an ETA and a
   Stop control**, on the existing sync-jobs surface. Takeout stays the
@@ -447,7 +447,7 @@ refused. 5b built the writeback (§3a) and left that switch false too.
 
 ## References
 
-- Forgejo #52; the v1.96 design spike (posted on #52).
+- #3.
 - ADR-001 (content-hash identity), ADR-009 (deletion), ADR-028 (ingest-only),
   ADR-030 (threading hints), ADR-031 (area labels local), ADR-046 (OAuth).
 - Spec §3 (pinned client library), §4 (Gmail handling), §18.4.

@@ -99,36 +99,36 @@ measurements nobody audited**. These rules are earned, each from a named inciden
 
 - **Build the report before the fix.** Whenever "it ran and changed nothing" is a
   plausible outcome, ship the read-only report first and make `--apply` opt-in.
-  A backfill once looked obviously correct and would have changed 3 of 584 messages
-  silently (#177); a diagnostic run before the planned work showed the plan had a
-  ceiling of under one message per rule and redirected the whole issue (#191); a
-  byte-level diff of real duplicates turned a header denylist into an allowlist
-  (#206). Report per-signal or per-case counts, never one total — a single number
+  A backfill once looked obviously correct and would have changed only a handful of messages
+  silently; a diagnostic run before the planned work showed the plan had a
+  ceiling of under one message per rule and redirected the whole issue; a
+  byte-level diff of real duplicates turned a header denylist into an allowlist.
+  Report per-signal or per-case counts, never one total — a single number
   cannot distinguish "nothing to do" from "the thing I measured is always empty".
 - **A measurement is a claim about the code that produced it.** Audit the pipeline
   before trusting its verdict. Every number the classification epic was judged on for
   a month came from an evaluation with four defects, one of which made sender
   memorisation a *fixed point of the training procedure* — so the conclusion
-  "structural features don't generalise" had never actually been tested (#169, #220).
+  "structural features don't generalise" had never actually been tested.
   Numbers from an unaudited pipeline are not findings.
 - **Choose the metric that matches the harm.** Respectable ranking (AUC 0.62–0.72)
   coexisted with unusable precision (0.20–0.60) at the threshold that decides what a
   user actually sees. Ask what the feature risks, measure *that*, and gate on the
-  bottom of its confidence interval rather than a point estimate (#220).
+  bottom of its confidence interval rather than a point estimate.
 - **Probe your own tests.** If a new suite passes on the first run, delete the
   mechanism it supposedly covers and confirm a test goes red. This caught a test whose
   subject was never exercised, and identified which test actually guarded a
   mail-destroying edge case when an older one only caught it by accident of its
-  fixture (#62). A test that cannot fail is documentation.
+  fixture. A test that cannot fail is documentation.
 - **Negative-control every safety or security assertion.** Three assertions about a
-  sandbox once passed against a page that could not have loaded at all (#131). Prove
+  sandbox once passed against a page that could not have loaded at all. Prove
   the test can observe the failure it claims to exclude.
-- **A bounded or empty result must report its bound.** A lower bound reads as a total
-  (#155); zero rows can be a design finding rather than an empty result (#176).
+- **A bounded or empty result must report its bound.** A lower bound reads as a total;
+  zero rows can be a design finding rather than an empty result.
 - **The absence of an error proves nothing on its own.** A capability left undeclared
-  failed one write path while the whole read path rendered perfectly (#159); a cast to
-  a property that did not exist compiled, read fine, and was `undefined` forever
-  (#155). Ask explicitly: *what would I observe if this were broken?*
+  failed one write path while the whole read path rendered perfectly; a cast to
+  a property that did not exist compiled, read fine, and was `undefined` forever.
+  Ask explicitly: *what would I observe if this were broken?*
 
 ## Releases & changelog
 

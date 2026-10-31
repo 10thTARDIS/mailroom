@@ -1,4 +1,4 @@
-# Search spike — tantivy-go (ADR-006, Forgejo #2)
+# Search spike — tantivy-go (ADR-006)
 
 **Verdict: PASS — adopt `anyproto/tantivy-go` behind the `SearchBackend`
 interface. Keep Bleve as the documented fallback but do not switch to it.**
@@ -159,7 +159,7 @@ Replace the current status line:
 
 with:
 
-> **Status:** Accepted — spike PASSED (`docs/search-spike.md`, Forgejo #2).
+> **Status:** Accepted — spike PASSED (`docs/search-spike.md`).
 > `anyproto/tantivy-go` v1.0.6 builds reproducibly with CGO in a musl-native
 > container (no Rust toolchain in CI; prebuilt static `.a` fetched per release),
 > and passed correctness (term/prefix/phrase/boolean/field, incremental

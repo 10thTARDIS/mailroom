@@ -9,6 +9,12 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Documentation
+
+- **A new front page.** The README now shows what Mailroom is and does at a glance, with screenshots, a picture of how it fits together, the roadmap with links to each planned feature, and an invitation to contribute.
+- **New guides:** a contributing guide, a developer guide, a documentation index and a page on the licence. Running and development instructions moved out of the README into these.
+- **Documentation brought up to date.** The feature list reflects what has actually shipped (Send & archive, the MCP server and API keys, Outlook sign-in and more were still listed as planned), every planned feature points at its issue on the public tracker, and references to the old private tracker are gone.
+
 ## [1.98.0] — 2026-10-30
 
 **Stay signed in, and see your signed-in devices.** You sign in once on each device and stay signed in. Mailroom checks with your sign-in provider in the background while you use it, so you're no longer sent back to the sign-in page several times a day. A new Settings page lists every device you're signed in on and lets you sign any of them out.

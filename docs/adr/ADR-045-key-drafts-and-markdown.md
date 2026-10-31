@@ -1,6 +1,6 @@
 # ADR-045: An API key's own drafts — clear no-send wording, repeats collapsed, replace and discard, Markdown bodies
 
-**Status:** Accepted (Forgejo #872, v1.95.0; all four parts chosen
+**Status:** Accepted (v1.95.0; all four parts chosen
 after testing v1.95.0-rc.2). Amends ADR-042 §3 (what a key's Email/set needs)
 and ADR-044 §4 (the tool list). Spec §13a's "no agent path to immediate hard
 deletion, ever" is kept, not deviated from.
@@ -9,8 +9,8 @@ deletion, ever" is kept, not deviated from.
 
 v1.95.0-rc.2 was tested with a small local model behind a chat
 front end. The key had `mail:draft` and not `mail:send`. Asked to send a
-message, the model saved a byte-identical draft five times in 85 seconds and
-"seemed very confused". The cause was ours: every draft tool's description
+message, the model saved the same draft over and over and never got further.
+The cause was ours: every draft tool's description
 told every key that sending is `send_draft` — a tool hidden from a key without
 `mail:send`. The model was told to call a tool it did not have, and did the
 only thing it could. Three further gaps showed: a key could not correct or
@@ -73,7 +73,7 @@ Markdown arrived at the recipient as literal asterisks.
   (`store.LockAPIKeyDrafts`, as `feedbackOnceLock`), so two identical creates
   racing cannot both miss each other, and a discard cannot interleave with a
   send of the same draft. A key's Email/set that creates or discards takes it
-  ONCE, as the first statement of its transaction (amended after the #874
+  ONCE, as the first statement of its transaction (amended after a
   review: taken per item, it came after a destroy's message and feedback locks
   in one call and before them in another, a deadlock between two calls of the
   same key). The lock is taken before anything that locks the
@@ -171,7 +171,7 @@ Markdown arrived at the recipient as literal asterisks.
 
 ## References
 
-Forgejo #872 · spec §13a · ADR-009 · ADR-042 §3, §5, §7 · ADR-044 ·
+spec §13a · ADR-009 · ADR-042 §3, §5, §7 · ADR-044 ·
 `internal/api/key_drafts.go`, `internal/store/api_key_drafts.go`,
 `internal/compose/fingerprint.go`, `internal/mcp/markdown.go`,
 `db/migrations/00077_api_key_draft_fingerprint.sql`, `docs/mcp.md`

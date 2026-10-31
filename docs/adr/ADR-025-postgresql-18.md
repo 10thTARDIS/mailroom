@@ -1,6 +1,6 @@
 # ADR-025: PostgreSQL 18 is the supported major; 16 remains the compatibility floor
 
-**Status:** Accepted (Forgejo #328; deviates from the spec's and `CLAUDE.md`'s
+**Status:** Accepted (deviates from the spec's and `CLAUDE.md`'s
 "PostgreSQL 16", which this ADR supersedes for the *running* version — see §4 for
 why the DDL's stated floor deliberately does **not** move)
 
@@ -8,7 +8,7 @@ why the DDL's stated floor deliberately does **not** move)
 
 The spec and `CLAUDE.md` name **PostgreSQL 16**, and `db/schema.sql` is described
 as "the reference DDL that CI applies to a clean PostgreSQL 16". Renovate has been
-proposing `postgres:16 → 18` since 2026-08-17 (PR #303).
+proposing `postgres:16 → 18` since 2026-08-17.
 
 That PR was **closed rather than merged**, and the reason matters more than the
 version number:
@@ -73,8 +73,8 @@ The reason is currency at the cheapest possible moment, not performance.
    16 gives it membership WITH ADMIN OPTION" to say 18 would falsify that record to
    make a search-and-replace look tidy.
 
-4. **The upgrade mechanism is dump/restore, not `pg_upgrade`.** At 23 MB the
-   restore is seconds; `pg_upgrade` would need both majors' binaries in one image
+4. **The upgrade mechanism is dump/restore, not `pg_upgrade`.** At the database sizes
+   involved the restore takes seconds; `pg_upgrade` would need both majors' binaries in one image
    and buys nothing at this size. Dump/restore is also the path `scripts/backup.sh`
    and `scripts/restore-drill.sh` already exercise, so the upgrade rides on
    machinery that is already tested rather than on a one-off.
@@ -109,8 +109,8 @@ change underneath us.
   reversible by editing a file: dump, stop, remove the `pgdata` volume, start 18,
   recreate the roles the dump does not carry, restore, then let the idempotent
   bootstrap one-shots and goose reconcile. ⚠ `pg_dump` does **not** carry roles —
-  the restore drill learned this the hard way when `mailroom_wkd` arrived in 00035
-  (#266), and the same four roles must exist before any restore.
+  the restore drill learned this the hard way when `mailroom_wkd` arrived in 00035,
+  and the same four roles must exist before any restore.
 - **`pg_dump` must run as a role with `BYPASSRLS`.** Every app table is
   `FORCE ROW LEVEL SECURITY`, so an owner-role dump fails loudly rather than
   silently emitting nothing (`scripts/backup.sh` documents this, measured).

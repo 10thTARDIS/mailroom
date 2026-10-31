@@ -1,10 +1,10 @@
 # ADR-024: PGP private keys live behind a crypto process with its OWN root secret; the at-rest hierarchy is untouched
 
-**Status:** Accepted (Forgejo #47; scopes spec §9's crypto process to PGP only,
+**Status:** Accepted (scopes spec §9's crypto process to PGP only,
 and leaves [ADR-013](ADR-013-key-derivation-hkdf-not-wrapped-kek.md)'s deferral
 of the wrapped-KEK hierarchy standing)
 
-> **⚠ §4 amended 2026-08-10 (Forgejo #275): its original wording described a
+> **⚠ §4 amended 2026-08-10: its original wording described a
 > control the process does not have.** It claimed the caller's identity was
 > *authenticated* and that the identity was "the caller's, not the request's".
 > Neither is true — `user_id` is a field on the wire request, asserted by the
@@ -12,9 +12,9 @@ of the wrapped-KEK hierarchy standing)
 > the control that is actually in force, and the threat model it does and does
 > not cover. The correction is recorded rather than made silently because a
 > document asserting a control it does not have is the exact failure this project
-> paid for three times over in #48 → #257 → #266.
+> paid for three times over.
 >
-> **Amended 2026-09-11 (Forgejo #525):** the process now verifies its root at boot
+> **Amended 2026-09-11:** the process now verifies its root at boot
 > against a check value the database recorded, and refuses to listen on a
 > mismatch. See Consequences.
 
@@ -33,8 +33,8 @@ MasterKey() ──HKDF(salt=userID, info=purpose)──▶ per-purpose DEK ─�
 ```
 
 That is not drift — ADR-013 records it as an accepted deviation and defers the
-wrapped hierarchy to "1.x hardening", which is the milestone #47 sits in. So
-#47 arrived carrying two coupled pieces: OpenPGP itself, and a key-hierarchy
+wrapped hierarchy to "1.x hardening", which is the milestone the PGP work sits in. So
+the PGP work arrived carrying two coupled pieces: OpenPGP itself, and a key-hierarchy
 refactor the spec's own wording presumes.
 
 They are separable, and the reason to separate them is **blast radius**.
@@ -87,9 +87,9 @@ for material that cannot be un-leaked.
 ### 3. The API is PGP-shaped, because S/MIME is deferred
 
 Step 0 measured a real mailbox: **zero S/MIME messages, zero S/MIME
-correspondents** (#47). Spec §18 item 6 makes the S/MIME
+correspondents**. Spec §18 item 6 makes the S/MIME
 go/no-go a crypto-release-time decision; it is hereby **deferred to 2.x**
-(Forgejo #69).
+(#10).
 
 Consequently the process API names OpenPGP concepts directly rather than carrying
 an algorithm-neutral abstraction that has exactly one implementation. Reversing
@@ -109,17 +109,17 @@ completeness" is an exfiltration route that nothing tests.
 planned (milestone "v1.71.0 — PGP encrypt/decrypt") but not built; the line
 above describes the intended surface, not the current one.
 
-> **AMENDED 2026-10-20 (#47 increment 6b): `decrypt` is now served.** It is in
+> **AMENDED 2026-10-20 (increment 6b): `decrypt` is now served.** It is in
 > `pgpwire.Methods` with a succeeding leak probe. Its bounds, opaque error, SED
 > refusal, rate limit, crypto-process-written audit trail and the rule that
 > retired keys still decrypt are recorded in
 > [ADR-037](ADR-037-decrypt-on-open-plaintext-never-persisted.md).
 
-#### ⚠ AMENDED 2026-08-28: that condition has now been met, and the gate is `--apply` (#54)
+#### ⚠ AMENDED 2026-08-28: that condition has now been met, and the gate is `--apply`
 
 The clause above is a deferral with a trigger, not a refusal, and **the trigger
 has arrived**. Spec §9 lists `export-wrapped` in the process API; this ADR
-declined to *build* it early. #54 (per-user export and hard delete) is the
+declined to *build* it early. Per-user export and hard delete is the
 "something" it was waiting for.
 
 The reasoning, and why it binds on delete rather than on export:
@@ -198,7 +198,7 @@ relying on the mode alone. That is defence in depth and is not planned here; it
 would not change anything above, because the application would still be the party
 naming the user.
 
-> **Re-evaluated 2026-10-20 at decrypt (#47 checklist item 8), and declined
+> **Re-evaluated 2026-10-20 at decrypt, and declined
 > again.** A plaintext-returning verb was the moment to reconsider. Both
 > containers still run the same image as the same uid, and only the application
 > and the crypto process mount the socket volume. Separate uids plus a peer-uid
@@ -231,14 +231,14 @@ Losing the master key loses everything; losing the PGP root loses a smaller set,
 **irreversibly and silently** — the mailbox restores, opens, and works, and only
 the encrypted mail is gone.
 
-**`docs/key-escrow.md`, the backup documentation, and the restore drill (#40)
+**`docs/key-escrow.md`, the backup documentation, and the restore drill
 change in the same increment as the process itself**, not afterwards. A restore
 drill that green-lights a backup which cannot decrypt encrypted mail is a drill
-that certifies a hypothesis — precisely what #40 exists to prevent.
+that certifies a hypothesis — precisely what the restore drill exists to prevent.
 
-### ⚠ AMENDED 2026-09-11: the process verifies its root at boot, against a value the database recorded (#525)
+### ⚠ AMENDED 2026-09-11: the process verifies its root at boot, against a value the database recorded
 
-The section above says a lost PGP root fails **silently**. Until #525 the same
+The section above says a lost PGP root fails **silently**. Until this amendment the same
 was true of a *wrong* one at runtime: stored keys are unsealed lazily, so a
 process started with the wrong root booted, reported healthy, and served until
 the first signature or decryption, possibly months later.
@@ -251,7 +251,7 @@ dials the socket, fails, and no request can reach a process holding the wrong
 root. In particular `generate` cannot seal a new key under it, which would put
 two roots into one database and make the eventual fix lose data.
 
-**Why not "unseal one stored key", which #525 asked for.** At boot there is no
+**Why not "unseal one stored key", which was first asked for.** At boot there is no
 caller, and `app.user_keys` is readable only under its owner's identity — the
 vault's fail-closed design, not a gap in it. Reading "some key" would take a new
 cross-user `SECURITY DEFINER` returning *sealed key material*, and it still could
@@ -315,7 +315,7 @@ surface, and the socket is still the boundary.
 
 ### Sequencing this decision does not settle
 
-Step 0's zero moved key **publication** (#48 — WKD, Autocrypt, key pages) ahead
+Step 0's zero moved key **publication** (WKD, Autocrypt, key pages) ahead
 of signing, and decryption last with an **entry condition** rather than a queue
 position: it is built when `mailroom-admin pgp-report` shows there is inbound
 mail to apply it to. Building decryption for a mailbox with nothing to decrypt
@@ -340,9 +340,6 @@ confirm the first test goes red.
 
 ## References
 
-- **#47** — the arc, its increments, and step 0's measurement
-- **#48** — key publication, which step 0 moved ahead of signing
 - **ADR-013** — why there are no KEKs, and the deferral this ADR leaves standing
 - **ADR-005 / docs/key-escrow.md** — the existing single-root escrow this amends
-- **#40** — the restore drill that must learn about the second root
-- **#69** — S/MIME's deferred home
+- **#10** — S/MIME's deferred home

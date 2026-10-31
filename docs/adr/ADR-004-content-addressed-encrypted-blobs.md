@@ -25,7 +25,7 @@ behind a `BlobStore` interface (MinIO slots in later).
 - DEK rotation = new DEK for new writes + lazy background re-encrypt; schema
   migrations never touch blob bytes.
 
-## Amendment (2026-09-19, #625): what the file names reveal, accepted
+## Amendment (2026-09-19): what the file names reveal, accepted
 
 The per-user **directory** is keyed (the HMAC above), but the **file name**
 inside it is the unkeyed SHA-256 of the plaintext (`internal/blob/fs.go`,

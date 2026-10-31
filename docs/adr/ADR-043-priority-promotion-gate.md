@@ -1,6 +1,6 @@
 # ADR-043: The priority model is promoted only through a gate against the cold start, and learns from honest signals
 
-**Status:** Accepted (Forgejo #842; all three steps approved). Amends spec §8's learning loop (mailroom#33 PR2): promotion is no
+**Status:** Accepted (all three steps approved). Amends spec §8's learning loop: promotion is no
 longer "the candidate's holdout AUC is at least the incumbent's".
 
 ## Context
@@ -15,8 +15,7 @@ important. Measured read-only on a real instance:
   few `flag`, `trash`, `mark_important` and `mark_not_important`. Zero `reply`
   events, although sent messages existed.
 
-The audit of the training and evaluation pipeline (the measurement discipline in CLAUDE.md, earned
-in #169 and #220) found these defects. Each is a property of the code, not an
+The audit of the training and evaluation pipeline (the measurement discipline in CLAUDE.md) found these defects. Each is a property of the code, not an
 inference from the numbers.
 
 1. **Reading was a negative.** `api/feedback.go` recorded every mark-read as
@@ -44,7 +43,7 @@ inference from the numbers.
    the one before. `priority-report` reconstructs each version's training
    split and prints `holdout lacked a class` where this happened.
 7. **A time split, not a sender split.** Train and holdout share senders,
-   which is how sender memorisation passes for skill (#169, #220).
+   which is how sender memorisation passes for skill.
 
 ## Decision
 
@@ -82,7 +81,7 @@ and it fits nothing, so every example is out-of-sample for it. Both sides are
 compared at the threshold on the value the `real` column will hold
 (`store.StoredScore`).
 
-**Why recall, and why paired.** The harm in #842 is engaged mail not shown as
+**Why recall, and why paired.** The harm here is engaged mail not shown as
 important. That is recall at the line the user looks at, not a ranking
 number. Both models score the same messages. The comparison therefore counts
 only the engaged messages they **disagree** on: wins are messages the
@@ -132,8 +131,8 @@ carried by `corr:`/`sent:`, which do generalise.
   message, after the message has stayed in the reading pane for
   `OPEN_DWELL_MS` = 4,000 ms with the page visible. A quick flick past a
   message never counts. The server records it once per message.
-  **Session-only:** an API key has no reading pane. When #841's scopes land,
-  `Triage/open` belongs in `agent_scopes.go`'s notForKeys set. #841 had not
+  **Session-only:** an API key has no reading pane. When API-key scopes land,
+  `Triage/open` belongs in `agent_scopes.go`'s notForKeys set. They had not
   merged when this landed, so this is the note for that merge.
 - **`reply` (label 1)** is derived at ingest from any client, but only from
   mail the user **verifiably sent**. A From header naming the user proves
@@ -193,8 +192,8 @@ fix to the existing write path.
 
 ## Consequences
 
-- On production at the time of #842 the gate refuses. Positives are 16
-  events plus the unrecorded replies the report counts, so the cold start
+- On a mailbox with few recorded positives the gate refuses: below
+  `MinPositives` the cold start
   serves and v9 is reverted on the first pass. That is the intended answer.
   The open signal is expected to carry the corpus past `MinPositives`; the
   report shows when.
@@ -216,9 +215,9 @@ fix to the existing write path.
 
 ## References
 
-- #842 (this), #841 (API-key scopes: `Triage/open` must be notForKeys), #169
-  and #220 (the label gate this mirrors), #155 (the preview must be the
-  engine), #222 (reproducible scoring), #299 (re-score change rows).
+- Related work: API-key scopes (`Triage/open` must be notForKeys); the label
+  gate this mirrors; the preview must be the engine; reproducible scoring;
+  re-score change rows.
 - `internal/ml/priority_gate.go`, `priority_train.go`, `priority_report.go`,
   `priority_rescore.go`, `train.go`; `internal/store/priority_signals.go`;
   `internal/api/triage_open.go`, `feedback.go`;

@@ -266,7 +266,7 @@ Integrated because it's the connective tissue for identity + crypto + triage:
 - Not full Material Design; borrow selectively (elevation cues, motion restraint) without the full language.
 - Keyboard-driven power use (you read/type fast): shortcuts + command palette. Accessibility (screen-reader, keyboard nav, high contrast). Density setting. i18n-ready.
 - **[v0.4] Account health panel:** users can see per-account sync state ("your Gmail sync is 3h behind"), writeback dead-letters, outbound quota, and delivery failures without reading server metrics.
-- **[v0.4] PWA push expectation-setting:** Web Push on iOS works only for installed-to-home-screen PWAs (iOS 16.4+), with OS-level throttling — documented up front so it isn't issue #1.
+- **[v0.4] PWA push expectation-setting:** Web Push on iOS works only for installed-to-home-screen PWAs (iOS 16.4+), with OS-level throttling — documented up front so it isn't the first issue anyone files.
 
 ### Client topology (enabled by the one documented API)
 - **`mailroom` monorepo:** Go core/server **+** web app **+** shared **TS client-core** (JMAP client, offline cache, sync/action-queue, local search). Atomic protocol+web changes.
@@ -321,9 +321,9 @@ Design constraints carried from §10: every hot index leads with `user_id`; `mes
 
 ### Versioning & process
 - **Semantic versioning** (MAJOR.MINOR.PATCH). **0.x** = pre-release builds toward MVP — **including the 0.5 daily-driver milestone (§17)**; **1.0.0 = MVP + core intelligence** ("v1"); **1.x** = additive features in the v1 line; **2.x**, **3.x** = later majors.
-- **Forgejo milestones + issues** track everything; each roadmap item becomes an issue tied to a milestone.
+- **Milestones + issues** on the project tracker track everything; each roadmap item becomes an issue tied to a milestone.
 - **[v0.4] ADR practice:** `docs/adr/` records every architectural decision (seeded from Appendix A). Cheap now; it's how the open-source version explains itself later.
-- **CI/CD from commit #1** (Forgejo Actions or any CI): build, test, lint, security scan, migration checks — plus the sync harness (§4), JMAP conformance client (§13), RLS negative tests (§10), and the restore drill (§11). Pairs well with an AI PR-review step if one is run.
+- **CI/CD from the first commit** (any CI): build, test, lint, security scan, migration checks — plus the sync harness (§4), JMAP conformance client (§13), RLS negative tests (§10), and the restore drill (§11). Pairs well with an AI PR-review step if one is run.
 
 ### [v0.4] Schema migrations (policy)
 - Tool: **goose / golang-migrate / Atlas — pick one at repo creation** (any is fine; the policy is what matters).
@@ -335,7 +335,7 @@ Design constraints carried from §10: every hot index leads with `user_id`; `mes
 One `jobs` table serves every timer in the product — snooze wake-ups, delayed submission (Undo Send / send-later), Trash purges, DEK lazy re-encryption, model snapshots. Single dispatcher; **catch-up on boot for missed timers**; idempotency keys; bounded retries into a dead-letter state that is surfaced, never swallowed.
 
 ### [v0.4] Observability (spec'd, not vibes)
-Per-account: sync lag seconds, IDLE connection state, action-queue depth, writeback failure rate. Global: index cursor lag, job-queue depth/dead-letters, model versions + feedback counts, outbound ledger levels, attachment-scanner signature version + age (ADR-027 §5c, #641). Prometheus metrics + structured logs; the user-facing subset surfaces in the account health panel (§12).
+Per-account: sync lag seconds, IDLE connection state, action-queue depth, writeback failure rate. Global: index cursor lag, job-queue depth/dead-letters, model versions + feedback counts, outbound ledger levels, attachment-scanner signature version + age (ADR-027 §5c). Prometheus metrics + structured logs; the user-facing subset surfaces in the account health panel (§12).
 
 ### Ops
 - Docker Compose profiles `minimal` / `enhanced(+Ollama)`; **Caddy** proxy; **OIDC provider** (e.g. Authentik); Postgres; embedded search; filesystem blobs behind a `BlobStore` interface (MinIO slots in when >1 disk); IaC via **Ansible** or similar; health probes; encrypted backups (e.g. restic) per the §11 restore unit.
@@ -365,7 +365,7 @@ Per-account: sync lag seconds, IDLE connection state, action-queue depth, writeb
 1. **Provider support questions (Migadu, for the reference profile; ask now):** (a) concurrent-IMAP connection cap per mailbox/account — pool stays conservative (one IDLE + small worker pool) until answered in writing; (b) **SMTPUTF8/EAI support** — if absent, compose must produce a clear error for internationalized addresses.
 2. **tantivy-go spike** (§3/§7): pass/fail against the stated criteria; Bleve is the fallback. Gates final search design, not the data model.
 3. **License:** **RESOLVED — AGPL-3.0-only** (ADR-011). Decided pre-publication, as required: relicensing after outside contributions requires CLAs or unanimous consent. The deciding argument was reversibility — as sole copyright holder, AGPL → permissive stays available later, whereas permissive → AGPL does not — reinforced by the fact that AGPL matches §0's anti-SaaS, anti-egress thesis, and that the adoption case for permissive is weak for a deployed application nobody links against. Accepted cost: some organizations ban AGPL outright. Applied as `LICENSE` plus one-line `SPDX-License-Identifier` headers.
-4. **Gmail ongoing-delivery path:** **RESOLVED for v1.96 (#52, ADR-046, ADR-047)** — live Gmail and Outlook/Microsoft 365 accounts connect over OAuth through **operator-owned OAuth clients**, one per instance, as this item always intended. The Google project is published "In production" and left unverified under the personal-use exemption (fewer than 100 users, who click through Google's "unverified app" warning); "Testing" mode is not usable because its grants expire after 7 days. Microsoft uses one app registration for personal and organizational accounts (`/common`). Live Gmail syncs All Mail once and maps Gmail labels (ADR-047, which deviates from §4's label-folder example for live accounts only), with a daily download budget and newest-first history. Takeout remains the recommended path for archives over about 10 GB, and a Gmail forward to another mailbox (with the §4 header-analysis fallback) is unaffected for anyone who keeps it. The operator guide documents the client setup, or Gmail-live becomes a permanent support generator.
+4. **Gmail ongoing-delivery path:** **RESOLVED for v1.96 (ADR-046, ADR-047; live sync is #3)** — live Gmail and Outlook/Microsoft 365 accounts connect over OAuth through **operator-owned OAuth clients**, one per instance, as this item always intended. The Google project is published "In production" and left unverified under the personal-use exemption (fewer than 100 users, who click through Google's "unverified app" warning); "Testing" mode is not usable because its grants expire after 7 days. Microsoft uses one app registration for personal and organizational accounts (`/common`). Live Gmail syncs All Mail once and maps Gmail labels (ADR-047, which deviates from §4's label-folder example for live accounts only), with a daily download budget and newest-first history. Takeout remains the recommended path for archives over about 10 GB, and a Gmail forward to another mailbox (with the §4 header-analysis fallback) is unaffected for anyone who keeps it. The operator guide documents the client setup, or Gmail-live becomes a permanent support generator.
 5. **Multi-user storage sizing:** large archives make disk the scaling resource — confirm the volume/backup budget for ~24 users before that phase.
 6. **S/MIME library + true cost** — decided at crypto-release time (§9).
 

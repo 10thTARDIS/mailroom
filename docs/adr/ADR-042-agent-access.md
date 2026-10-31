@@ -1,6 +1,6 @@
 # ADR-042: Agent access — API keys, bearer authentication, deny-by-default scopes, limits, anomalies and approvals
 
-**Status:** Accepted (Forgejo #49, v1.95 server increment "K"; spec §13a;
+**Status:** Accepted (v1.95 server increment "K"; spec §13a;
 builds on ADR-009 for soft deletes). The MCP tools (increment M) and the
 Settings UI (increment U) build on this; neither may widen it.
 
@@ -12,7 +12,7 @@ per-key rate limits and budgets drawing from the outbound ledger, anomaly
 alerting, and an optional human-in-the-loop confirm mode for the destructive
 scopes. `app.api_keys` existed since the baseline and nothing used it.
 
-Decisions on #49: every ability in v1.95 with the
+Decisions: every ability in v1.95 with the
 safety defaults (send and delete "ask me first", a typed confirmation for
 send+delete), a pending-approvals banner with push, unanswered requests denied
 after 24 hours, and **no lock-in**: standard MCP and a standard
@@ -38,7 +38,7 @@ examples, not targets.
   delete}, defaulting to the destructive scopes granted (an update that newly
   grants one starts it in confirm mode); `ratePerMinute` (default 60, 1–600);
   `dailyBudget` (default 500, 1–20000); `suspendOnAnomaly` (default on; since
-  the suspend-on-anomaly decision (#49) it applies to every anomaly rule but off hours, §6, and migration
+  the suspend-on-anomaly decision it applies to every anomaly rule but off hours, §6, and migration
   00076 turned it on for every existing key).
   `confirm_scopes text[]` supersedes the never-read `confirm_mode` boolean,
   which stays until a contract step (ADR-008).
@@ -160,7 +160,7 @@ delete to Trash.
 **A key's destroy is always the soft delete** (ADR-009): non-drafts already
 were; an unsent draft, which a session's destroy retires for good, takes the
 Trash path for a key. No key-reachable method hard-deletes: Mailbox/set and
-every purge path are session-only. (Amended for #872, ADR-045 §3: a key may
+every purge path are session-only. (Amended by ADR-045 §3: a key may
 also move its OWN unsent drafts to Trash under `mail:draft` — a create with
 `replacesEmailId`, or `discardDrafts` — refused for anything that is not its
 own live draft; still the soft path.)
@@ -181,9 +181,9 @@ unchanged: a key's send is signed exactly like a browser's when the identity
 has a bound key, because the signature attests the account sent it, which it
 did.
 
-### 3a. Areas, and a key's moves are never the user's evidence (#49)
+### 3a. Areas, and a key's moves are never the user's evidence
 
-Decision (#49): a key may file mail into areas, through
+Decision: a key may file mail into areas, through
 this table, the restriction, the budget and the audit like everything else,
 and **moves made by a key must not count as the user's filing evidence for
 learned placement**. `Area/get` is open under `mail:read`; filing is the
@@ -286,14 +286,14 @@ costs one unit per `ReadUnitObjects` (50) objects (amended after review, so the
 budget bounds the data a key moves, spec §13a): a /get `ceil(ids/50)`, a
 /query `ceil(limit/50)`, a /changes `ceil(maxChanges/50)`. **Every** /query a
 key can call (Email, Mailbox, Label, Contact, EmailSubmission; second review
-for Email/query, #850 for the rest) always runs with a limit: 50
+for Email/query, a later change for the rest) always runs with a limit: 50
 (`KeyQueryDefaultLimit`) when it sends none, at most 500 (`KeyQueryMaxLimit`;
 Contact/query's own 100), reported back as the response's `limit` whenever it
 differs from the request (RFC 8620 §5.5), and charged for that limit before it
 runs; Mailbox/query and Label/query honour `position` and `limit` for keys.
 Every /changes a key can call likewise runs with `maxChanges` 50 when it sends
 none and at most 500, charged up front, with `hasMoreChanges` and an
-intermediate `newState` carrying the rest (RFC 8620 §5.2; #852). The charge for
+intermediate `newState` carrying the rest (RFC 8620 §5.2). The charge for
 a /query or /changes is taken from that bound before any other argument is
 read, and `TestEveryKeyQueryIsBounded` holds every key-reachable /query and
 /changes in the scope table to it. Any
@@ -314,7 +314,7 @@ reason), where the method is the name only if this server has it and
 `unknown` otherwise, so no client text keys a row; ApiKey/getEvents returns
 those counts as `suppressedRefusals`. The first critical refusal past its cap
 records a `critical_refusals` anomaly and pushes an alert, at most once per key
-per hour, or, for a key with `suspendOnAnomaly` (the default; #49),
+per hour, or, for a key with `suspendOnAnomaly` (the default),
 suspends the key and records and pushes it every time (§6). A refused system
 or reserved keyword is counted on the admitted Email/set's own row
 (`refusedKeywords`). Refusals are written under the key's row lock.
@@ -338,18 +338,17 @@ Rules (named constants in `agent_gate.go`):
   cross it is refused, an anomaly is recorded and pushed, and the key is
   suspended when `suspendOnAnomaly` (default on). The bound is on the damage.
 - **Mass send:** more than 10 sends in 10 minutes: refused, recorded, pushed,
-  and suspended when `suspendOnAnomaly` (#49; it was alert-only before).
+  and suspended when `suspendOnAnomaly` (it was alert-only before).
 - **Critical refusals:** the first security-meaningful refusal past its
-  per-minute cap (§5): recorded, pushed, and suspended when `suspendOnAnomaly`
-  (#49).
+  per-minute cap (§5): recorded, pushed, and suspended when `suspendOnAnomaly`.
 - The rules refuse **every** call that would cross them, but a key with
   `suspendOnAnomaly` off is recorded and pushed at most once per key, rule and
-  `MassAnomalyAlertCooldown` (one hour; #852; critical refusals:
+  `MassAnomalyAlertCooldown` (one hour; critical refusals:
   `CriticalRefusalAlertCooldown`, also an hour), so a key looping past a
   threshold cannot flood the user's devices with urgent alerts. A key the rule
   suspends is recorded and pushed every time, since it can only recur after a
   person reactivated it.
-- **Suspension** (#49) is the same for every rule: `store.SuspendAPIKey`
+- **Suspension** is the same for every rule: `store.SuspendAPIKey`
   sets `suspended_at` and the reason and writes `api_key.suspend` to
   `app.audit_log` (actor `system`, with the rule) in the transaction that
   refuses the call, reporting whether this call suspended it so a stale copy
@@ -387,7 +386,7 @@ the destructive operation (one submission create; destroy only), else
 `invalidArguments`. A send is **planned** (every check, nothing written) before
 it is held, so an impossible send fails at once and the summary names the real
 recipients from the bytes. A key has at most `MaxPendingPerKey` (10)
-requests waiting at once (#852); the next is refused with `overQuota` and the
+requests waiting at once; the next is refused with `overQuota` and the
 routine refusal reason `pending_cap` until one is approved, denied or expires.
 A request that cannot be held at all (nothing valid to delete, a send that
 would fail) is answered with that error and audited as a refusal with reason
@@ -401,7 +400,7 @@ who actually receives it), `to`, `cc`, `bcc` (how the headers address them),
 `subject`, `sendAt` (null = after the undo window), `attachments` and
 `archive` as fields. The summary leads with the recipients, then counts (the
 number and size of attachments, the messages archived), and ends with the
-subject (#852); attachment names and archived subjects are not in it, only in
+subject; attachment names and archived subjects are not in it, only in
 the fields. The recipients and the subject are both key-written: the envelope
 recipients by design, constrained to strict ASCII addr-specs
 (`store.CanonicalEnvelopeAddress`: a dot-atom local part, LDH domain
@@ -420,7 +419,7 @@ time (`pendingExpired`, `notPending`), key active (`keyNotActive`), draft
 byte-identical (`draftChanged`); marks the request approved (so a second
 approval cannot run it), commits, then runs the call through the **same gate**
 as the key's own calls — scope against the key as it is now, restriction and
-budget; not the per-minute rate (#852), since the call was admitted and paid
+budget; not the per-minute rate, since the call was admitted and paid
 for when it was held and the key's own refusals since must not fail what a
 person approved — attributed to the key (outcome `approved`) and to the session
 (`app.audit_log`). A call refused at that point leaves the request `failed`.
@@ -447,6 +446,6 @@ as `failed` ("the server stopped before it ran; nothing was done"), audited
 
 ## References
 
-spec §13a, §5 (outbound ledger) · ADR-008, ADR-009 · Forgejo #49 ·
+spec §13a, §5 (outbound ledger) · ADR-008, ADR-009 ·
 `internal/auth/bearer.go`, `internal/api/agent_*.go`, `internal/store/api_keys.go`,
 `internal/store/label_source.go` (LabelByAgent), migrations 00074, 00075, 00076

@@ -1,6 +1,6 @@
 # ADR-037: PGP/MIME mail is decrypted on open, in the crypto process, and its plaintext is never persisted
 
-**Status:** Accepted (Forgejo #47 increment 6b; deviates from spec §7 line 148
+**Status:** Accepted (PGP increment 6b; deviates from spec §7 line 148
 and §9's threat table; amends ADR-024 §4 and the LUKS consequence in its
 Consequences; resolves ADR-027 §6's deferral for mail that can be opened)
 
@@ -11,12 +11,12 @@ encrypted bodies are decrypted server-side **and indexed normally**, so the
 search index holds the plaintext of encrypted mail, and the index directory
 needs volume-level encryption (LUKS/dm-crypt) as a deployment requirement.
 ADR-024 repeated that and made the LUKS gate land "with the decryption
-increment". The 2026-08-21 checklist on #47 (item 7) made it blocking on 6b's
+increment". A 2026-08-21 checklist for the PGP work (item 7) made it blocking on 6b's
 PR, and it was still red on the test host when this was written: no
 dm-crypt anywhere.
 
 The requirement was the simplest implementation that relies on existing
-packages (the v1.92 plan on #47). The simplest design that is also safe is one
+packages (the v1.92 plan). The simplest design that is also safe is one
 where plaintext never reaches anything that persists. Then the index never
 holds it, and the LUKS-on-index gate is not needed for this feature.
 
@@ -135,7 +135,7 @@ the entity's MIME content fields (Content-Type, Content-Transfer-Encoding,
 Content-Disposition, Content-ID, Content-Description, Content-Language).
 Identity, trace and authentication headers always come from the outer,
 provider-delivered message, so a `From:` or `Authentication-Results:` hidden in
-the ciphertext cannot spoof the sender or defeat the one-From rule (#754) and
+the ciphertext cannot spoof the sender or defeat the one-From rule and
 the local-DKIM guards (ADR-036). **Protected headers** (RFC 9788 "memory hole",
 an inner Subject meant to replace the outer one) are out of scope and not
 honoured; honouring them is a possible later feature that needs its own
@@ -155,7 +155,7 @@ at-rest requirement it would bring back.
 
 ADR-027 §6 forced every part of an encrypted message to `unknown` at ingest,
 because clamd sees ciphertext, and said the scan "moves to wherever plaintext
-exists once #47's decryption lands". Plaintext now exists only at request time,
+exists once decryption lands". Plaintext now exists only at request time,
 so that is where the scan is:
 
 - Parts of a decrypted message have partIds `e.<path>` and blobIds
@@ -167,15 +167,15 @@ so that is where the scan is:
   (`attachscan.ForcedUnknown`), and so does a part inside an encrypted subtree
   of the decrypted entity, such as a second encryption layer or a forwarded
   encrypted message (`attachscan.EncryptedPaths`, the subtree-scoped rule
-  ingest applies since #405); zero bytes is
+  ingest applies); zero bytes is
   `unknown`; no scanner is `unscanned`, which does not block; a scanner error is
   `unknown`, which blocks like `flagged`. A release the user already made for
   the same bytes (keyed on the content digest) is honoured.
 - Nothing is cached: not the plaintext, not the verdict. `fetchAllBodyValues`
   withholds the value of attachment-leaf text parts of a decrypted message, so
   the only door to them is the scanned download.
-- The ciphertext message's stored parts are recorded exactly as before: #405
-  (PR #785) scoped the ingest rule to the encrypted SUBTREE, which stays
+- The ciphertext message's stored parts are recorded exactly as before: an
+  earlier change scoped the ingest rule to the encrypted SUBTREE, which stays
   `unknown` at ingest, while plaintext siblings and the parts of a message that
   merely forwards an encrypted one are scanned normally. This ADR builds on top
   of that: the encrypted subtree's real attachments become reachable, scanned,
@@ -233,7 +233,4 @@ the one property for all signed mail by ADR-039). Encrypt, the key-changed UI an
 
 ## References
 
-- #47: the 2026-08-21 checklist (carried over from #301) and the v1.92 plan
 - ADR-024 (crypto process), ADR-027 §5b, §6, §8 (attachment scanning)
-- #405 (blanket quarantine of encrypted mail), #263 / #301 C4 (interop
-  circularity, closed for the key shape by the GnuPG decrypt interop test)

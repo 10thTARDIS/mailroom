@@ -3,7 +3,7 @@
 Spec §12 lists screen-reader support, keyboard operation and contrast as
 requirements. This file records **how** they are met, because most of the answer
 is a small number of decisions that are invisible in a diff and easy to undo by
-accident. It is the client's half of Forgejo #447; the automated checks that
+accident. It is the client's half of the accessibility work; the automated checks that
 assert it are a separate increment (see the last section).
 
 Everything here is observable in the DOM or in the accessibility tree. Nothing
@@ -77,7 +77,7 @@ While focus is in the list:
 | `PageUp` / `PageDown` | a screenful of rows |
 | `Enter`, `o` | open |
 | `Space` (`Shift+Space`) | select (extend the range) — `x` still does this too |
-| `Shift+↑` / `Shift+↓` | put the message on the other side of the line (#464) |
+| `Shift+↑` / `Shift+↓` | put the message on the other side of the line |
 
 `gridKeyIntent` (`ui/desk/gridKeys.ts`, pure and tested) decides what the grid
 claims. It claims **nothing** carrying Ctrl/⌘/Alt, and nothing for `j`/`k` or
@@ -98,7 +98,7 @@ surface would have announced, so a second region is duplication that interrupts.
 Section errors are deliberately **not** `role="alert"`.
 
 The exceptions, all narrow: the shell's offline/error banners, the shell's
-pending-approvals banner (#49; an always-present `role="status"` wrapper,
+pending-approvals banner (an always-present `role="status"` wrapper,
 empty while nothing is waiting, so the first request IS announced), and the
 selection toolbar's count (`role="status"` — "2 selected", "3 selected"). The
 count has a known limit written down beside it: a live region must exist before
@@ -122,19 +122,19 @@ does not re-announce the sentence around it).
 | sender popover | `role="tooltip"` while hovered (the anchor points `aria-describedby` at it), `role="dialog"` once pinned |
 | attachment viewer | `role="dialog" aria-modal`, focus trapped, Escape closes and returns focus |
 | settings | `role="dialog" aria-modal`, focus trapped, with an `<h2>` for the page and an `<h3>` per row. Deliberately **not** a `main` landmark: the list route stays mounted underneath, so a second `main` would be a real violation |
-| search box | the input is an ARIA 1.2 `combobox` that owns its `listbox` of suggestions through `aria-controls`/`aria-activedescendant`; focus never leaves the input, nothing is active until an arrow key, Escape collapses the list and keeps the text (#57, #724) |
-| search options | an in-page `<form>` named by its `<h2>`, opened by a button with `aria-expanded`/`aria-controls`; not a dialog and not trapped (the results it refines stay usable). Focus goes to its first field on open and back to the button on Escape or Cancel; every control is named by its visible `<label>`; one column at phone width (#724) |
-| search sort | `role="group"` named "Sort search results" of two buttons with `aria-pressed` (#724) |
-| key dialogs (Settings › Keys) | `role="dialog" aria-modal`, named by their `<h2>` (`aria-labelledby`), focus trapped, Escape closes and returns focus to the button that opened them. They open INSIDE the settings dialog, so each stops Tab and Escape from propagating: the page's own trap and the shell's Escape never see a key the dialog handled (#796) |
-| revoke key | the confirm button is `aria-disabled`, NOT `disabled`, until a reason is chosen and the fingerprint's last 8 characters are typed: it stays a tab stop, is announced as unavailable, and its `aria-describedby` names what it is waiting for. A click on it while unavailable does nothing (#796) |
-| key-expiry banner | a `banner-warn` block on the desk whose sentence is `role="status"`; "Extend it" and "Dismiss" are word buttons, Dismiss named for the key it dismisses (#795) |
-| pending-approvals banner | in the shell, over every mail view: a `role="status"` (polite) wrapper that is always rendered and empty while nothing waits; "N actions waiting for your approval" and a word button, "Review", that opens Settings → API keys (#49) |
-| API key token dialog | a labelled modal (`aria-labelledby` → its heading) that traps Tab and starts on the token field; it has NO close button and ignores Escape and clicks outside, because closing it is when the key is gone for good: only "Done, I've saved the key" closes it. Escape is still stopped there, so it cannot peel the settings page behind (#49) |
-| approve request | Approve… opens a labelled modal that traps Tab, starts on Cancel, and states in one sentence exactly what approving does; the request's recipients, subject and names are each their own `<bdi dir="auto">`, never loose text, so right-to-left characters in them cannot reorder the page's own words; the server's answer is a `role="status"` line on the card (#49) |
-| create API key | the Create button is `aria-disabled`, not `disabled`, until the form is complete (and, for send plus delete, until the phrase is typed), described by the sentence saying what it waits for; a click while unavailable sends nothing (#49) |
-| invitation card | a `<section aria-label>` → `region` named "Calendar invitation: <title>" (or "Cancelled event: …", "Reply to an invitation: …"); Accept / Maybe / Decline are a `role="group"` named "Respond to this invitation" of buttons whose `aria-pressed` is the answer the SERVER recorded, after a reload, not the click. The answer is announced by the undo toast, so the card adds no live region (#725) |
+| search box | the input is an ARIA 1.2 `combobox` that owns its `listbox` of suggestions through `aria-controls`/`aria-activedescendant`; focus never leaves the input, nothing is active until an arrow key, Escape collapses the list and keeps the text |
+| search options | an in-page `<form>` named by its `<h2>`, opened by a button with `aria-expanded`/`aria-controls`; not a dialog and not trapped (the results it refines stay usable). Focus goes to its first field on open and back to the button on Escape or Cancel; every control is named by its visible `<label>`; one column at phone width |
+| search sort | `role="group"` named "Sort search results" of two buttons with `aria-pressed` |
+| key dialogs (Settings › Keys) | `role="dialog" aria-modal`, named by their `<h2>` (`aria-labelledby`), focus trapped, Escape closes and returns focus to the button that opened them. They open INSIDE the settings dialog, so each stops Tab and Escape from propagating: the page's own trap and the shell's Escape never see a key the dialog handled |
+| revoke key | the confirm button is `aria-disabled`, NOT `disabled`, until a reason is chosen and the fingerprint's last 8 characters are typed: it stays a tab stop, is announced as unavailable, and its `aria-describedby` names what it is waiting for. A click on it while unavailable does nothing |
+| key-expiry banner | a `banner-warn` block on the desk whose sentence is `role="status"`; "Extend it" and "Dismiss" are word buttons, Dismiss named for the key it dismisses |
+| pending-approvals banner | in the shell, over every mail view: a `role="status"` (polite) wrapper that is always rendered and empty while nothing waits; "N actions waiting for your approval" and a word button, "Review", that opens Settings → API keys |
+| API key token dialog | a labelled modal (`aria-labelledby` → its heading) that traps Tab and starts on the token field; it has NO close button and ignores Escape and clicks outside, because closing it is when the key is gone for good: only "Done, I've saved the key" closes it. Escape is still stopped there, so it cannot peel the settings page behind |
+| approve request | Approve… opens a labelled modal that traps Tab, starts on Cancel, and states in one sentence exactly what approving does; the request's recipients, subject and names are each their own `<bdi dir="auto">`, never loose text, so right-to-left characters in them cannot reorder the page's own words; the server's answer is a `role="status"` line on the card |
+| create API key | the Create button is `aria-disabled`, not `disabled`, until the form is complete (and, for send plus delete, until the phrase is typed), described by the sentence saying what it waits for; a click while unavailable sends nothing |
+| invitation card | a `<section aria-label>` → `region` named "Calendar invitation: <title>" (or "Cancelled event: …", "Reply to an invitation: …"); Accept / Maybe / Decline are a `role="group"` named "Respond to this invitation" of buttons whose `aria-pressed` is the answer the SERVER recorded, after a reload, not the click. The answer is announced by the undo toast, so the card adds no live region |
 
-**The two row layouts share one DOM (#514).** A row is `role="row"` with three
+**The two row layouts share one DOM.** A row is `role="row"` with three
 `gridcell`s — sender, subject, marks and time — whichever of `One line` and
 `Multi-line` is chosen, and its accessible name is the same sentence from
 `ui/desk/rowName.ts` either way. Only CSS grid placement differs: on one line the
@@ -233,7 +233,7 @@ Two instruments, because one of them cannot see most of this file:
 **axe-core** (exact-pinned devDependency; nothing in `src/` imports it) runs over
 fifteen surfaces — the day-one setup wizard (`#/setup`), desk / Review first, desk
 / Everything else with a drawer open, the in-tray page, All mail, Settings,
-Settings with a section open, the composer, **the composer reached by reloading its URL** (#612: the warm path stayed green while a reload hung), the reading pane, the sender popover
+Settings with a section open, the composer, **the composer reached by reloading its URL** (the warm path once stayed green while a reload hung), the reading pane, the sender popover
 pinned, the attachment viewer, focused reading, **the desk in the multi-line row
 layout**, and **the desk at the largest text size** — in **three themes** (light,
 dark, and "system" with the OS asking for dark, which is a different code path).
@@ -321,4 +321,4 @@ instruments can see:
 | the toast container | `div.toasts[role=status]`, an undo toast's button `.toast-undo .toast-undo-action`, its countdown `.toast-countdown[role=timer]` |
 | the sender popover | `#sender-popover-<messageId>` |
 | a settings row's body | `#setting-body-<rowId>` |
-| the search box | `input.search-input`, its listbox `#search-suggestions`, options `#search-suggestions-<n>`; the options form `#search-options`, its fields `#search-options-<field>` (#724) |
+| the search box | `input.search-input`, its listbox `#search-suggestions`, options `#search-suggestions-<n>`; the options form `#search-options`, its fields `#search-options-<field>` |

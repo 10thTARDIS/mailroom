@@ -1,6 +1,6 @@
 # ADR-036: Mailroom verifies DKIM itself, at ingest, for mail with no trusted authentication
 
-**Status:** Accepted (Forgejo #776; extends ADR-035's trust model, which it
+**Status:** Accepted (extends ADR-035's trust model, which it
 leaves untouched)
 
 ## Context
@@ -81,7 +81,7 @@ punycode). The Public Suffix List (ICANN and private sections) replaces the
 report's last-two-labels approximation: `d=co.uk` or `d=com` cannot speak for
 everything beneath them, and `d=blogspot.com` cannot speak for one tenant's
 mail. Tests cover exact, subdomain, a TLD, `co.uk`, a private-section suffix,
-IDN in both directions, and an unrelated domain. Since #846 the suffix test
+IDN in both directions, and an unrelated domain. The suffix test
 reads the list through `ml.OrgDomain`, the one Public Suffix List helper,
 which DMARC relaxed alignment for learned placement (ADR-032 amendment) also
 uses. The alignment rule here is unchanged.
@@ -125,7 +125,7 @@ An unguarded check would label either forgery "Verified by Mailroom" and, worse,
 use it to silence `selfSpoof`. The guard is **"every displayed identity header
 is signed"**, not "no duplicates". A pass is displayable only if, for the
 passing signature, with *m* = instances in the message (the raw field count,
-`mime.Header.FieldCount`, as #754) and *n* = times `h=` lists the name:
+`mime.Header.FieldCount`, as for the one-From rule) and *n* = times `h=` lists the name:
 
 - `From`: *m* = 1 and *n* >= 1;
 - each of Sender, Reply-To, To, Cc, Subject, Date, Message-ID: *m* = 0, or
@@ -181,5 +181,5 @@ are declined by the verifier.
 
 ## References
 
-Forgejo #776; ADR-035; RFC 6376 §8.15; `internal/dkimverify`;
+ADR-035; RFC 6376 §8.15; `internal/dkimverify`;
 `internal/ingest/localdkim.go`.
