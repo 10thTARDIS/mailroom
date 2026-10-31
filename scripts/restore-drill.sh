@@ -394,11 +394,14 @@ if [ "$SELF_TEST" -eq 1 ]; then
   echo "###############################################################################"
   echo "# SELF-TEST: restore an OLDER snapshot then migrate forward — the drill MUST pass"
   echo "###############################################################################"
+  # The child reports "no older revision" through a marker file, not an exit
+  # status: its cleanup trap runs under errexit and rewrites the status.
+  skipfile="$(mktemp)"
   rc=0
-  sh "$0" --migrate-forward || rc=$?
+  DRILL_SKIP_FILE="$skipfile" sh "$0" --migrate-forward || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "--- self-test OK: an older backup restores and migrates forward to HEAD"
-  elif [ "$rc" -eq 3 ]; then
+  elif [ "$rc" -ne 0 ] && [ -s "$skipfile" ]; then
     echo "::warning::migrate-forward phase SKIPPED: the head migration is in the root commit, so there is no older revision to restore from"
     echo "--- self-test SKIPPED (not passed): migrate-forward has no older revision in this history"
   else
@@ -406,6 +409,7 @@ if [ "$SELF_TEST" -eq 1 ]; then
     fails=$((fails + 1))
     drill_network_report
   fi
+  rm -f "$skipfile"
   echo
   [ "$fails" -eq 0 ] || { echo "SELF-TEST FAILED ($fails)"; exit 1; }
   echo "SELF-TEST PASSED: the drill fails when it must, and passes when it must."
@@ -618,12 +622,14 @@ if [ "$MIGRATE_FWD" -eq 1 ]; then
     # A full-history clone whose ROOT commit already contains the head migration
     # (the public repository starts from a single squashed commit) has no older
     # revision to build the fixture from. That is a property of the history, not
-    # a defect: say so loudly and exit 3, which --self-test reports as SKIPPED.
+    # a defect: say so loudly and record it in $DRILL_SKIP_FILE, which --self-test
+    # reports as SKIPPED.
     # A shallow clone is told apart so it still fails.
     if [ "$(git_at rev-parse --is-shallow-repository 2>/dev/null || echo true)" = "false" ]; then
       echo "restore-drill: $HEAD_MIG was added by the root commit $ADD_COMMIT; there is no older" >&2
       echo "  revision to build the migrate-forward fixture from. SKIPPING this phase until a" >&2
       echo "  migration lands after the root commit." >&2
+      [ -z "${DRILL_SKIP_FILE:-}" ] || echo skipped > "$DRILL_SKIP_FILE"
       exit 3
     fi
     echo "restore-drill: $HEAD_MIG was added by $ADD_COMMIT, which has no parent in this" >&2
