@@ -774,6 +774,12 @@ async function axeContrastAAA(page, surface, theme) {
           document,
           Object.assign({}, shared, {
             runOnly: { type: "rule", values: ["color-contrast-enhanced"] },
+            // The node axe actually measured, not a re-query of its selector
+            // afterwards. A surface that is still rendering (the sender popover
+            // adds sections as its data arrives) can replace the element between
+            // the run and the lookup; the selector then resolves to nothing and
+            // an allowlisted element was reported as an unlisted failure.
+            elementRef: true,
           }),
         )
         .then((r) => {
@@ -784,11 +790,13 @@ async function axeContrastAAA(page, surface, theme) {
             for (const n of v.nodes) {
               const sel = String(n.target[0]);
               const data = (n.any && n.any[0] && n.any[0].data) || {};
-              let el = null;
-              try {
-                el = document.querySelector(sel);
-              } catch (e) {
-                el = null;
+              let el = n.element || null;
+              if (!el) {
+                try {
+                  el = document.querySelector(sel);
+                } catch (e) {
+                  el = null;
+                }
               }
               let hit = null;
               if (el) {
