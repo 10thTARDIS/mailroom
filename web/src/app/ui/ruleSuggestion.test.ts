@@ -14,6 +14,7 @@ import type { AreaRuleSuggestion, Area, Email, Id, Label } from "../../core/jmap
 import { MailStore } from "../../core/store";
 import type { Toast } from "../state";
 import { movableSenderAddress, offerRuleSuggestion } from "./ruleSuggestion";
+import { UNDO_TTL_MS } from "../../core/undo";
 
 function label(id: string): Label {
   return { id, name: id, color: null, parentId: null, mirrorToImap: false, keyword: null, tab: null };
@@ -90,6 +91,8 @@ describe("the offer after a manual move", () => {
     expect(t.message).toBe("Always put mail from news@example.com in News?");
     expect(t.action?.label).toBe("Make a rule");
     expect(t.secondary?.label).toBe("Not now");
+    // It goes when the move's own Undo does, instead of waiting forever.
+    expect(t.ttlMs).toBe(UNDO_TTL_MS);
     // It is a second toast: the move's own Undo was never touched.
     expect(h.undos).toEqual([]);
   });

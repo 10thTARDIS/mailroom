@@ -13,7 +13,7 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 - **Mailroom now offers to make a rule when you keep moving the same sender's mail by hand.** After you file mail from one sender into an area for the third time in 30 days (by dragging it to the sidebar, using Move to area, the Labels menu or Re-file), a message appears under the move: "Always put mail from alice@example.com in Updates?" with "Make a rule" and "Not now". The Undo for the move stays where it was.
 - **It only asks when it will not already be handled.** If learned placement is going to file that sender's next message there itself, or a rule you have already turned on does, you are not asked. You are asked when learned placement is switched off or paused for that area, when your moves for that sender are not consistent, or when the sender's latest message could not be confirmed as genuine.
-- **"Not now" is remembered for 30 days** for that sender and area. It does not stop the offer for other senders or other areas.
+- **"Not now" is remembered for 30 days** for that sender and area. It does not stop the offer for other senders or other areas. If you ignore the offer, it goes away when the move's Undo does, and you may be asked again next time.
 - **"Make a rule" makes an ordinary rule you can see and edit** under Rules, named "Mail from alice@example.com → Updates". It applies to future mail only. If older mail from that sender is somewhere else, Mailroom then asks "Also move the 12 earlier messages?" and moves nothing until you tap "Move them" (with its own Undo).
 
 ### Upgrading

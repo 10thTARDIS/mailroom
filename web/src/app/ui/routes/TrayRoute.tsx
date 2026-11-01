@@ -451,7 +451,7 @@ export function TrayRoute(): JSX.Element {
       void actions
         .relabel(changes, filedText(list.length, area.name))
         .then(() =>
-          offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
+          void offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
         );
       const inverse = invertChanges(changes);
       offerUndo(filedText(list.length, area.name), async () => {

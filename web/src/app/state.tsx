@@ -45,6 +45,12 @@ export interface Toast {
    * wherever `action` is, as a real button, and dismisses the toast the same way. */
   secondary?: { label: string; run: () => void };
   /**
+   * Remove an info toast after this long even though it carries an action.
+   * An offer (the rule suggestion) should go when the moment has passed, like
+   * the move confirmation beside it, rather than wait for an answer forever.
+   */
+  ttlMs?: number;
+  /**
    * The undo offer this toast carries (#375 increment 6): which entry in the
    * log it is about, and when that offer runs out.
    *
@@ -111,6 +117,8 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     // eight-second offer would take the button away while the offer stood.
     if (t.kind === "info" && !t.action && !t.undo) {
       setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4000);
+    } else if (t.kind === "info" && t.ttlMs && t.ttlMs > 0) {
+      setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), t.ttlMs);
     }
     return id;
   }, []);

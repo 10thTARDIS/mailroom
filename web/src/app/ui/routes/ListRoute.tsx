@@ -410,7 +410,7 @@ export function ListRoute(): JSX.Element {
       void moveToArea(deps, list, areaId, total).then((r) => {
         if (r) {
           clearSelection();
-          offerRuleSuggestion(deps, list, areaId, r.moved);
+          void offerRuleSuggestion(deps, list, areaId, r.moved);
         }
       });
     },
@@ -1096,7 +1096,7 @@ export function ListRoute(): JSX.Element {
           onPick={(areaId) => {
             const deps = { store, sync, actions, offerUndo, pushToast };
             void moveToArea(deps, [open.id], areaId, 1).then((r) => {
-              if (r) offerRuleSuggestion(deps, [open.id], areaId, r.moved);
+              if (r) void offerRuleSuggestion(deps, [open.id], areaId, r.moved);
             });
           }}
           onClose={() => setRefilePickerOpen(false)}

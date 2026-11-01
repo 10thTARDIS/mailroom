@@ -672,7 +672,7 @@ export function DeskRoute(): JSX.Element {
       void actions
         .relabel(changes, filedText(list.length, area.name))
         .then(() =>
-          offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
+          void offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
         );
       // The undo is the exact inverse of what changed for each message, so it
       // restores the prior label set rather than guessing at one: what was

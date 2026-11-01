@@ -31,6 +31,7 @@ import { moveToArea } from "./moveToArea";
 import type { SyncEngine } from "../../core/sync";
 import { t } from "../i18n";
 import { looksLikeAddress } from "./compose/chips";
+import { UNDO_TTL_MS } from "../../core/undo";
 
 /**
  * An address the `from:` operator can carry unquoted. A From with no local part
@@ -71,29 +72,37 @@ export function commonMovableSender(state: Parameters<typeof effectiveEmail>[0],
  * It leaves the move's own Undo toast alone: the offer is a second, separate
  * toast, and both may be on screen.
  */
-export function offerRuleSuggestion(deps: RuleSuggestionDeps, ids: Id[], areaId: Id, moved: number): void {
-  if (moved <= 0 || ids.length === 0) return;
+/** How long an offer stays up unanswered: as long as the move's own Undo. */
+export const RULE_OFFER_TTL_MS = UNDO_TTL_MS;
+
+/**
+ * Resolves true when the offer was shown, so a caller with an older prompt of
+ * its own (LabelMenu's rule induction) can stand down instead of showing both.
+ */
+export async function offerRuleSuggestion(deps: RuleSuggestionDeps, ids: Id[], areaId: Id, moved: number): Promise<boolean> {
+  if (moved <= 0 || ids.length === 0) return false;
   const address = commonMovableSender(deps.store.getState(), ids);
-  if (address === null) return;
-  void (async () => {
-    try {
-      const answer = await deps.actions.ruleSuggestion(areaId, address);
-      if (!answer || !answer.suggest) return;
-      const area = deps.store.getState().areas[areaId];
-      if (!area) return;
-      deps.pushToast({
-        kind: "info",
-        message: t("ruleSuggestion.offer", { address, area: area.name }),
-        action: { label: t("ruleSuggestion.make"), run: () => void makeRule(deps, areaId, address, answer) },
-        secondary: {
-          label: t("ruleSuggestion.notNow"),
-          run: () => void deps.actions.dismissRuleSuggestion(areaId, address),
-        },
-      });
-    } catch {
-      // Silence, by design (see the file comment).
-    }
-  })();
+  if (address === null) return false;
+  try {
+    const answer = await deps.actions.ruleSuggestion(areaId, address);
+    if (!answer || !answer.suggest) return false;
+    const area = deps.store.getState().areas[areaId];
+    if (!area) return false;
+    deps.pushToast({
+      ttlMs: RULE_OFFER_TTL_MS,
+      kind: "info",
+      message: t("ruleSuggestion.offer", { address, area: area.name }),
+      action: { label: t("ruleSuggestion.make"), run: () => void makeRule(deps, areaId, address, answer) },
+      secondary: {
+        label: t("ruleSuggestion.notNow"),
+        run: () => void deps.actions.dismissRuleSuggestion(areaId, address),
+      },
+    });
+    return true;
+  } catch {
+    // No suggestion is the safe failure: this is an offer, never an error.
+    return false;
+  }
 }
 
 /** "Make a rule": exactly the rule the rule editor produces for "move to area" --
@@ -114,6 +123,7 @@ async function makeRule(deps: RuleSuggestionDeps, areaId: Id, address: string, a
   if (answer.earlier > 0) {
     deps.pushToast({
       kind: "info",
+      ttlMs: RULE_OFFER_TTL_MS,
       message: t("ruleSuggestion.madeEarlier", { earlier: String(answer.earlier), address, area: area.name }),
       action: { label: t("ruleSuggestion.moveThem"), run: () => void moveEarlier(deps, areaId, address) },
     });

@@ -99,8 +99,10 @@ export function LabelMenu({
         const deps = { store, sync, actions, offerUndo, pushToast };
         const outcome = await moveToArea(deps, ids, owner.id);
         if (outcome) {
-          offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
-          onSuggestRule?.(label.id);
+          // The targeted offer wins; the older induction prompt only runs when
+          // it stays silent, so the user never gets two rule prompts at once.
+          const offered = await offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
+          if (!offered) onSuggestRule?.(label.id);
         }
       })();
       return;

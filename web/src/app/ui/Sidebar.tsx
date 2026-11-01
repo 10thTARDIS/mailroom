@@ -273,7 +273,7 @@ export function Sidebar({
       // through the one path Re-file and Move to area use, with one Undo.
       const deps = { store, sync, actions, offerUndo, pushToast };
       const outcome = await moveToArea(deps, ids, target.areaId);
-      if (outcome) offerRuleSuggestion(deps, ids, target.areaId, outcome.moved);
+      if (outcome) void offerRuleSuggestion(deps, ids, target.areaId, outcome.moved);
       return;
     }
     if (target.kind === "label") {
@@ -283,7 +283,7 @@ export function Sidebar({
       if (owner) {
         const deps = { store, sync, actions, offerUndo, pushToast };
         const outcome = await moveToArea(deps, ids, owner.id);
-        if (outcome) offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
+        if (outcome) void offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
         return;
       }
       // Whichever path the label needs — its atom, or its id when it is
