@@ -42,6 +42,7 @@ import { KEYWORD_FLAGGED } from "../../../core/jmap/types";
 import type { Area, Id } from "../../../core/jmap/types";
 import { PAGE_SIZE } from "../../../core/sync";
 import { invertChanges, refileChanges } from "../../../core/refile";
+import { offerRuleSuggestion } from "../ruleSuggestion";
 import { withCompose } from "../../../core/routes";
 import type { Route } from "../../../core/routes";
 import { navigate, useListRoute } from "../../routing";
@@ -115,7 +116,7 @@ function clampLine(v: number): number {
 }
 
 export function DeskRoute(): JSX.Element {
-  const { actions, sync, pushToast, offerUndo, client } = useApp();
+  const { actions, sync, store, pushToast, offerUndo, client } = useApp();
   const state = useMailState();
   const shell = useShell();
   // FOLLOW UP (#58): the nudges due now, under the tray strip.
@@ -668,7 +669,11 @@ export function DeskRoute(): JSX.Element {
       // re-filed to a LATER area stays in the earlier one, because the
       // resolver picks the label-fed area by position.
       const changes = refileChanges(state, list, areaId);
-      void actions.relabel(changes, filedText(list.length, area.name));
+      void actions
+        .relabel(changes, filedText(list.length, area.name))
+        .then(() =>
+          void offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
+        );
       // The undo is the exact inverse of what changed for each message, so it
       // restores the prior label set rather than guessing at one: what was
       // removed goes back, the target comes off only where this added it.
@@ -684,7 +689,7 @@ export function DeskRoute(): JSX.Element {
         clearSelection();
       }
     },
-    [actions, state, targets, pushToast, clearSelection, offerUndo],
+    [actions, sync, store, state, targets, pushToast, clearSelection, offerUndo],
   );
 
   /** Ask again, now, rather than waiting out the poll interval — and re-load

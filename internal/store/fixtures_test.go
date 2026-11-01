@@ -46,7 +46,7 @@ var appTables = []string{
 	"setup_runs", "setup_journal",
 	"learned_placements", "learned_placement_gate_resets",
 	"calendar_invites", "calendar_responses",
-	"nudge_dismissals",
+	"nudge_dismissals", "rule_suggestion_dismissals",
 	"out_of_office",
 	"message_local_auth",
 	"pgp_decrypt_audit",
@@ -383,6 +383,11 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// one user which of another's conversations they have closed.
 	exec(`INSERT INTO app.nudge_dismissals (user_id, message_id, kind) VALUES ($1, $2, 'outbound')`,
 		u.ID, u.MessageID)
+
+	// One rule-suggestion dismissal (migration 00085): a leak would tell one
+	// user which senders another has declined to automate, and into which area.
+	exec(`INSERT INTO app.rule_suggestion_dismissals (user_id, area_id, address) VALUES ($1, $2, $3)`,
+		u.ID, areaID, tag+"-sender@example.net")
 
 	// One out-of-office reply (#50, migration 00065), so the RLS inventory
 	// probes it. A leak of it is a leak of the user's own words and, usually,

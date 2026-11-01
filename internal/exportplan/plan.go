@@ -244,6 +244,13 @@ var plan = map[string]Entry{
 		"\"Done\" on a follow-up nudge, which expires by itself 30 days after its message; " +
 			"the follow-up settings travel in desk_preferences.json"},
 
+	// Rule-suggestion dismissals (migration 00085). DROPPED: a "Not now" on an
+	// offer that lapses by itself after 30 days and names an area id of this
+	// instance; on import it would hide an offer the user can simply decline again.
+	"rule_suggestion_dismissals": {Dropped, "",
+		"\"Not now\" on a rule offer, which lapses by itself after 30 days and is keyed by " +
+			"this instance's area ids"},
+
 	// Local DKIM verdicts (#776, migration 00066). DROPPED: a verdict about
 	// signatures checked at THIS instance's ingest, against DNS keys of that
 	// moment; the exported bytes still carry the signatures themselves.

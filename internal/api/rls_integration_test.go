@@ -2107,6 +2107,58 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 		}
 	},
 
+	// Area/ruleSuggestion and Area/dismissRuleSuggestion: A naming B's area is
+	// answered exactly as an area that does not exist (noArea / invalidArguments),
+	// echoes no id of B's but the one A sent, and writes nothing against B's area.
+	"Area/ruleSuggestion": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		res, mErr := invokeAs(t, h, "Area/ruleSuggestion", a.UserID, map[string]any{
+			"areaId": b.AreaID.String(), "address": "friend@example.com"})
+		if mErr != nil {
+			t.Fatalf("Area/ruleSuggestion: %+v", mErr)
+		}
+		assertNoBLeakExcept(t, "Area/ruleSuggestion", res, b, b.AreaID.String())
+		if res["suggest"] != false || res["reason"] != store.RuleReasonNoArea {
+			t.Errorf("Area/ruleSuggestion naming B's area = %v, want suggest=false reason=%s", res, store.RuleReasonNoArea)
+		}
+		// Control: the same call on A's own area is a real answer, so the line
+		// above is not just "the method always says noArea".
+		res, mErr = invokeAs(t, h, "Area/ruleSuggestion", a.UserID, map[string]any{
+			"areaId": a.AreaID.String(), "address": "friend@example.com"})
+		if mErr != nil || res["reason"] == store.RuleReasonNoArea {
+			t.Errorf("Area/ruleSuggestion on A's own area = %v, %+v, want a real answer", res, mErr)
+		}
+		if _, mErr := invokeAs(t, h, "Area/ruleSuggestion", a.UserID, map[string]any{
+			"accountId": b.UserID.String(), "areaId": a.AreaID.String(), "address": "friend@example.com"}); mErr == nil || mErr.Type != errAccountNotFound {
+			t.Fatalf("Area/ruleSuggestion naming B's account: got %+v, want accountNotFound", mErr)
+		}
+	},
+	"Area/dismissRuleSuggestion": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		count := func(area ulid.ULID) int {
+			var n int
+			superScan(t, h, &n, `SELECT count(*) FROM app.rule_suggestion_dismissals WHERE area_id = $1`, area.String())
+			return n
+		}
+		before := count(b.AreaID)
+		_, mErr := invokeAs(t, h, "Area/dismissRuleSuggestion", a.UserID, map[string]any{
+			"areaId": b.AreaID.String(), "address": "friend@example.com"})
+		if mErr == nil || mErr.Type != errInvalidArguments {
+			t.Fatalf("dismissing against B's area: got %+v, want invalidArguments", mErr)
+		}
+		if got := count(b.AreaID); got != before {
+			t.Fatalf("A's dismissal changed B's area's dismissals from %d to %d", before, got)
+		}
+		// Control: A's own area takes the dismissal, so the refusal above is
+		// about B's area and not about the method never writing.
+		ownBefore := count(a.AreaID)
+		if _, mErr := invokeAs(t, h, "Area/dismissRuleSuggestion", a.UserID, map[string]any{
+			"areaId": a.AreaID.String(), "address": "friend@example.com"}); mErr != nil {
+			t.Fatalf("dismissing against A's own area: %+v", mErr)
+		}
+		if got := count(a.AreaID); got != ownBefore+1 {
+			t.Errorf("A's own dismissal wrote %d rows, want 1", got)
+		}
+	},
+
 	"OutOfOffice/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		probeGetFindsNothing("OutOfOffice/get", "ids", func(b rlsUser) string { return b.AccountID.String() })(t, h, a, b)
 		// With no ids: every account of A's and nothing of B's.

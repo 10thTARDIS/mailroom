@@ -70,6 +70,7 @@ import type {
   RuleApplyResult,
   RuleCondition,
   RuleInduceResult,
+  AreaRuleSuggestion,
   RulePreview,
   RuleTightenResult,
   SearchSnippet,
@@ -740,6 +741,18 @@ export class JmapClient {
   }
   areaGet(args: GetArgs): Promise<GetResult<Area>> {
     return this.call("Area/get", args as unknown as Record<string, unknown>);
+  }
+  /** urn:mailroom:desk: should a rule be offered for this sender -> area? Read-only. */
+  areaRuleSuggestion(args: {
+    accountId: string;
+    areaId: string;
+    address: string;
+  }): Promise<AreaRuleSuggestion> {
+    return this.call("Area/ruleSuggestion", args as unknown as Record<string, unknown>) as Promise<AreaRuleSuggestion>;
+  }
+  /** urn:mailroom:desk: "Not now" for a rule offer; remembered for 30 days. */
+  areaDismissRuleSuggestion(args: { accountId: string; areaId: string; address: string }): Promise<unknown> {
+    return this.call("Area/dismissRuleSuggestion", args as unknown as Record<string, unknown>);
   }
 
   // -- day-one setup (urn:mailroom:desk, #446) --------------------------------

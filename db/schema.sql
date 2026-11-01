@@ -3370,6 +3370,24 @@ CREATE POLICY nudge_dismissals_isolation ON app.nudge_dismissals
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
+-- RULE-SUGGESTION DISMISSALS (migration 00085): the user's "Not now" on the
+-- "Always put mail from this sender in <area>?" offer (Area/ruleSuggestion).
+-- One row per (user, area, sender); a row older than 30 days no longer
+-- suppresses the offer. Not a JMAP-visible object: no change_log row.
+CREATE TABLE app.rule_suggestion_dismissals (
+  user_id      app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  area_id      app.ulid NOT NULL REFERENCES app.areas(id) ON DELETE CASCADE,
+  address      citext NOT NULL,
+  dismissed_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, area_id, address)
+);
+ALTER TABLE app.rule_suggestion_dismissals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.rule_suggestion_dismissals FORCE ROW LEVEL SECURITY;
+CREATE POLICY rule_suggestion_dismissals_isolation ON app.rule_suggestion_dismissals
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
 -- OUT OF OFFICE (#50, migration 00065): the vacation responder Mailroom writes
 -- to the provider as a ManageSieve script (internal/outofoffice). One row per
 -- mail account; JMAP-visible as 'OutOfOffice' with the account id as its id.
@@ -3686,6 +3704,10 @@ GRANT SELECT, INSERT, DELETE ON app.superseded_content TO mailroom_app;
 -- Follow-up nudge dismissals (#58): a "Done" is written once and goes only
 -- with its message — no UPDATE, like the category dismissals above.
 GRANT SELECT, INSERT, DELETE ON app.nudge_dismissals TO mailroom_app;
+
+-- Rule-suggestion dismissals (migration 00085): a re-dismissal refreshes the
+-- time, so an upsert needs UPDATE.
+GRANT SELECT, INSERT, UPDATE ON app.rule_suggestion_dismissals TO mailroom_app;
 
 -- Local DKIM verdicts (#776): written once with the message, gone with it; no UPDATE.
 GRANT SELECT, INSERT, DELETE ON app.message_local_auth TO mailroom_app;

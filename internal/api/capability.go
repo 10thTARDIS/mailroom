@@ -245,6 +245,9 @@ var methodCapabilities = map[string]string{
 	// #665: the whole desk — getSummary's counts plus every section's page —
 	// from one resolution of every message's area.
 	"Area/getDesk": capDesk,
+	// "Always put mail from X in <area>?" after a manual move, and its "Not now".
+	"Area/ruleSuggestion":        capDesk,
+	"Area/dismissRuleSuggestion": capDesk,
 
 	"DeskPreferences/get":     capDesk,
 	"OutOfOffice/get":         capOutOfOffice,

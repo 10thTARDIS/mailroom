@@ -2632,6 +2632,17 @@ const en = {
   "popover.stopShowingImages": "Stop always showing images",
   "popover.changeArea": "Change area",
 
+  // "Always put mail from {address} in {area}?" after repeated manual moves.
+  "ruleSuggestion.offer": "Always put mail from {address} in {area}?",
+  "ruleSuggestion.make": "Make a rule",
+  "ruleSuggestion.notNow": "Not now",
+  "ruleSuggestion.ruleName": "Mail from {address} → {area}",
+  "ruleSuggestion.made": "Rule made.",
+  "ruleSuggestion.madeEarlier":
+    "Rule made. Also move the {earlier} earlier messages from {address} to {area}?",
+  "ruleSuggestion.moveThem": "Move them",
+  "ruleSuggestion.earlierFailed": "Could not find the earlier messages from {address}.",
+
   // Moving many messages into an area at once (#708): from the list's selection
   // toolbar, and "everything from this sender" on the sender card. Every count
   // is said per case, and a capped selection says so rather than reading as done.
