@@ -46,6 +46,7 @@ import type {
   RuleApplyResult,
   RuleCondition,
   RuleInduceResult,
+  AreaRuleSuggestion,
   RulePreview,
   RuleTightenResult,
   SetError,
@@ -2479,6 +2480,37 @@ export class MailActions {
       return await this.client.ruleInduce({ accountId, labelId });
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Should "Always put mail from {address} in {area}?" be offered (Area/ruleSuggestion)?
+   *
+   * Asked after a manual move, so the server must have SEEN that move: it counts
+   * the persisted filings, and the verbs only queue. Hence `settle()` first; if the
+   * queue did not empty (offline, a retry pending) the answer would be about an
+   * older state, so there is none.
+   *
+   * Returns null on any failure, never a fabricated "no": this is asked
+   * speculatively, so a failure is deliberately NOT surfaced as an error toast.
+   */
+  async ruleSuggestion(areaId: Id, address: string): Promise<AreaRuleSuggestion | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      if (!(await this.settle())) return null;
+      return await this.client.areaRuleSuggestion({ accountId, areaId, address });
+    } catch {
+      return null;
+    }
+  }
+
+  /** "Not now" on the offer above; best effort and silent. */
+  async dismissRuleSuggestion(areaId: Id, address: string): Promise<void> {
+    const accountId = this.store.getState().accountId;
+    try {
+      await this.client.areaDismissRuleSuggestion({ accountId, areaId, address });
+    } catch {
+      // The offer simply comes back after the next qualifying move.
     }
   }
 

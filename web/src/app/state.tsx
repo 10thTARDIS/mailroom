@@ -41,6 +41,9 @@ export interface Toast {
   kind: "info" | "error";
   message: string;
   action?: { label: string; run: () => void };
+  /** An optional second button beside `action` (for example "Not now"). Rendered
+   * wherever `action` is, as a real button, and dismisses the toast the same way. */
+  secondary?: { label: string; run: () => void };
   /**
    * The undo offer this toast carries (#375 increment 6): which entry in the
    * log it is about, and when that offer runs out.

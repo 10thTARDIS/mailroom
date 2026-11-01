@@ -49,6 +49,7 @@ import type { JSX } from "react";
 
 import { areaCounts, railCounts, sectionKey } from "../../core/desk";
 import { moveToArea } from "./moveToArea";
+import { offerRuleSuggestion } from "./ruleSuggestion";
 import { canDrop, decodeDrag, DRAG_MIME, inboxDropPlan } from "../../core/dragDrop";
 import { isInJunk } from "../../core/junk";
 import type { DropContext, DropTarget } from "../../core/dragDrop";
@@ -270,7 +271,9 @@ export function Sidebar({
     if (target.kind === "area") {
       // A MOVE (#728): the other areas' labels come off and the target's goes on,
       // through the one path Re-file and Move to area use, with one Undo.
-      await moveToArea({ store, sync, actions, offerUndo, pushToast }, ids, target.areaId);
+      const deps = { store, sync, actions, offerUndo, pushToast };
+      const outcome = await moveToArea(deps, ids, target.areaId);
+      if (outcome) offerRuleSuggestion(deps, ids, target.areaId, outcome.moved);
       return;
     }
     if (target.kind === "label") {
@@ -278,7 +281,9 @@ export function Sidebar({
       // message would not move (#728). Route it through the area move.
       const owner = areas.find((a) => a.labelId === target.labelId);
       if (owner) {
-        await moveToArea({ store, sync, actions, offerUndo, pushToast }, ids, owner.id);
+        const deps = { store, sync, actions, offerUndo, pushToast };
+        const outcome = await moveToArea(deps, ids, owner.id);
+        if (outcome) offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
         return;
       }
       // Whichever path the label needs — its atom, or its id when it is

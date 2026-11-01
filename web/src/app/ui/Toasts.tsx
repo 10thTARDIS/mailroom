@@ -143,6 +143,18 @@ export function Toasts(): JSX.Element {
                 {toast.action.label}
               </button>
             ) : null}
+            {toast.secondary ? (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => {
+                  toast.secondary?.run();
+                  dismissToast(toast.id);
+                }}
+              >
+                {toast.secondary.label}
+              </button>
+            ) : null}
             <button
               type="button"
               className="icon-button"

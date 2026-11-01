@@ -26,6 +26,7 @@ import type { Id, Label } from "../../core/jmap/types";
 import { useApp, useMailState } from "../state";
 import { t } from "../i18n";
 import { moveToArea } from "./moveToArea";
+import { offerRuleSuggestion } from "./ruleSuggestion";
 
 export function LabelMenu({
   ids,
@@ -95,8 +96,12 @@ export function LabelMenu({
     const owner = adding ? Object.values(state.areas).find((a) => a.labelId === label.id) : undefined;
     if (owner) {
       void (async () => {
-        const outcome = await moveToArea({ store, sync, actions, offerUndo, pushToast }, ids, owner.id);
-        if (outcome) onSuggestRule?.(label.id);
+        const deps = { store, sync, actions, offerUndo, pushToast };
+        const outcome = await moveToArea(deps, ids, owner.id);
+        if (outcome) {
+          offerRuleSuggestion(deps, ids, owner.id, outcome.moved);
+          onSuggestRule?.(label.id);
+        }
       })();
       return;
     }
