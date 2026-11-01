@@ -79,6 +79,20 @@ type LearnedTrace struct {
 	done bool
 }
 
+// learnedEnabled is the user's learned-placement switch, read server-side. No
+// desk_preferences row yet means the column default, which is ON (#714).
+// Shared by the arrival decision and by Area/ruleSuggestion, so the two cannot
+// disagree about whether learned placement is on.
+func (tx *UserTx) learnedEnabled(ctx context.Context) (bool, error) {
+	var on bool
+	if err := tx.tx.QueryRow(ctx, `
+		SELECT COALESCE((SELECT learned_placement_enabled FROM app.desk_preferences WHERE user_id = $1), true)`,
+		tx.userID.String()).Scan(&on); err != nil {
+		return false, fmt.Errorf("store: learned placement (switch): %w", err)
+	}
+	return on, nil
+}
+
 // learnedArrival runs steps 1 to 4b. It writes nothing.
 func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender placement.Sender, opt arrivalOpts) (LearnedTrace, error) {
 	var tr LearnedTrace
@@ -95,10 +109,9 @@ func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender pl
 
 	// 1. THE OFF SWITCH, server-side. No desk_preferences row yet means the
 	// column default, which is ON (#714: a design decision).
-	if err := tx.tx.QueryRow(ctx, `
-		SELECT COALESCE((SELECT learned_placement_enabled FROM app.desk_preferences WHERE user_id = $1), true)`,
-		tx.userID.String()).Scan(&tr.Enabled); err != nil {
-		return LearnedTrace{}, fmt.Errorf("store: learned placement (switch): %w", err)
+	var err error
+	if tr.Enabled, err = tx.learnedEnabled(ctx); err != nil {
+		return LearnedTrace{}, err
 	}
 	if !tr.Enabled && stop("learned placement is switched off", LearnedPlacementResult{Reason: LearnedOff}) {
 		return tr, nil

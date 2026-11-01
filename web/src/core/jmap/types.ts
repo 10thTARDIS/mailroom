@@ -2746,6 +2746,21 @@ export interface InducedRule {
 }
 
 /**
+ * `Area/ruleSuggestion` (urn:mailroom:desk): whether to offer "Always put mail
+ * from {address} in {area}?" after the user filed mail from one sender into an
+ * area by hand. The SERVER decides; `reason` says why either way, and
+ * `earlier` is how many live messages from the sender are not in the area.
+ */
+export interface AreaRuleSuggestion {
+  suggest: boolean;
+  reason: string;
+  address: string;
+  areaId: Id;
+  filings: number;
+  earlier: number;
+}
+
+/**
  * What Rule/induce reports (#168).
  *
  * `examples < required` is the normal answer for a new label, and the UI must

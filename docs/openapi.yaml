@@ -1442,6 +1442,29 @@ components:
         drawer-report` previews the sweep, shows whether it is armed, and
         `--enable`/`--disable` flips the switch.
 
+        **Area/ruleSuggestion** — "Always put mail from this sender in this
+        area?", asked by a client after the user files mail from one sender
+        into an area by hand: `{accountId, areaId, address}` → `{accountId,
+        suggest, reason, address, areaId, filings, earlier}`. Read-only. The
+        server answers `suggest: true` only when the user's own filings of
+        that sender into the area number at least 3 in the last 30 days (the
+        move just made included), learned placement would NOT file the
+        sender's next message there (its decision does not act, acts into
+        another area, is switched off, is gated, or the sender's latest
+        message fails the sender checks), no enabled rule already files that
+        sender into the area, and the user has not answered "Not now" in the
+        last 30 days. `reason` names what decided it (`mixed`, `thin`,
+        `contradicted`, `off`, `gated`, `elsewhere`, `unauthenticated`, ... when
+        suggesting; `fewFilings`, `learned`, `covered`, `dismissed`,
+        `unverified`, `noArea`, `noAddress` when not). `filings` is the
+        recent count; `earlier` is how many live messages from the sender are
+        not in the area. Closed to API keys.
+
+        **Area/dismissRuleSuggestion** — "Not now": `{accountId, areaId,
+        address}` → `{accountId}`. Remembers the answer for 30 days
+        (re-dismissing refreshes it). An unknown area is `invalidArguments`.
+        Closed to API keys.
+
         **DeskPreferences** — the desk-wide settings SINGLETON:
         `{id, lineThreshold, drawerDefaultDays, trayNagDays,
         drawerSweepEnabled, setupCompletedAt, learnedPlacementEnabled}`,

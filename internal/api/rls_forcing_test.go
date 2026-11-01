@@ -203,6 +203,10 @@ var crossUserProbedMethods = map[string]bool{
 	// plus a section naming B's area, which must come back notFound and never
 	// as a page of B's mail.
 	"Area/getDesk": true,
+	// "Always put mail from X in <area>?": A naming B's area must learn nothing
+	// of B (not even that the area exists) and must write nothing against it.
+	"Area/ruleSuggestion":        true,
+	"Area/dismissRuleSuggestion": true,
 
 	"DeskPreferences/get":     true,
 	"DeskPreferences/changes": true,
