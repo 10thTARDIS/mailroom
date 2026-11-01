@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.2] — 2026-11-01
+
+**The second beta of 1.99.0: when you keep moving one sender's mail by hand, Mailroom offers to make a rule.** Learned placement can't help with every sender: some have been filed in more than one place, and some send mail that can't be confirmed as genuine. Until now you just kept moving their mail yourself. This beta notices, and offers a one-tap rule right under the move.
+
 ### Sorting
 
 - **Mailroom now offers to make a rule when you keep moving the same sender's mail by hand.** After you file mail from one sender into an area for the third time in 30 days (by dragging it to the sidebar, using Move to area, the Labels menu or Re-file), a message appears under the move: "Always put mail from alice@example.com in Updates?" with "Make a rule" and "Not now". The Undo for the move stays where it was.
