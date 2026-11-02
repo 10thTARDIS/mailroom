@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.5] — 2026-11-02
+
+**The fifth beta of 1.99.0: a deeper diagnostic for the person who runs Mailroom.** Nothing changes in how Mailroom looks or behaves. The read-only `plan-check` command can now show exactly how the database answers the desk, area views and mailbox counts, so the slow steps can be found and fixed.
+
 ### Under the hood
 
 - **`plan-check --explain` shows the real database plans.** `mailroom-admin
