@@ -79,7 +79,9 @@ func oldCollapsedQuery(t *testing.T, tx *UserTx, q EmailQuery) ([]string, int) {
 	return ids, total
 }
 
-func TestCollapsedPageAgreesWithFullRanking(t *testing.T) { eachAreaMode(t, testCollapsedPageAgreesWithFullRanking) }
+func TestCollapsedPageAgreesWithFullRanking(t *testing.T) {
+	eachAreaMode(t, testCollapsedPageAgreesWithFullRanking)
+}
 
 func testCollapsedPageAgreesWithFullRanking(t *testing.T, ready bool) {
 	old := collapseBatchBase

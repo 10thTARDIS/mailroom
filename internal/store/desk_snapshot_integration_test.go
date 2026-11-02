@@ -133,7 +133,9 @@ func sectionByHand(areaID *ulid.ULID, account *ulid.ULID, threshold float32, pos
 	return q
 }
 
-func TestDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T) { eachAreaMode(t, testDeskSnapshotAgreesWithQueryEmailsAndAreaSummary) }
+func TestDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T) {
+	eachAreaMode(t, testDeskSnapshotAgreesWithQueryEmailsAndAreaSummary)
+}
 
 func testDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T, ready bool) {
 	d := seedDeskScale(t, 1500)

@@ -483,7 +483,9 @@ func seedPrefilterFixture(t *testing.T) *prefilterFixture {
 	return f
 }
 
-func TestAreaPrefilterAgreesWithFullResolution(t *testing.T) { eachAreaMode(t, testAreaPrefilterAgreesWithFullResolution) }
+func TestAreaPrefilterAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testAreaPrefilterAgreesWithFullResolution)
+}
 
 func testAreaPrefilterAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)
@@ -774,7 +776,9 @@ func setMinus(a, b []ulid.ULID) []ulid.ULID {
 // (the onDesk filter alone). The fixture has area members that are off the
 // desk (the trashed one), desk mail in other areas, and mail fed by tabs and
 // by labels; every area is checked, with and without an account.
-func TestAreaOnDeskScopeAgreesWithFullResolution(t *testing.T) { eachAreaMode(t, testAreaOnDeskScopeAgreesWithFullResolution) }
+func TestAreaOnDeskScopeAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testAreaOnDeskScopeAgreesWithFullResolution)
+}
 
 func testAreaOnDeskScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)
@@ -870,7 +874,9 @@ func testAreaOnDeskScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 // The desk-scoped resolver behind AreaSummary and DeskSnapshot (#27) must
 // return exactly the rows the unscoped one does: every desk message, its area
 // and its side of the line, with and without an account scope.
-func TestDeskResolvedScopeAgreesWithFullResolution(t *testing.T) { eachAreaMode(t, testDeskResolvedScopeAgreesWithFullResolution) }
+func TestDeskResolvedScopeAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testDeskResolvedScopeAgreesWithFullResolution)
+}
 
 func testDeskResolvedScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)

@@ -23,7 +23,9 @@ import (
 	"mailroom/internal/tabs"
 )
 
-func TestAreaResolverAgreesWithTheQueryExpression(t *testing.T) { eachAreaMode(t, testAreaResolverAgreesWithTheQueryExpression) }
+func TestAreaResolverAgreesWithTheQueryExpression(t *testing.T) {
+	eachAreaMode(t, testAreaResolverAgreesWithTheQueryExpression)
+}
 
 func testAreaResolverAgreesWithTheQueryExpression(t *testing.T, ready bool) {
 	h := newHarness(t)
@@ -287,7 +289,9 @@ func testAreaResolverAgreesWithTheQueryExpression(t *testing.T, ready bool) {
 	}
 }
 
-func TestAreaSummary(t *testing.T) { eachAreaMode(t, testAreaSummary) }
+func TestAreaSummary(t *testing.T) {
+	eachAreaMode(t, testAreaSummary)
+}
 
 func testAreaSummary(t *testing.T, ready bool) {
 	h := newHarness(t)
