@@ -95,7 +95,7 @@ func (tx *UserTx) queryCollapsedBounded(ctx context.Context, q EmailQuery, from,
 		batch := collapseBatchBase
 		for {
 			args := base[:len(base):len(base)]
-			sql := `SELECT m.id, ` + key + `, ` + collapseThreadKey + ` FROM ` + from + ` WHERE (` + where + `)`
+			sql := `SELECT /* collapsed page */ m.id, ` + key + `, ` + collapseThreadKey + ` FROM ` + from + ` WHERE (` + where + `)`
 			if have {
 				args = append(args, curKey, curID)
 				n := len(args)
