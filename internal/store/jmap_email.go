@@ -911,8 +911,15 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		return nil, 0, err
 	}
 
+	// The area-list shape (collapse + date sort) is served by a bounded scan
+	// whose cost follows the page, not the area (collapsedPage). Every other
+	// shape keeps the full-ranking statement below.
+	bounded := collapseBoundedEligible(q)
+
 	var countSQL, pageSQL string
-	if q.CollapseThreads {
+	if bounded {
+		// Nothing to build: collapsedPage writes its own statements.
+	} else if q.CollapseThreads {
 		// RFC 8621 §4.4.4: "Emails in the same Thread as a previous Email in
 		// the list (given the filter and sort order) will be removed from the
 		// list" — for the returned page AND for `total`.
@@ -972,6 +979,20 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		).Scan(&restorePlan, new(string)); err != nil {
 			return nil, 0, fmt.Errorf("store: query emails (plan mode): %w", err)
 		}
+	}
+
+	if bounded {
+		// LIMIT/OFFSET are not bound: the bounded scan windows in Go.
+		ids, total, err = tx.queryCollapsedBounded(ctx, q, from, where, countArgs)
+		if err != nil {
+			return nil, 0, err
+		}
+		if restorePlan != "" {
+			if _, err := tx.tx.Exec(ctx, `SELECT set_config('plan_cache_mode', $1, true)`, restorePlan); err != nil {
+				return nil, 0, fmt.Errorf("store: query emails (plan mode): %w", err)
+			}
+		}
+		return ids, total, nil
 	}
 
 	rows, err := tx.tx.Query(ctx, pageSQL, args...)
