@@ -53,6 +53,7 @@ var wiredBy = map[string]string{
 	"FetchFlagsAbsentTotal":      "cmd/mailroom's syncObserver, via mailsync.WithObserver (Observer.FlagsAbsent)",
 	"SyncRecoveredArrivalsTotal": "cmd/mailroom's syncObserver, via mailsync.WithObserver (Observer.RecoveredArrival)",
 	"FlagSweepMessagesTotal":     "cmd/mailroom's syncObserver, via mailsync.WithObserver (Observer.FlagSweep)",
+	"MailboxCountsCacheTotal":    "cmd/mailroom's mailboxCacheObserver, via api.WithMailboxCacheObserver, one increment per Mailbox/get ids:null lookup",
 }
 
 func TestEveryDeclaredMetricIsSetSomewhere(t *testing.T) {
@@ -85,8 +86,8 @@ func TestEveryDeclaredMetricIsSetSomewhere(t *testing.T) {
 	// ⚠ A COUNT ASSERTION, so this cannot pass vacuously. Reflection over a
 	// renamed or emptied struct would otherwise iterate nothing and report
 	// success, which is the failure mode this whole issue is about.
-	if len(declared) != 26 {
-		t.Errorf("Metrics declares %d metrics, want 26. If one was added or removed "+
+	if len(declared) != 27 {
+		t.Errorf("Metrics declares %d metrics, want 27. If one was added or removed "+
 			"deliberately, bump this number in the same commit", len(declared))
 	}
 }

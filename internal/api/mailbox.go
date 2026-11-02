@@ -47,25 +47,49 @@ func (a *API) mailboxGet(ctx context.Context, userID ulid.ULID, rawArgs json.Raw
 		notFound  = []string{}
 	)
 	mErr := a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
-		var want []ulid.ULID
+		var (
+			want  []ulid.ULID
+			views []store.MailboxView
+		)
 		if args.IDs == nil {
-			// ids:null means "all mailboxes" (RFC 8620 §5.1).
-			all, err := tx.ListMailboxIDs(ctx)
+			// ids:null means "all mailboxes" (RFC 8620 §5.1). The answer is cached
+			// per user under the (Email, Mailbox) change sequences, both read FIRST
+			// in this transaction (mailbox_cache.go): while neither has moved, no
+			// count or attribute can have, so the recount is skipped.
+			emailSeq, mailboxSeq, err := tx.EmailMailboxStates(ctx)
 			if err != nil {
 				return &MethodError{Type: errServerFail, Description: err.Error()}
 			}
-			want = all
-			for _, id := range all {
+			state = mailboxSeq
+			if ids, cached, ok := a.mailboxCache.get(userID, emailSeq, mailboxSeq); ok {
+				a.noteMailboxCache(mailboxCacheHit)
+				want, views = ids, cached
+			} else {
+				a.noteMailboxCache(mailboxCacheMiss)
+				all, err := tx.ListMailboxIDs(ctx)
+				if err != nil {
+					return &MethodError{Type: errServerFail, Description: err.Error()}
+				}
+				want = all
+				if views, err = tx.GetMailboxes(ctx, want); err != nil {
+					return &MethodError{Type: errServerFail, Description: err.Error()}
+				}
+				a.mailboxCache.put(userID, emailSeq, mailboxSeq, want, views)
+			}
+			for _, id := range want {
 				requested = append(requested, requestedID{raw: id.String(), id: id, ok: true})
 			}
 		} else {
 			var valid []ulid.ULID
 			valid, notFound, requested = parseIDs(*args.IDs)
 			want = valid
-		}
-		views, err := tx.GetMailboxes(ctx, want)
-		if err != nil {
-			return &MethodError{Type: errServerFail, Description: err.Error()}
+			var err error
+			if views, err = tx.GetMailboxes(ctx, want); err != nil {
+				return &MethodError{Type: errServerFail, Description: err.Error()}
+			}
+			if state, err = tx.ChangeState(ctx, store.ObjectMailbox); err != nil {
+				return &MethodError{Type: errServerFail, Description: err.Error()}
+			}
 		}
 		for _, v := range views {
 			// An account-restricted API key sees only its accounts' mailboxes
@@ -83,10 +107,6 @@ func (a *API) mailboxGet(ctx context.Context, userID ulid.ULID, rawArgs json.Raw
 				}
 			}
 			requested = kept
-		}
-		state, err = tx.ChangeState(ctx, store.ObjectMailbox)
-		if err != nil {
-			return &MethodError{Type: errServerFail, Description: err.Error()}
 		}
 		return nil
 	})

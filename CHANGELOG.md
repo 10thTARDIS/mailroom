@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **Refreshing your mail folders is now nearly free when nothing has changed.** Mailroom used to recount the total and unread mail in every folder each time a client asked for the folder list, even when no mail had arrived, moved or been read since the last time. It now remembers the last answer for each person and reuses it for as long as nothing that could change a count or a folder name has happened; the moment mail arrives, is read, moved or deleted, or a folder is renamed, the next request recounts. What you see is exactly the same, and the operator gets a new `mailroom_mailbox_counts_cache_total` metric (hit or miss) to watch it work.
+
 ## [1.99.0-beta.6] — 2026-11-02
 
 **The sixth beta of 1.99.0: the desk loads faster on a large mailbox.** The desk and its per-area counts used to work out the area of every message you have before keeping the ones on the desk. They now look only at the desk's messages. Nothing you see changes.

@@ -231,3 +231,25 @@ func (tx *UserTx) AppendChanges(ctx context.Context, t ObjectType, objectIDs []u
 	}
 	return nil
 }
+
+// EmailMailboxStates reads the current state (last allocated sequence) of the
+// Email and Mailbox types in ONE statement; a type never mutated reads 0.
+//
+// It is the correctness key of the Mailbox/get all-mailboxes cache: every
+// change to a mailbox's counts or attributes (a seen flag, a move, a trash, a
+// delete, a sync ingest or reap, a rename, a role change, an account removal)
+// appends an Email or a Mailbox change row in the same transaction as the
+// mutation, so a cached answer is current exactly while this pair is unchanged.
+func (tx *UserTx) EmailMailboxStates(ctx context.Context) (email, mailbox int64, err error) {
+	err = tx.tx.QueryRow(ctx, `
+		SELECT COALESCE((SELECT last_seq FROM app.change_seq
+		                  WHERE user_id = $1 AND object_type = $2), 0),
+		       COALESCE((SELECT last_seq FROM app.change_seq
+		                  WHERE user_id = $1 AND object_type = $3), 0)`,
+		tx.userID.String(), ObjectEmail, ObjectMailbox,
+	).Scan(&email, &mailbox)
+	if err != nil {
+		return 0, 0, fmt.Errorf("store: read email and mailbox states: %w", err)
+	}
+	return email, mailbox, nil
+}

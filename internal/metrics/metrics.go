@@ -203,6 +203,9 @@ type Metrics struct {
 	// (ADR-046 §12): result=read (messages re-read) and applied (whose
 	// server flags differed and were applied).
 	FlagSweepMessagesTotal *prometheus.CounterVec // labels: result
+	// MailboxCountsCacheTotal counts Mailbox/get all-mailboxes lookups by whether
+	// the per-user cache answered (hit) or the counts were recomputed (miss).
+	MailboxCountsCacheTotal *prometheus.CounterVec // labels: result
 }
 
 // searchDurationBuckets resolves the range a debounce decision turns on — a
@@ -379,6 +382,12 @@ func New() *Metrics {
 			Namespace: namespace,
 			Name:      "flag_sweep_messages_total",
 			Help:      "Messages the CONDSTORE-less flag sweep re-read (result=read) and applied a changed reading for (result=applied).",
+		}, []string{"result"}),
+
+		MailboxCountsCacheTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "mailbox_counts_cache_total",
+			Help:      "Mailbox/get all-mailboxes lookups answered from the per-user cache (result=hit) or recounted (result=miss).",
 		}, []string{"result"}),
 	}
 }
