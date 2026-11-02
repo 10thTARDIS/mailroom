@@ -162,3 +162,76 @@ func TestSetPlanCacheModeIsTransactionLocalAndClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// --explain captures the statements each path really sends and prints a real
+// plan for them, and writes nothing.
+func TestPlanCheckExplainPrintsPlansAndWritesNothing(t *testing.T) {
+	h := newUntangleHarness(t)
+	ctx := context.Background()
+	userID := seedUntangleUser(t, h.super, "planexplain-"+store.NewULID().String())
+	if err := h.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+		if _, err := tx.ListAreas(ctx); err != nil {
+			return err
+		}
+		_, err := tx.GetDeskPreferences(ctx)
+		return err
+	}); err != nil {
+		t.Fatalf("open desk: %v", err)
+	}
+	for _, subj := range []string{"a", "b", "c"} {
+		seedUntangleMessage(t, h.super, userID, subj)
+	}
+	snapshot := func() (changes, messages int) {
+		t.Helper()
+		if err := h.super.QueryRow(ctx,
+			`SELECT (SELECT count(*) FROM app.change_log WHERE user_id = $1),
+			        (SELECT count(*) FROM app.messages WHERE user_id = $1)`,
+			userID.String()).Scan(&changes, &messages); err != nil {
+			t.Fatalf("snapshot: %v", err)
+		}
+		return
+	}
+	changesBefore, messagesBefore := snapshot()
+
+	st, rec, err := store.OpenRecording(ctx, os.Getenv("MAILROOM_TEST_APP_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close)
+	var out bytes.Buffer
+	if err := planExplain(ctx, &out, st, rec, userID, ""); err != nil {
+		t.Fatalf("planExplain: %v", err)
+	}
+	report := out.String()
+	if !strings.HasPrefix(report, "Plans may include values from your own mail") {
+		t.Errorf("privacy notice missing at the top:\n%s", report)
+	}
+	for _, path := range []string{"Area/getSummary: AreaSummary", "Area/getDesk: DeskSnapshot", "Mailbox/get: all mailboxes"} {
+		i := strings.Index(report, "##### "+path)
+		if i < 0 {
+			t.Fatalf("path %q missing:\n%s", path, report)
+		}
+		rest := report[i+1:]
+		if j := strings.Index(rest, "#####"); j >= 0 {
+			rest = rest[:j]
+		}
+		if !strings.Contains(rest, "actual time=") {
+			t.Errorf("path %q printed no plan with actual time=:\n%s", path, rest)
+		}
+	}
+	if !strings.HasSuffix(report, "READ ONLY: nothing was written (rolled back).\n") {
+		t.Errorf("report does not end with the read-only line:\n%s", report)
+	}
+	if c, m := snapshot(); c != changesBefore || m != messagesBefore {
+		t.Errorf("--explain wrote: change_log %d -> %d, messages %d -> %d", changesBefore, c, messagesBefore, m)
+	}
+
+	// --path limits to one path by prefix.
+	out.Reset()
+	if err := planExplain(ctx, &out, st, rec, userID, "Mailbox/get"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "##### Area/") || !strings.Contains(out.String(), "##### Mailbox/get") {
+		t.Errorf("--path Mailbox/get did not limit the output:\n%s", out.String())
+	}
+}

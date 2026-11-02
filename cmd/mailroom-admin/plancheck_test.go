@@ -80,3 +80,13 @@ func TestPrintPlanCheck(t *testing.T) {
 		t.Error("output must end with the read-only line")
 	}
 }
+
+func TestPlanExecTime(t *testing.T) {
+	plan := "Seq Scan on t (actual time=0.01..0.02 rows=1 loops=1)\nPlanning Time: 0.1 ms\nExecution Time: 12.500 ms\n"
+	if got := planExecTime(plan); got != 12500*time.Microsecond {
+		t.Errorf("planExecTime = %v, want 12.5ms", got)
+	}
+	if got := planExecTime("no timing"); got != 0 {
+		t.Errorf("planExecTime without a line = %v, want 0", got)
+	}
+}
