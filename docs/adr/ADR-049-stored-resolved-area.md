@@ -1,6 +1,6 @@
 # ADR-049: Each message stores its resolved area, maintained by triggers
 
-**Status:** Proposed (for v1.99.0). Deviates from nothing in the spec; changes how
+**Status:** Accepted (increment 1 in v1.99.0-beta.N: expand, backfill, report; readers switch in increment 2). Deviates from nothing in the spec; changes how
 the area resolver of #442 (`internal/store/areas_resolve.go`) is used, not what it
 answers.
 
@@ -126,6 +126,25 @@ move-all, learned placement backfill) pay it per row. That is acceptable at the
 scale a single-user instance relabels, and is measured in the PR with the
 integration fixture's bulk paths. A configuration change pays one full recompute
 for that user.
+
+## Amendments found while building increment 1
+
+- **A foreign-key cascade runs as the table owner, which row-level security
+  shows no rows**, so a trigger fired by a cascade resolves from nothing and
+  leaves the stored area stale (a wrong value, not the harmless no-op §2
+  describes). The label delete path that matters is closed by a
+  `BEFORE DELETE` trigger on `app.labels` that removes the label from its
+  messages in the caller's own context, where the message-label triggers see
+  the caller's rows. Cascades from a message, an area and a user are unaffected
+  (the rows they remove are gone, or the area's own statement trigger recomputes
+  afterwards).
+- **`app.resolve_message_area` takes the verdict as a third argument** (a
+  two-argument form reads it from the row), because the `BEFORE` triggers run
+  before the row holds the new verdict.
+- **The tab precedence is a function, `app.area_tab_precedence()`**, and a test
+  holds it to `tabs.PrecedenceNames()`.
+- **A backfill batch locks its rows (`FOR UPDATE`) before it resolves them**,
+  so a concurrent change cannot be overwritten with an answer read before it.
 
 ## Consequences
 

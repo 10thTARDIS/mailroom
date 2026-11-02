@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"os"
+	"flag"
 	"slices"
 	"strings"
 	"testing"
@@ -57,6 +57,9 @@ type aiWorld struct {
 	n      int // unique-name counter
 	kinds  map[string]int
 	skips  int
+	// maxStored is the most messages that held a stored area at any step, so a
+	// run that only ever saw NULL cannot pass.
+	maxStored int
 }
 
 func newAIWorld(t *testing.T, h *harness, tag string, rng *rand.Rand) *aiWorld {
@@ -90,6 +93,22 @@ func newAIWorld(t *testing.T, h *harness, tag string, rng *rand.Rand) *aiWorld {
 		for i := 0; i < 14; i++ {
 			if e := w.insertMessage(ctx, tx); e != nil {
 				return e
+			}
+		}
+		// Give the mail 0-3 labels each, so ties and mappings exist from step 0.
+		var mids []string
+		mids, e := w.col(ctx, tx, `SELECT id FROM app.messages WHERE user_id=$1 ORDER BY id`, w.userID.String())
+		if e != nil {
+			return e
+		}
+		for _, l := range labels {
+			for _, m := range mids {
+				if w.rng.Intn(100) < 35 {
+					if _, e := tx.tx.Exec(ctx, `INSERT INTO app.message_labels (user_id, message_id, label_id)
+						VALUES ($1,$2,$3)`, w.userID.String(), m, l.String()); e != nil {
+						return e
+					}
+				}
 			}
 		}
 		return nil
@@ -148,15 +167,30 @@ func pick(rng *rand.Rand, xs []string) (string, bool) {
 var aiKinds = []string{
 	"label-add", "label-remove", "verdict", "map-tab", "feed-add", "feed-remove", "feed-retarget",
 	"area-create", "area-delete", "area-reorder", "label-delete-store", "label-delete-cascade",
-	"msg-insert", "msg-delete",
+	"msg-insert", "msg-delete", "label-create", "area-swap",
 }
+
+// aiWeights makes the changes that matter most for ties the commonest: a
+// message needs two area-feeding labels for position to decide anything, and a
+// mapped label on a message for a mapping change to decide anything.
+var aiWeights = map[string]int{"label-add": 4, "map-tab": 2, "area-reorder": 2, "area-swap": 2}
 
 // step applies one random input change as the user, through the application
 // role, and returns the kind it ran. A step that hits a legitimate refusal
 // (a feed already taken, an area's own label) is rolled back and counted as
 // skipped, not failed.
 func (w *aiWorld) step(ctx context.Context) (string, error) {
-	kind := aiKinds[w.rng.Intn(len(aiKinds))]
+	var bag []string
+	for _, k := range aiKinds {
+		n := 1
+		if x, ok := aiWeights[k]; ok {
+			n = x
+		}
+		for i := 0; i < n; i++ {
+			bag = append(bag, k)
+		}
+	}
+	kind := bag[w.rng.Intn(len(bag))]
 	uid := w.userID.String()
 	err := w.s.UserTx(ctx, w.userID, func(tx *UserTx) error {
 		msgs, err := w.col(ctx, tx, `SELECT id FROM app.messages WHERE user_id=$1 ORDER BY id`, uid)
@@ -294,6 +328,27 @@ func (w *aiWorld) step(ctx context.Context) (string, error) {
 			// The cascade path: the label row goes with its message_labels and feeds.
 			_, err = tx.tx.Exec(ctx, `DELETE FROM app.labels WHERE user_id=$1 AND id=$2`, uid, l)
 			return err
+		case "label-create":
+			w.n++
+			row := LabelRow{Name: fmt.Sprintf("C%d-%s", w.n, w.tag), MirrorToIMAP: false}
+			if w.rng.Intn(2) == 0 {
+				row.Tab = tabs.All[w.rng.Intn(len(tabs.All))]
+			}
+			_, err := tx.CreateLabel(ctx, row)
+			return err
+		case "area-swap":
+			if len(areaIDs) < 2 {
+				return errSkip
+			}
+			// Two areas trade positions in ONE statement, so a tie between their
+			// labels flips.
+			_, err := tx.tx.Exec(ctx, `UPDATE app.areas a SET position = b.position
+				FROM app.areas b WHERE a.user_id=$1 AND b.user_id=$1 AND a.id=$2 AND b.id=$3`, uid, areaIDs[0], areaIDs[1])
+			if err != nil {
+				return err
+			}
+			_, err = tx.tx.Exec(ctx, `UPDATE app.areas SET position = position + 1 WHERE user_id=$1 AND id=$2`, uid, areaIDs[1])
+			return err
 		case "msg-insert":
 			return w.insertMessage(ctx, tx)
 		case "msg-delete":
@@ -343,6 +398,7 @@ func (w *aiWorld) agrees(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	w.maxStored = max(w.maxStored, rep.StoredSet)
 	if rep.Disagreeing() != 0 {
 		return fmt.Errorf("%d of %d message(s) hold a stored area that differs from the resolver: %+v",
 			rep.Disagreeing(), rep.Messages, rep.Disagreements)
@@ -435,15 +491,10 @@ func TestAreaIndexAgreesWithTheResolverUnderRandomChanges(t *testing.T) {
 				t.Errorf("seed %d: step kind %q never succeeded in 200 steps (skips: %d); the run does not cover it", seed, k, w.skips)
 			}
 		}
-		var nonNull int
-		if err := h.super.QueryRow(context.Background(),
-			`SELECT count(area_id) FROM app.messages WHERE user_id=$1`, w.userID.String()).Scan(&nonNull); err != nil {
-			t.Fatal(err)
+		if w.maxStored < 3 {
+			t.Errorf("seed %d: at most %d message(s) held a stored area at any step; the run exercised almost only the NULL case", seed, w.maxStored)
 		}
-		if nonNull == 0 {
-			t.Errorf("seed %d: no message ended with a stored area; the run exercised only the NULL case", seed)
-		}
-		t.Logf("seed %d: kinds=%v skips=%d stored-non-null=%d", seed, w.kinds, w.skips, nonNull)
+		t.Logf("seed %d: kinds=%v skips=%d max-stored=%d", seed, w.kinds, w.skips, w.maxStored)
 	}
 }
 
@@ -466,6 +517,7 @@ func TestAreaIndexAgreementDetectsADroppedTrigger(t *testing.T) {
 		{"area_feeds_area_del", "app.area_feeds"},
 		{"area_feeds_area_upd", "app.area_feeds"},
 		{"labels_area_tab", "app.labels"},
+		{"labels_area_detach", "app.labels"},
 	}
 	for _, tr := range required {
 		t.Run(tr.name, func(t *testing.T) {
@@ -504,10 +556,10 @@ func trunc(s string, n int) string {
 
 // TestAreaIndexBulkRelabelCost times a bulk relabel with the triggers in place
 // and without them, and logs the ratio. A measurement, not an assertion, so it
-// runs only when asked for: MAILROOM_AREA_INDEX_BULK_COST=1.
+// runs only when selected by name with -run.
 func TestAreaIndexBulkRelabelCost(t *testing.T) {
-	if os.Getenv("MAILROOM_AREA_INDEX_BULK_COST") == "" {
-		t.Skip("set MAILROOM_AREA_INDEX_BULK_COST=1 to run the bulk relabel timing")
+	if f := flag.Lookup("test.run"); f == nil || !strings.Contains(f.Value.String(), "TestAreaIndexBulkRelabelCost") {
+		t.Skip("a measurement: run it by name, -run TestAreaIndexBulkRelabelCost")
 	}
 	h := newHarness(t)
 	ctx := context.Background()

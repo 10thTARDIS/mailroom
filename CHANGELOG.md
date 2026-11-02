@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Under the hood
+
+- **Mailroom now remembers which area each message belongs to, to make area lists faster later.** A new `mailroom-admin area-index` command prepares this. Run without options it only reports, per person, how many messages would be filled in and where any stored answer differs from the one Mailroom works out today, and it changes nothing. Add `--apply` to fill it in (in batches, safe to run again) and mark that person ready; a person is only marked ready once the stored answers match for every message. From the moment this version is installed, Mailroom keeps the stored answer correct as mail is labelled, reclassified or moved between areas, and when areas are created, deleted, reordered or re-fed. Nothing you see changes yet: the lists and counts still work the area out as before until a later version starts using the stored answer.
+
 ## [1.99.0-beta.7] — 2026-11-02
 
 **The seventh beta of 1.99.0: folder counts are only recounted when something changed.** Your mail app asks for folder counts every time it refreshes. Mailroom now remembers the last answer and recounts only when mail or folders have actually changed, so an idle refresh costs almost nothing. Nothing you see changes.

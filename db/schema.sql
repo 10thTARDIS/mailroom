@@ -3202,6 +3202,19 @@ BEGIN
 END;
 $$;
 
+-- A label deleted: take it off its messages first, in the CALLER's context.
+-- Left to the foreign key's cascade, the removal would run as the table owner,
+-- which RLS (FORCED, owner without a policy) shows no rows, so the row triggers
+-- above would compute from nothing and leave a stale area (ADR-049 section 2
+-- assumed that case is a harmless no-op; it is not).
+CREATE FUNCTION app.trg_labels_detach() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM app.message_labels WHERE user_id = OLD.user_id AND label_id = OLD.id;
+  RETURN OLD;
+END;
+$$;
+
 CREATE FUNCTION app.trg_labels_tab() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -3224,7 +3237,8 @@ GRANT EXECUTE ON FUNCTION
   app.trg_area_config_del(),
   app.trg_areas_position(),
   app.trg_area_feeds_upd(),
-  app.trg_labels_tab()
+  app.trg_labels_tab(),
+  app.trg_labels_detach()
 TO mailroom_app;
 
 CREATE TRIGGER message_labels_area
@@ -3265,6 +3279,9 @@ CREATE TRIGGER area_feeds_area_upd
   REFERENCING OLD TABLE AS oldt NEW TABLE AS newt
   FOR EACH STATEMENT EXECUTE FUNCTION app.trg_area_feeds_upd();
 
+CREATE TRIGGER labels_area_detach
+  BEFORE DELETE ON app.labels
+  FOR EACH ROW EXECUTE FUNCTION app.trg_labels_detach();
 CREATE TRIGGER labels_area_tab
   AFTER UPDATE ON app.labels
   REFERENCING OLD TABLE AS oldt NEW TABLE AS newt
