@@ -219,6 +219,13 @@
 //	                   and the first check that refused. Evidence is as of NOW unless
 //	                   --as-of (filings made before the message was ingested). Read-only
 //	                   transaction, never committed; prints addresses, never subjects.)
+//	plan-check         --user-id [--runs N]
+//	                   (do the hot read paths suffer from generic plans? Runs the real
+//	                   store calls behind Area/getSummary, Area/getDesk, Email/query for
+//	                   the largest area and Mailbox/get, N times each with the planner
+//	                   forced to the generic plan and then to a custom plan, and prints
+//	                   median times, the ratio and a verdict per path. Read-only
+//	                   transaction, never committed; needs a desk that was opened once.)
 //	placement-backfill --user-id [--exclude ADDRESS-or-DOMAIN ...] [--apply] [--undo BATCH_ID]
 //	                   (mailroom#714: apply learned placement to mail already on the
 //	                   desk. Report only by default: totals, area pairs, a line per
@@ -439,6 +446,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"drawer-report":             runDrawerReport,
 	"placement-report":          runPlacementReport,
 	"placement-explain":         runPlacementExplain,
+	"plan-check":                runPlanCheck,
 	"nudge-report":              runNudgeReport,
 	"from-field-report":         runFromFieldReport,
 	"placement-backfill":        runPlacementBackfill,
