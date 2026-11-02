@@ -71,6 +71,7 @@ import type {
   RuleCondition,
   RuleInduceResult,
   AreaRuleSuggestion,
+  LearningStatus,
   RulePreview,
   RuleTightenResult,
   SearchSnippet,
@@ -749,6 +750,10 @@ export class JmapClient {
     address: string;
   }): Promise<AreaRuleSuggestion> {
     return this.call("Area/ruleSuggestion", args as unknown as Record<string, unknown>) as Promise<AreaRuleSuggestion>;
+  }
+  /** urn:mailroom:desk: learned placement's 30-day status and unlearned senders. Read-only. */
+  learnedPlacementGetStatus(args: { accountId: string }): Promise<LearningStatus> {
+    return this.call("LearnedPlacement/getStatus", args as unknown as Record<string, unknown>) as Promise<LearningStatus>;
   }
   /** urn:mailroom:desk: "Not now" for a rule offer; remembered for 30 days. */
   areaDismissRuleSuggestion(args: { accountId: string; areaId: string; address: string }): Promise<unknown> {

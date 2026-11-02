@@ -2159,6 +2159,31 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 		}
 	},
 
+	// LearnedPlacement/getStatus: the counts are the caller's own. B has a
+	// learned placement in B's area; A's status must not count it, and B's own
+	// status must (the control that proves the probe can see the row).
+	"LearnedPlacement/getStatus": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		superExec(t, h, `INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
+		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)`,
+			b.UserID.String(), b.MessageID.String(), b.AreaID.String())
+		res, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", a.UserID, map[string]any{})
+		if mErr != nil {
+			t.Fatalf("LearnedPlacement/getStatus: %+v", mErr)
+		}
+		assertNoBLeak(t, "LearnedPlacement/getStatus", res, b)
+		if res["placed"] != float64(0) {
+			t.Errorf("LearnedPlacement/getStatus counted B's placement for A: %v", res)
+		}
+		own, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", b.UserID, map[string]any{})
+		if mErr != nil || own["placed"] != float64(1) || own["open"] != float64(1) {
+			t.Errorf("LearnedPlacement/getStatus for B = %v, %+v, want placed=1 open=1", own, mErr)
+		}
+		if _, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", a.UserID, map[string]any{
+			"accountId": b.UserID.String()}); mErr == nil || mErr.Type != errAccountNotFound {
+			t.Fatalf("LearnedPlacement/getStatus naming B's account: got %+v, want accountNotFound", mErr)
+		}
+	},
+
 	"OutOfOffice/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		probeGetFindsNothing("OutOfOffice/get", "ids", func(b rlsUser) string { return b.AccountID.String() })(t, h, a, b)
 		// With no ids: every account of A's and nothing of B's.

@@ -248,6 +248,7 @@ var methodCapabilities = map[string]string{
 	// "Always put mail from X in <area>?" after a manual move, and its "Not now".
 	"Area/ruleSuggestion":        capDesk,
 	"Area/dismissRuleSuggestion": capDesk,
+	"LearnedPlacement/getStatus": capDesk,
 
 	"DeskPreferences/get":     capDesk,
 	"OutOfOffice/get":         capOutOfOffice,

@@ -1465,6 +1465,24 @@ components:
         (re-dismissing refreshes it). An unknown area is `invalidArguments`.
         Closed to API keys.
 
+        **LearnedPlacement/getStatus** — the status line under Settings,
+        Learned sorting: `{accountId}` → `{accountId, enabled, placed,
+        corrected, kept, open, senders, moreSenders, sendersTruncated}`.
+        Read-only. `placed`, `corrected`, `kept` and `open` count the
+        placements learned placement made on NEW mail (backfilled placements
+        are left out) that were decided in the last 30 days, by outcome as of
+        now; `placed` also includes a placement an API key withdrew. When
+        learned placement is switched off, `enabled` is `false` and nothing
+        else is computed. `senders` lists up to 5 senders the user has filed by
+        hand into one area at least 3 times in the last 30 days where
+        Area/ruleSuggestion would offer a rule (learned placement would not
+        file the next message there, no enabled rule covers it, not dismissed):
+        `{address, areaId, reason, filings}`, with `reason` as in
+        Area/ruleSuggestion. At most 25 candidates (most filings first) are
+        evaluated; `moreSenders` counts the listed-worthy ones beyond the 5
+        returned, and `sendersTruncated` is `true` when the 25 cut candidates
+        off, making `moreSenders` a lower bound. Closed to API keys.
+
         **DeskPreferences** — the desk-wide settings SINGLETON:
         `{id, lineThreshold, drawerDefaultDays, trayNagDays,
         drawerSweepEnabled, setupCompletedAt, learnedPlacementEnabled}`,

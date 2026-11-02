@@ -2760,6 +2760,32 @@ export interface AreaRuleSuggestion {
   earlier: number;
 }
 
+/** One line of LearnedPlacement/getStatus's "senders you keep moving by hand". */
+export interface LearningStatusSender {
+  address: string;
+  areaId: Id;
+  /** Why learned placement is not filing this sender (a placement reason or an Area/ruleSuggestion one). */
+  reason: string;
+  filings: number;
+}
+
+/**
+ * LearnedPlacement/getStatus: what learned placement did in the last 30 days
+ * (arrival placements only) and the senders it is not learning. When `enabled`
+ * is false nothing else is meaningful. `moreSenders` is a lower bound when
+ * `sendersTruncated`.
+ */
+export interface LearningStatus {
+  enabled: boolean;
+  placed: number;
+  corrected: number;
+  kept: number;
+  open: number;
+  senders: LearningStatusSender[];
+  moreSenders: number;
+  sendersTruncated: boolean;
+}
+
 /**
  * What Rule/induce reports (#168).
  *

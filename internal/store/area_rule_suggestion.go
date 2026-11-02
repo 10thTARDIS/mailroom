@@ -136,30 +136,37 @@ func (tx *UserTx) RuleSuggestion(ctx context.Context, areaID ulid.ULID, address 
 		return out, nil
 	}
 
-	dismissed, err := tx.ruleSuggestionDismissed(ctx, areaID, addr)
-	if err != nil {
-		return out, err
-	}
-	if dismissed {
-		out.Reason = RuleReasonDismissed
-		return out, nil
-	}
-	covered, err := tx.enabledRuleFiles(ctx, addr, labelID)
-	if err != nil {
-		return out, err
-	}
-	if covered {
-		out.Reason = RuleReasonCovered
-		return out, nil
-	}
-
-	// Would learned placement file the next message from this address?
-	reason, suggest, err := tx.learnedWouldNotFile(ctx, areaID, addr, addrKey, domainKey, senderFor)
+	reason, suggest, err := tx.suggestionVerdict(ctx, areaID, labelID, addr, addrKey, domainKey, senderFor)
 	if err != nil {
 		return out, err
 	}
 	out.Suggest, out.Reason = suggest, reason
 	return out, nil
+}
+
+// suggestionVerdict is the part of the decision after the filings threshold:
+// dismissed, covered by an enabled rule, then whether learned placement would
+// file the next message. Shared with the learned-placement status list
+// (LearningStatus) so the two cannot disagree about which senders are
+// "not being learned".
+func (tx *UserTx) suggestionVerdict(ctx context.Context, areaID, labelID ulid.ULID, addr string,
+	addrKey, domainKey placement.Key, senderFor RuleSuggestionSenderFunc) (reason string, suggest bool, err error) {
+	dismissed, err := tx.ruleSuggestionDismissed(ctx, areaID, addr)
+	if err != nil {
+		return "", false, err
+	}
+	if dismissed {
+		return RuleReasonDismissed, false, nil
+	}
+	covered, err := tx.enabledRuleFiles(ctx, addr, labelID)
+	if err != nil {
+		return "", false, err
+	}
+	if covered {
+		return RuleReasonCovered, false, nil
+	}
+	// Would learned placement file the next message from this address?
+	return tx.learnedWouldNotFile(ctx, areaID, addr, addrKey, domainKey, senderFor)
 }
 
 // learnedWouldNotFile answers: when this address's next message arrives, will

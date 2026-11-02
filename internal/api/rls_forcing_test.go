@@ -207,6 +207,8 @@ var crossUserProbedMethods = map[string]bool{
 	// of B (not even that the area exists) and must write nothing against it.
 	"Area/ruleSuggestion":        true,
 	"Area/dismissRuleSuggestion": true,
+	// Learned placement's status: counts and sender list are the caller's own.
+	"LearnedPlacement/getStatus": true,
 
 	"DeskPreferences/get":     true,
 	"DeskPreferences/changes": true,

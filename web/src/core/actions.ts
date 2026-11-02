@@ -47,6 +47,7 @@ import type {
   RuleCondition,
   RuleInduceResult,
   AreaRuleSuggestion,
+  LearningStatus,
   RulePreview,
   RuleTightenResult,
   SetError,
@@ -2499,6 +2500,19 @@ export class MailActions {
     try {
       if (!(await this.settle())) return null;
       return await this.client.areaRuleSuggestion({ accountId, areaId, address });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Learned placement's status for Settings (LearnedPlacement/getStatus).
+   * Null on any failure: it is a status line, never an error toast.
+   */
+  async learningStatus(): Promise<LearningStatus | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      return await this.client.learnedPlacementGetStatus({ accountId });
     } catch {
       return null;
     }
