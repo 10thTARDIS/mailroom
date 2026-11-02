@@ -170,6 +170,22 @@ for that user.
 - The Go resolver and the SQL resolver must still agree. The trigger function
   is a third consumer of the SQL resolver, not a third resolver.
 
+## Trade-off accepted for increment 1
+
+A label change now also rewrites the message row's `area_id`. Because `area_id`
+is indexed, that is a non-HOT update across every index on `app.messages`, and no
+trigger design avoids it. Statement-level triggers over the transition table did
+not make it cheaper. A single-statement bulk relabel of many messages (day-one
+setup, "Move all from", a rule applied to existing mail, a placement backfill) is
+therefore several times slower than before, and a single label change is a small
+multiple of a write that was already cheap. That is accepted, because those bulk
+paths are rare and user-initiated while an area's list is read constantly.
+
+If the bulk cost proves to matter, the alternative is a narrow side table
+(`message_areas (user_id, message_id, area_id, arrival)`) maintained by the same
+triggers. Changing it would not rewrite the message row or touch its indexes, at
+the cost of keeping `arrival` in step on snooze wake.
+
 ## References
 
 - #27 (the measurements and the area-list attempt), #63 (desk-scoped resolver).
