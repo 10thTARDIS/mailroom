@@ -302,11 +302,15 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-	joins, _, _ := areaJoinSQL(bind, nil)
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return plan, err
+	}
+	joins, areaResolved := areaSourceSQL(stored, bind, nil)
 	onDesk := deskMessageSQL(bind, tx.userID, nil)
 	decided := bind([]string{LabelByDesk, LabelBySetup})
 	rows, err := tx.tx.Query(ctx, `
-		SELECT m.id, COALESCE(m.from_address::text, ''), m.auth_fail, m.content_hash, `+areaResolvedSQL+`, `+onDesk+`,
+		SELECT m.id, COALESCE(m.from_address::text, ''), m.auth_fail, m.content_hash, `+areaResolved+`, `+onDesk+`,
 		       (m.id IN (SELECT hml.message_id
 		                   FROM app.message_labels hml
 		                   JOIN app.area_feeds hf ON hf.user_id = hml.user_id AND hf.label_id = hml.label_id

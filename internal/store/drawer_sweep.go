@@ -125,12 +125,16 @@ func (tx *UserTx) DrawerCandidates(ctx context.Context, now time.Time, limit int
 		return nil, fmt.Errorf("store: drawer candidates (desk preferences): %w", err)
 	}
 
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return nil, err
+	}
 	args := []any{tx.userID.String()}
 	bind := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-	areaJoins, _, _ := areaJoinSQL(bind, nil)
+	areaJoins, areaResolved := areaSourceSQL(stored, bind, nil)
 	deskLive := deskLiveSQL(bind, tx.userID, nil)
 	cond := drawerCandidateWhereSQL(bind, prefs.LineThreshold)
 	defaultPH := bind(prefs.DrawerDefaultDays)
@@ -140,7 +144,7 @@ func (tx *UserTx) DrawerCandidates(ctx context.Context, now time.Time, limit int
 	query := `
 		SELECT m.id, a.id, a.name, COALESCE(a.auto_archive_days, ` + defaultPH + `) AS period_days, m.received_at
 		  FROM app.messages m` + areaJoins + `
-		  JOIN app.areas a ON a.user_id = m.user_id AND a.id = ` + areaResolvedSQL + ` AND a.auto_archive
+		  JOIN app.areas a ON a.user_id = m.user_id AND a.id = ` + areaResolved + ` AND a.auto_archive
 		  LEFT JOIN app.triage_scores t ON t.user_id = m.user_id AND t.message_id = m.id
 		 WHERE m.user_id = $1
 		   AND ` + deskLive + `
@@ -186,12 +190,16 @@ func (tx *UserTx) DrawerCandidates(ctx context.Context, now time.Time, limit int
 // auto-archives — either could have changed between the scan and this write
 // (the user moved it, relabelled it, or flipped the area's switch).
 func (tx *UserTx) drawerCandidateStillQualifies(ctx context.Context, id, areaID ulid.ULID, threshold float32) (bool, error) {
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return false, err
+	}
 	args := []any{tx.userID.String(), id.String(), areaID.String()}
 	bind := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-	areaJoins, _, _ := areaJoinSQL(bind, nil)
+	areaJoins, areaResolved := areaSourceSQL(stored, bind, nil)
 	deskLive := deskLiveSQL(bind, tx.userID, nil)
 	cond := drawerCandidateWhereSQL(bind, threshold)
 
@@ -202,7 +210,7 @@ func (tx *UserTx) drawerCandidateStillQualifies(ctx context.Context, id, areaID 
 		    JOIN app.areas a ON a.user_id = m.user_id AND a.id = $3 AND a.auto_archive
 		    LEFT JOIN app.triage_scores t ON t.user_id = m.user_id AND t.message_id = m.id` + areaJoins + `
 		   WHERE m.user_id = $1 AND m.id = $2
-		     AND ` + areaResolvedSQL + ` = a.id
+		     AND ` + areaResolved + ` = a.id
 		     AND ` + deskLive + `
 		     AND ` + cond + `
 		)`
@@ -432,12 +440,16 @@ func (tx *UserTx) DrawerReport(ctx context.Context, now time.Time) (DrawerReport
 		return DrawerReportRows{}, fmt.Errorf("store: drawer report (desk preferences): %w", err)
 	}
 
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return DrawerReportRows{}, err
+	}
 	args := []any{tx.userID.String(), now.UTC(), prefs.DrawerDefaultDays}
 	bind := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-	areaJoins, _, _ := areaJoinSQL(bind, nil)
+	areaJoins, areaResolved := areaSourceSQL(stored, bind, nil)
 	deskLive := deskLiveSQL(bind, tx.userID, nil)
 	hasArchive := hasArchiveMailboxSQL()
 	thresholdPH := bind(prefs.LineThreshold)
@@ -453,7 +465,7 @@ func (tx *UserTx) DrawerReport(ctx context.Context, now time.Time) (DrawerReport
 	                AND NOT b.already_swept AND NOT b.no_archive`
 	query := `
 		WITH base AS (
-			SELECT m.id, ` + areaResolvedSQL + ` AS area_id, m.is_flagged, m.pinned_at,
+			SELECT m.id, ` + areaResolved + ` AS area_id, m.is_flagged, m.pinned_at,
 			       m.snoozed_until, ` + lineSideSQL("t.score", thresholdPH) + ` AS side, m.received_at,
 			       EXISTS (SELECT 1 FROM app.drawer_archives da
 			                WHERE da.user_id = m.user_id AND da.message_id = m.id) AS already_swept,
@@ -541,7 +553,7 @@ func (tx *UserTx) DrawerReport(ctx context.Context, now time.Time) (DrawerReport
 		uArgs = append(uArgs, v)
 		return "$" + strconv.Itoa(len(uArgs))
 	}
-	uAreaJoins, _, _ := areaJoinSQL(ubind, nil)
+	uAreaJoins, uAreaResolved := areaSourceSQL(stored, ubind, nil)
 	uDeskLive := deskLiveSQL(ubind, tx.userID, nil)
 	var unsorted int
 	if err := tx.tx.QueryRow(ctx, `
@@ -551,7 +563,7 @@ func (tx *UserTx) DrawerReport(ctx context.Context, now time.Time) (DrawerReport
 		   AND NOT m.is_junk AND m.trashed_at IS NULL AND m.vanished_at IS NULL AND NOT m.is_draft
 		   AND m.moved_mailbox_id IS NULL
 		   AND `+uDeskLive+`
-		   AND `+areaResolvedSQL+` IS NULL`, uArgs...).Scan(&unsorted); err != nil {
+		   AND `+uAreaResolved+` IS NULL`, uArgs...).Scan(&unsorted); err != nil {
 		return DrawerReportRows{}, fmt.Errorf("store: drawer report (needs sorting): %w", err)
 	}
 	out.NeedsSorting = DrawerAreaReport{AreaName: "Needs sorting", Candidates: unsorted}

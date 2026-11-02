@@ -126,6 +126,10 @@ func DeskSectionQuery(sec DeskSectionPage, scope DeskScope) EmailQuery {
 // See this file's header for the shape and why it agrees with AreaSummary and
 // per-section QueryEmails by construction.
 func (tx *UserTx) DeskSnapshot(ctx context.Context, q DeskSnapshotQuery) (DeskSnapshotResult, error) {
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return DeskSnapshotResult{}, err
+	}
 	args := []any{tx.userID.String(), q.Scope.Threshold}
 	bind := func(v any) string {
 		args = append(args, v)
@@ -134,7 +138,7 @@ func (tx *UserTx) DeskSnapshot(ctx context.Context, q DeskSnapshotQuery) (DeskSn
 
 	var b strings.Builder
 	b.WriteString(`
-		WITH desk AS MATERIALIZED (` + deskResolvedSQL(bind, tx.userID, q.Scope.AccountID, "$2") + `),
+		WITH desk AS MATERIALIZED (` + deskResolvedSQL(bind, tx.userID, q.Scope.AccountID, "$2", stored) + `),
 		` + areaSummaryCTEs("desk") + `,
 		summary AS (SELECT * FROM by_area UNION ALL SELECT * FROM unsorted)`)
 

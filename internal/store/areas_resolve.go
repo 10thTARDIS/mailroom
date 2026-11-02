@@ -344,17 +344,46 @@ func (tx *UserTx) ResolveAreas(ctx context.Context, ids []ulid.ULID) (map[ulid.U
 		return out, nil
 	}
 
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return nil, err
+	}
 	args := []any{tx.userID.String(), ulidStrings(ids)}
 	bind := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
-	joins, labelArea, tabArea := areaJoinSQL(bind, func(col string) string { return col + " = ANY($2)" })
+	var query string
+	if stored {
+		// The stored column IS the answer (ADR-049); what it does not carry is
+		// WHICH arm decided it. A label decided it exactly when a label of the
+		// message feeds that area: the resolver is labels-first, so if one does
+		// the label arm is non-null (and wins), and if the label arm is
+		// non-null the winner is a label-fed area. The label arm is reported
+		// in the first column and the tab arm in the second, as below.
+		query = `
+		SELECT m.id,
+		       CASE WHEN m.area_id IS NOT NULL AND EXISTS (
+		              SELECT 1 FROM app.message_labels ml
+		                JOIN app.area_feeds f ON f.user_id = ml.user_id AND f.label_id = ml.label_id
+		               WHERE ml.user_id = m.user_id AND ml.message_id = m.id AND f.area_id = m.area_id)
+		            THEN m.area_id END,
+		       CASE WHEN m.area_id IS NOT NULL AND NOT EXISTS (
+		              SELECT 1 FROM app.message_labels ml
+		                JOIN app.area_feeds f ON f.user_id = ml.user_id AND f.label_id = ml.label_id
+		               WHERE ml.user_id = m.user_id AND ml.message_id = m.id AND f.area_id = m.area_id)
+		            THEN m.area_id END
+		  FROM app.messages m
+		 WHERE m.user_id = $1 AND m.id = ANY($2)`
+	} else {
+		joins, labelArea, tabArea := areaJoinSQL(bind, func(col string) string { return col + " = ANY($2)" })
+		query = `
+		SELECT m.id, ` + labelArea + `, ` + tabArea + `
+		  FROM app.messages m` + joins + `
+		 WHERE m.user_id = $1 AND m.id = ANY($2)`
+	}
 
-	rows, err := tx.tx.Query(ctx, `
-		SELECT m.id, `+labelArea+`, `+tabArea+`
-		  FROM app.messages m`+joins+`
-		 WHERE m.user_id = $1 AND m.id = ANY($2)`, args...)
+	rows, err := tx.tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve areas: %w", err)
 	}
@@ -583,7 +612,20 @@ func lineSideSQL(scoreExpr string, thresholdBind string) string {
 // filter on it. Exact for areaInDeskSQL's reason: the scope narrows WHICH
 // messages are resolved, never HOW (a desk message keeps every one of its label
 // rows), and every message outside it fails the desk predicate anyway.
-func deskResolvedSQL(bind func(any) string, userID ulid.ULID, accountID *ulid.ULID, thresholdPH string) string {
+//
+// stored (the user's area index is ready, area_source.go) reads m.area_id
+// instead: no resolver joins and nothing to scope, so the desk predicate is
+// the only filter.
+func deskResolvedSQL(bind func(any) string, userID ulid.ULID, accountID *ulid.ULID, thresholdPH string, stored bool) string {
+	if stored {
+		return `
+			SELECT m.id, m.area_id AS area_id, ` + lineSideSQL("t.score", thresholdPH) + ` AS side
+			  FROM app.messages m
+			  LEFT JOIN app.triage_scores t ON t.user_id = m.user_id AND t.message_id = m.id
+			 WHERE m.user_id = $1
+			   AND ` + deskMessageSQL(bind, userID, accountID) + `
+		`
+	}
 	return deskResolvedSQLScoped(bind, userID, accountID, thresholdPH, true)
 }
 
@@ -661,6 +703,10 @@ func areaSummaryCTEs(desk string) string {
 // it is the same bucket, and renaming it would break every client over a
 // widened edge case.
 func (tx *UserTx) AreaSummary(ctx context.Context, scope DeskScope) ([]AreaCounts, error) {
+	stored, err := tx.areaIndexReady(ctx)
+	if err != nil {
+		return nil, err
+	}
 	args := []any{tx.userID.String(), scope.Threshold}
 	bind := func(v any) string {
 		args = append(args, v)
@@ -668,7 +714,7 @@ func (tx *UserTx) AreaSummary(ctx context.Context, scope DeskScope) ([]AreaCount
 	}
 
 	query := `
-		WITH desk AS (` + deskResolvedSQL(bind, tx.userID, scope.AccountID, "$2") + `),
+		WITH desk AS (` + deskResolvedSQL(bind, tx.userID, scope.AccountID, "$2", stored) + `),
 		` + areaSummaryCTEs("desk") + `
 		SELECT area_id, surface, drawer, unscored
 		  FROM (SELECT * FROM by_area UNION ALL SELECT * FROM unsorted) x

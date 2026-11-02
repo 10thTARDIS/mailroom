@@ -193,5 +193,6 @@ func (tx *UserTx) MarkAreaIndexReady(ctx context.Context) error {
 		tx.userID.String()); err != nil {
 		return fmt.Errorf("store: mark area index ready: %w", err)
 	}
+	tx.areaReady = nil
 	return nil
 }

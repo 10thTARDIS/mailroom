@@ -121,6 +121,8 @@ type UserTx struct {
 	// writebackDisabled is the instance-level half of the ingest-only switch,
 	// copied from the Store at transaction start (ADR-028 §2).
 	writebackDisabled bool
+	// areaReady caches areaIndexReady for this transaction (nil = not read).
+	areaReady *bool
 }
 
 // UserID returns the identity this transaction is scoped to.

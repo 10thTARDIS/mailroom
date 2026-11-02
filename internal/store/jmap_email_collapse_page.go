@@ -10,8 +10,11 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
-// A thread-collapsed list sorted by date (every area, drawer and desk list) is
-// served here by a BOUNDED scan instead of the full ranking in QueryEmails.
+// A thread-collapsed area list in arrival order, for a user whose area index is
+// ready (ADR-049), is served here by a BOUNDED scan instead of the full ranking
+// in QueryEmails. (A user who is not ready keeps the full ranking: the scan is
+// only worth having when each batch is an index range and not a fresh
+// resolution of the whole area.)
 //
 // The full ranking numbers every matching message inside its thread, sorts the
 // lot and counts it before LIMIT is applied, so the first page of a large area
@@ -28,7 +31,7 @@ import (
 //
 // `total` (distinct threads in the filter) is free when the scan reached the
 // end of the area; otherwise one separate count of distinct threads is run,
-// which needs no ranking or sorting.
+// which needs no ranking or sorting, and reads the same index range.
 
 // collapseBatchBase is the first batch's size; it doubles per batch up to
 // collapseBatchMax. A variable so a test can make a small fixture loop.
@@ -42,7 +45,9 @@ var (
 const collapseThreadKey = `COALESCE(m.thread_id::text, 'msg:' || m.id::text)`
 
 // collapseBoundedEligible reports whether q is the shape the bounded scan
-// serves: collapsed, ordered by a date key then id and nothing else. The
+// serves: an area list (inArea or unsorted) on the STORED path, collapsed,
+// ordered by effective arrival then id and nothing else. The caller has
+// already established that the user's area index is ready. The
 // search-relevance, priority and suggestion-confidence orders put extra
 // leading keys in front and stay on the full ranking, as do negative
 // position/limit values (the full ranking leaves those to Postgres).
@@ -53,10 +58,11 @@ func collapseBoundedEligible(q EmailQuery) bool {
 	if q.SortByPriority || q.SortBySuggestionConfidence {
 		return false
 	}
-	if q.SortByRank && len(q.RestrictIDs) > 0 {
+	if q.SortByRank {
 		return false
 	}
-	return true
+	// The order the area index holds, and so the one a range scan can walk.
+	return q.SortByEffectiveArrival && (q.InArea != nil || q.Unsorted)
 }
 
 // queryCollapsedBounded runs the scan. base holds the arguments already bound
