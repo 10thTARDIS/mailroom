@@ -66,15 +66,19 @@ func runAreaIndex(ctx context.Context, args []string) error {
 	return areaIndex(ctx, os.Stdout, d.store, users, *apply, *batch)
 }
 
+// say writes one formatted report line; the report goes to a terminal or a
+// test buffer, where a failed write has nowhere better to be reported.
+func say(w io.Writer, format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
+
 func areaIndex(ctx context.Context, w io.Writer, st *store.Store, users []ulid.ULID, apply bool, batch int) error {
-	fmt.Fprintf(w, "area-index: %d user(s)\n", len(users))
+	say(w, "area-index: %d user(s)\n", len(users))
 	for _, u := range users {
 		if err := areaIndexUser(ctx, w, st, u, apply, batch); err != nil {
 			return fmt.Errorf("area-index: user %s: %w", u, err)
 		}
 	}
 	if !apply {
-		fmt.Fprintln(w, "\nREPORT ONLY - nothing was written. Re-run with --apply to backfill and mark users ready.")
+		say(w, "\nREPORT ONLY - nothing was written. Re-run with --apply to backfill and mark users ready.\n")
 	}
 	return nil
 }
@@ -101,7 +105,7 @@ func areaIndexUser(ctx context.Context, w io.Writer, st *store.Store, u ulid.ULI
 	if err := read(); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\nuser %s\n", u)
+	say(w, "\nuser %s\n", u)
 	printAreaIndexReport(w, rep, names)
 	if !apply {
 		return nil
@@ -130,21 +134,21 @@ func areaIndexUser(ctx context.Context, w io.Writer, st *store.Store, u ulid.ULI
 		}
 		after, scanned, changed = last, scanned+s, changed+c
 	}
-	fmt.Fprintf(w, "  applied: scanned %d message(s), wrote %d\n", scanned, changed)
+	say(w, "  applied: scanned %d message(s), wrote %d\n", scanned, changed)
 
 	if err := read(); err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "  after the backfill:")
+	say(w, "  after the backfill:\n")
 	printAreaIndexReport(w, rep, names)
 	if n := rep.Disagreeing(); n != 0 {
-		fmt.Fprintf(w, "  NOT marked ready: %d message(s) still disagree with the resolver\n", n)
+		say(w, "  NOT marked ready: %d message(s) still disagree with the resolver\n", n)
 		return nil
 	}
 	if err := st.UserTx(ctx, u, func(tx *store.UserTx) error { return tx.MarkAreaIndexReady(ctx) }); err != nil {
 		return err
 	}
-	fmt.Fprintln(w, "  marked ready: 0 disagreements")
+	say(w, "  marked ready: 0 disagreements\n")
 	return nil
 }
 
@@ -162,9 +166,9 @@ func printAreaIndexReport(w io.Writer, rep store.AreaIndexReport, names map[ulid
 	if rep.ReadyAt != nil {
 		ready = "ready since " + rep.ReadyAt.UTC().Format("2006-01-02 15:04:05Z")
 	}
-	fmt.Fprintf(w, "  messages: %d   stored area set: %d   %s\n", rep.Messages, rep.StoredSet, ready)
-	fmt.Fprintf(w, "  disagreeing with the resolver (rows --apply would write): %d\n", rep.Disagreeing())
+	say(w, "  messages: %d   stored area set: %d   %s\n", rep.Messages, rep.StoredSet, ready)
+	say(w, "  disagreeing with the resolver (rows --apply would write): %d\n", rep.Disagreeing())
 	for _, d := range rep.Disagreements {
-		fmt.Fprintf(w, "    %-28s -> %-28s via %-5s %d\n", label(d.Stored), label(d.Resolved), d.Via, d.Count)
+		say(w, "    %-28s -> %-28s via %-5s %d\n", label(d.Stored), label(d.Resolved), d.Via, d.Count)
 	}
 }
