@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.6] — 2026-11-02
+
+**The sixth beta of 1.99.0: the desk loads faster on a large mailbox.** The desk and its per-area counts used to work out the area of every message you have before keeping the ones on the desk. They now look only at the desk's messages. Nothing you see changes.
+
 ### Faster
 
 - **The desk and its area counts load faster on a large mailbox.** To show the desk, Mailroom works out which area each message belongs to. It used to do that for every message you have and then keep only the ones on the desk. It now works out only the desk's messages, which on a long-used mailbox is a small fraction of the work. What you see is exactly the same.
