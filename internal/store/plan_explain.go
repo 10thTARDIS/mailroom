@@ -162,4 +162,3 @@ func (tx *UserTx) ExplainAnalyze(ctx context.Context, c CapturedStatement) (stri
 	}
 	return sb.String(), nil
 }
-
