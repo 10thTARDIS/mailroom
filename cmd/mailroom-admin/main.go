@@ -107,6 +107,9 @@
 //	                   plan through the one place that can until the desk client exists —
 //	                   diffs the file against the STORED areas and creates/updates; never
 //	                   deletes a stored area the plan omits.)
+//	area-index         [--user-id] [--apply] [--batch N]   (ADR-049: the stored resolved area.
+//	                   Report-only by default: per user, where messages.area_id disagrees
+//	                   with the resolver. --apply backfills it and marks the user ready.)
 //	materialize-area-labels --user-id [--apply] [--batch N] [--verbose]
 //	                   (#442 increment 3: write an area's own label onto existing mail
 //	                   that only landed there via its tab verdict — "areas are labels".
@@ -443,6 +446,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"tabs":                      runTabs,
 	"area-report":               runAreaReport,
 	"area-plan":                 runAreaPlan,
+	"area-index":                runAreaIndex,
 	"materialize-area-labels":   runMaterializeAreaLabels,
 	"classify-tabs":             runClassifyTabs,
 	"map-label-tabs":            runMapLabelTabs,
