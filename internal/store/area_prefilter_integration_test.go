@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -854,4 +855,70 @@ func TestAreaOnDeskScopeAgreesWithFullResolution(t *testing.T) {
 	}
 	n := 0
 	t.Log("generated:", AreaPredicateOnDesk(f.areas["Promotions"], func(any) string { n++; return fmt.Sprintf("$%d", n+1) }, "(<desk predicate>)"))
+}
+
+// The desk-scoped resolver behind AreaSummary and DeskSnapshot (#27) must
+// return exactly the rows the unscoped one does: every desk message, its area
+// and its side of the line, with and without an account scope.
+func TestDeskResolvedScopeAgreesWithFullResolution(t *testing.T) {
+	f := seedPrefilterFixture(t)
+	d := f.d
+	ctx := context.Background()
+	acct := d.accountA
+
+	resolve := func(tx *UserTx, accountID *ulid.ULID, scoped bool) []string {
+		t.Helper()
+		args := []any{tx.userID.String(), 0.5}
+		bind := func(v any) string {
+			args = append(args, v)
+			return "$" + strconv.Itoa(len(args))
+		}
+		body := deskResolvedSQLScoped(bind, tx.userID, accountID, "$2", scoped)
+		rows, err := tx.tx.Query(ctx, `SELECT id, COALESCE(area_id::text, '-'), COALESCE(side, '-') FROM (`+body+`) r ORDER BY id`, args...)
+		if err != nil {
+			t.Fatalf("scoped=%v: %v", scoped, err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var id, area, side string
+			if err := rows.Scan(&id, &area, &side); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, id+" "+area+" "+side)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	var total int
+	var areasSeen = map[string]bool{}
+	for _, accountID := range []*ulid.ULID{nil, &acct} {
+		if err := d.st.UserTx(ctx, d.userID, func(tx *UserTx) error {
+			full := resolve(tx, accountID, false)
+			scoped := resolve(tx, accountID, true)
+			if !slices.Equal(full, scoped) {
+				t.Errorf("account=%v: scoped resolution differs\n full:   %v\n scoped: %v", accountID != nil, full, scoped)
+			}
+			total += len(full)
+			for _, r := range full {
+				areasSeen[strings.Fields(r)[1]] = true
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Not vacuous: desk rows exist, they resolve to several areas (and Needs
+	// sorting), and some of the user's messages are off the desk, so the scope
+	// actually excludes something.
+	var all int
+	if err := d.h.super.QueryRow(ctx, `SELECT count(*) FROM app.messages WHERE user_id = $1`, d.userID.String()).Scan(&all); err != nil {
+		t.Fatal(err)
+	}
+	if total == 0 || len(areasSeen) < 3 || all*2 <= total {
+		t.Fatalf("vacuous fixture: %d desk rows over two scopes, %d distinct areas, %d messages in all", total, len(areasSeen), all)
+	}
 }

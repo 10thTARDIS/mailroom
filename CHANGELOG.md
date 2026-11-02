@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **The desk and its area counts load faster on a large mailbox.** To show the desk, Mailroom works out which area each message belongs to. It used to do that for every message you have and then keep only the ones on the desk. It now works out only the desk's messages, which on a long-used mailbox is a small fraction of the work. What you see is exactly the same.
+
 ## [1.99.0-beta.5] — 2026-11-02
 
 **The fifth beta of 1.99.0: a deeper diagnostic for the person who runs Mailroom.** Nothing changes in how Mailroom looks or behaves. The read-only `plan-check` command can now show exactly how the database answers the desk, area views and mailbox counts, so the slow steps can be found and fixed.
