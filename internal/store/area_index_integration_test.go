@@ -66,6 +66,11 @@ func newAIWorld(t *testing.T, h *harness, tag string, rng *rand.Rand) *aiWorld {
 	t.Helper()
 	u := seedUser(t, h.super, tag)
 	w := &aiWorld{h: h, s: h.appStore(), userID: mustULID(t, u.ID), tag: tag, rng: rng, kinds: map[string]int{}}
+	// Label changes through the store enqueue writeback jobs; leave none due behind
+	// (the dispatcher test claims at most 50 and would not find its own).
+	t.Cleanup(func() {
+		_, _ = h.super.Exec(context.Background(), `DELETE FROM app.jobs WHERE user_id = $1`, w.userID.String())
+	})
 	// seedUser's own mail would muddy the count; the world below is self-contained
 	// but the user's fixture rows stay (they are not areas or labels).
 	ctx := context.Background()
