@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **Checking for new mail uses far less database time.** Mailroom asks the database "has anything changed?" every few seconds, for every open window and for its search index. On a server with one user, the database had settled on a way of answering that read the whole change history each time. It now works out the answer from the index, so this constant background check costs a small fraction of what it did. The same fix applies to the sender lookup used when scoring new mail.
+
 ## [1.99.0-beta.2] — 2026-11-01
 
 **The second beta of 1.99.0: when you keep moving one sender's mail by hand, Mailroom offers to make a rule.** Learned placement can't help with every sender: some have been filed in more than one place, and some send mail that can't be confirmed as genuine. Until now you just kept moving their mail yourself. This beta notices, and offers a one-tap rule right under the move.
