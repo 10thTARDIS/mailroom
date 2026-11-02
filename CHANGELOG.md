@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.4] — 2026-11-02
+
+**The fourth beta of 1.99.0: a diagnostic for the person who runs Mailroom.** Nothing changes in how Mailroom looks or behaves. This beta adds a read-only check that shows whether the desk, the area views and the mailbox counts would get faster with a different database planning style, so the next speed work goes where it actually helps.
+
 ### Under the hood
 
 - **A new read-only operator check for slow database plans.** `mailroom-admin
