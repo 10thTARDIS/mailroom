@@ -79,7 +79,9 @@ func oldCollapsedQuery(t *testing.T, tx *UserTx, q EmailQuery) ([]string, int) {
 	return ids, total
 }
 
-func TestCollapsedPageAgreesWithFullRanking(t *testing.T) {
+func TestCollapsedPageAgreesWithFullRanking(t *testing.T) { eachAreaMode(t, testCollapsedPageAgreesWithFullRanking) }
+
+func testCollapsedPageAgreesWithFullRanking(t *testing.T, ready bool) {
 	old := collapseBatchBase
 	collapseBatchBase = 2
 	t.Cleanup(func() { collapseBatchBase = old })
@@ -104,6 +106,9 @@ func TestCollapsedPageAgreesWithFullRanking(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if ready {
+		readyAreaIndex(t, d.st, d.userID)
+	}
 	yes := true
 	var areas []*ulid.ULID
 	if err := d.st.UserTx(ctx, d.userID, func(tx *UserTx) error {
@@ -178,6 +183,20 @@ func TestCollapsedPageAgreesWithFullRanking(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+	// The bounded page serves a ready user's area lists and nobody else's: the
+	// comparison above is only a comparison of two different statements if it ran.
+	bounded := 0
+	for _, st := range d.rec.stmts {
+		if strings.Contains(st.sql, "/* collapsed page */") {
+			bounded++
+		}
+	}
+	if ready && bounded == 0 {
+		t.Fatal("a ready user's area lists never used the bounded page: this run compared the full ranking with itself")
+	}
+	if !ready && bounded != 0 {
+		t.Fatalf("a user who is not ready sent %d bounded-page statements", bounded)
 	}
 	// Agreement over empty results proves nothing: the matrix must have
 	// compared real pages.

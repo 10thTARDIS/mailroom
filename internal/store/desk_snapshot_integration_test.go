@@ -133,7 +133,9 @@ func sectionByHand(areaID *ulid.ULID, account *ulid.ULID, threshold float32, pos
 	return q
 }
 
-func TestDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T) {
+func TestDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T) { eachAreaMode(t, testDeskSnapshotAgreesWithQueryEmailsAndAreaSummary) }
+
+func testDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T, ready bool) {
 	d := seedDeskScale(t, 1500)
 	shapes := deskAgreementExtras(t, d)
 	for name, n := range shapes {
@@ -142,6 +144,9 @@ func TestDeskSnapshotAgreesWithQueryEmailsAndAreaSummary(t *testing.T) {
 		}
 	}
 	t.Logf("extra shapes: %v", shapes)
+	if ready {
+		readyAreaIndex(t, d.st, d.userID)
+	}
 	ctx := context.Background()
 
 	var areaIDs []*ulid.ULID
