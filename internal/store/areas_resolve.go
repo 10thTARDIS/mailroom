@@ -574,14 +574,47 @@ func lineSideSQL(scoreExpr string, thresholdBind string) string {
 //
 // The caller's $1 must be its own user id; bind registers the remaining
 // parameters (the resolver's tab precedence, deskLiveSQL's user/account).
+//
+// THE RESOLVER IS SCOPED TO THE DESK (#27), as areaInDeskSQL is for a drawer:
+// the desk is a few hundred messages on a mailbox of tens of thousands, and an
+// unrestricted areaJoinSQL sorts and de-duplicates the label rows of EVERY
+// message the user has, twice, only for the outer WHERE to keep the desk.
+// desk_scope materialises the desk's ids once and both DISTINCT ON subqueries
+// filter on it. Exact for areaInDeskSQL's reason: the scope narrows WHICH
+// messages are resolved, never HOW (a desk message keeps every one of its label
+// rows), and every message outside it fails the desk predicate anyway.
 func deskResolvedSQL(bind func(any) string, userID ulid.ULID, accountID *ulid.ULID, thresholdPH string) string {
-	areaJoins, _, _ := areaJoinSQL(bind, nil)
-	return `
+	return deskResolvedSQLScoped(bind, userID, accountID, thresholdPH, true)
+}
+
+// deskResolvedSQLScoped is deskResolvedSQL with the desk scope switchable, so
+// a test can prove the scoped and unscoped resolutions return the same rows.
+func deskResolvedSQLScoped(bind func(any) string, userID ulid.ULID, accountID *ulid.ULID, thresholdPH string, scoped bool) string {
+	if !scoped {
+		areaJoins, _, _ := areaJoinSQL(bind, nil)
+		return `
 			SELECT m.id, ` + areaResolvedSQL + ` AS area_id, ` + lineSideSQL("t.score", thresholdPH) + ` AS side
 			  FROM app.messages m
 			  LEFT JOIN app.triage_scores t ON t.user_id = m.user_id AND t.message_id = m.id` + areaJoins + `
 			 WHERE m.user_id = $1
 			   AND ` + deskMessageSQL(bind, userID, accountID) + `
+		`
+	}
+	inScope := func(col string) string {
+		return `(` + col + ` IN (SELECT s.id FROM desk_scope s)) IS TRUE`
+	}
+	areaJoins, _, _ := areaJoinSQL(bind, inScope)
+	return `
+			WITH desk_scope AS MATERIALIZED (
+			  SELECT m.id FROM app.messages m
+			   WHERE m.user_id = $1
+			     AND ` + deskMessageSQL(bind, userID, accountID) + `
+			)
+			SELECT m.id, ` + areaResolvedSQL + ` AS area_id, ` + lineSideSQL("t.score", thresholdPH) + ` AS side
+			  FROM app.messages m
+			  LEFT JOIN app.triage_scores t ON t.user_id = m.user_id AND t.message_id = m.id` + areaJoins + `
+			 WHERE m.user_id = $1
+			   AND ` + inScope("m.id") + `
 		`
 }
 
