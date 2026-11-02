@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.3] — 2026-11-02
+
+**The third beta of 1.99.0: learned sorting shows its work, and checking for new mail is much lighter on the server.** Settings now tells you what learned sorting has filed for you, and which senders you keep moving by hand that it isn't picking up, each with a one-tap rule. Separately, the constant "has anything changed?" check that every open window and the search index make now uses the database index instead of reading the whole change history each time.
+
 ### What's new
 
 - **Settings now show what learned sorting has been doing.** Under the Learned
