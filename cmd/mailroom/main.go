@@ -1073,6 +1073,7 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 	// The download-time verdict of an attachment of a decrypted message (#47):
 	// one INFO line (always) and mailroom_ondemand_scan_total{verdict}.
 	opts = append(opts, api.WithOnDemandObserver(onDemandScanObserver(m)))
+	opts = append(opts, api.WithMailboxCacheObserver(mailboxCacheObserver(m)))
 	// Recipient key lookup for encrypted sends (#47, ADR-038): WKD, through the
 	// same SSRF-guarded egress client key discovery uses (https only, short
 	// timeout, key-sized byte cap). The host it fetches from is derived from a

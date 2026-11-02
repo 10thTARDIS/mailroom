@@ -150,3 +150,20 @@ func onDemandScanObserver(m *metrics.Metrics) func(verdict string) {
 		}
 	}
 }
+
+// mailboxCacheObserver is the api.WithMailboxCacheObserver sink: it counts each
+// Mailbox/get all-mailboxes lookup as a cache hit or a recount. A nil m counts
+// nothing. Both labels are created at zero at boot, for the reason proxyObserver
+// gives.
+func mailboxCacheObserver(m *metrics.Metrics) func(result string) {
+	if m != nil {
+		for _, r := range api.MailboxCacheResults() {
+			m.MailboxCountsCacheTotal.WithLabelValues(r)
+		}
+	}
+	return func(result string) {
+		if m != nil {
+			m.MailboxCountsCacheTotal.WithLabelValues(result).Inc()
+		}
+	}
+}
