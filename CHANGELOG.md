@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.7] — 2026-11-02
+
+**The seventh beta of 1.99.0: folder counts are only recounted when something changed.** Your mail app asks for folder counts every time it refreshes. Mailroom now remembers the last answer and recounts only when mail or folders have actually changed, so an idle refresh costs almost nothing. Nothing you see changes.
+
 ### Faster
 
 - **Refreshing your mail folders is now nearly free when nothing has changed.** Mailroom used to recount the total and unread mail in every folder each time a client asked for the folder list, even when no mail had arrived, moved or been read since the last time. It now remembers the last answer for each person and reuses it for as long as nothing that could change a count or a folder name has happened; the moment mail arrives, is read, moved or deleted, or a folder is renamed, the next request recounts. What you see is exactly the same, and the operator gets a new `mailroom_mailbox_counts_cache_total` metric (hit or miss) to watch it work.
