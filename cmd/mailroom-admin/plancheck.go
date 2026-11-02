@@ -9,10 +9,12 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
 
+	"mailroom/internal/config"
 	"mailroom/internal/store"
 )
 
@@ -52,6 +54,8 @@ func runPlanCheck(ctx context.Context, args []string) error {
 	var (
 		userIDStr = fs.String("user-id", "", "user id (ULID)")
 		runs      = fs.Int("runs", 3, "timed runs per path per plan mode")
+		explain   = fs.Bool("explain", false, "print the real EXPLAIN (ANALYZE, BUFFERS) plan of every statement each path sends")
+		pathSel   = fs.String("path", "", "with --explain: only the path whose name starts with this (e.g. Area/getDesk)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -62,6 +66,21 @@ func runPlanCheck(ctx context.Context, args []string) error {
 	}
 	if *runs < 1 || *runs > 50 {
 		return fmt.Errorf("--runs %d: must be between 1 and 50", *runs)
+	}
+	if *pathSel != "" && !*explain {
+		return fmt.Errorf("--path only applies with --explain")
+	}
+	if *explain {
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		st, rec, err := store.OpenRecording(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return fmt.Errorf("open store: %w", err)
+		}
+		defer st.Close()
+		return planExplain(ctx, os.Stdout, st, rec, userID, *pathSel)
 	}
 	d, err := openDeps(ctx)
 	if err != nil {
@@ -121,20 +140,30 @@ func planCheckRun(ctx context.Context, tx *store.UserTx, runs int) ([]planPathRe
 	if err := tx.SetStatementTimeout(ctx, planCheckStatementTimeout); err != nil {
 		return nil, err
 	}
+	paths, emailPath, err := planCheckPaths(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	return planCheckTimeAll(ctx, tx, paths, emailPath, runs)
+}
+
+// planCheckPaths builds the hot paths from the user's own state (read in tx),
+// exactly as the API handlers do. emailPath is nil when no area holds mail.
+func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, emailPath *planPath, err error) {
 
 	// Setup, exactly as the API handlers do it, untimed.
 	views, err := tx.ListAreas(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prefs, err := tx.GetDeskPreferences(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scope := store.DeskScope{Threshold: prefs.LineThreshold}
 	counts, err := tx.AreaSummary(ctx, scope)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var largest *ulid.ULID
 	best := 0
@@ -151,7 +180,7 @@ func planCheckRun(ctx context.Context, tx *store.UserTx, runs int) ([]planPathRe
 	}
 	sections = append(sections, store.DeskSectionPage{Limit: planCheckPageSize})
 
-	paths := []planPath{
+	paths = []planPath{
 		{"Area/getSummary: AreaSummary", func(ctx context.Context, tx *store.UserTx) (int, error) {
 			c, err := tx.AreaSummary(ctx, scope)
 			return len(c), err
@@ -177,7 +206,6 @@ func planCheckRun(ctx context.Context, tx *store.UserTx, runs int) ([]planPathRe
 			return len(mv), err
 		}},
 	}
-	var emailPath *planPath
 	if largest != nil && best > 0 {
 		area := *largest
 		emailPath = &planPath{"Email/query: largest area, first page", func(ctx context.Context, tx *store.UserTx) (int, error) {
@@ -193,7 +221,11 @@ func planCheckRun(ctx context.Context, tx *store.UserTx, runs int) ([]planPathRe
 			return len(ids), err
 		}}
 	}
+	return paths, emailPath, nil
+}
 
+// planCheckTimeAll times every path (the email path right after the desk).
+func planCheckTimeAll(ctx context.Context, tx *store.UserTx, paths []planPath, emailPath *planPath, runs int) ([]planPathResult, error) {
 	var out []planPathResult
 	for _, p := range paths {
 		r, err := planCheckPath(ctx, tx, p, runs)
@@ -304,6 +336,131 @@ func printPlanCheck(w io.Writer, results []planPathResult, runs int) {
 			p("  %-42s generic plan is slower by %.1fx - candidate for planForValues\n", r.Name, ratio)
 		} else {
 			p("  %-42s no plan-mode effect\n", r.Name)
+		}
+	}
+	p("\nREAD ONLY: nothing was written (rolled back).\n")
+}
+
+const (
+	// planExplainStatementTimeout bounds each EXPLAIN ANALYZE, which executes
+	// the statement under the custom plan.
+	planExplainStatementTimeout = 60 * time.Second
+	planExplainSQLHeader        = 160
+)
+
+// planExplainStatement is one captured statement with its plan.
+type planExplainStatement struct {
+	Pos  int // 1-based position among the path's captured statements
+	SQL  string
+	Plan string
+	Exec time.Duration // "Execution Time" from the plan; 0 when absent
+}
+
+// planExplainPath is one path's captured statements with plans.
+type planExplainPath struct {
+	Name       string
+	Skipped    string
+	Statements []planExplainStatement
+}
+
+// planExecTime parses the "Execution Time: 12.345 ms" line of a plan.
+func planExecTime(plan string) time.Duration {
+	for _, line := range strings.Split(plan, "\n") {
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "Execution Time:"); ok {
+			var ms float64
+			if _, err := fmt.Sscanf(strings.TrimSpace(v), "%f", &ms); err == nil {
+				return time.Duration(ms * float64(time.Millisecond))
+			}
+		}
+	}
+	return 0
+}
+
+// planExplain runs each hot path once under a custom plan, capturing the
+// statements the store sends, then EXPLAINs each captured SELECT/WITH with its
+// captured arguments in the same read-only transaction (rolled back).
+func planExplain(ctx context.Context, w io.Writer, st *store.Store, rec *store.StatementRecorder, userID ulid.ULID, pathSel string) error {
+	var results []planExplainPath
+	if err := st.UserReadTx(ctx, userID, func(tx *store.UserTx) error {
+		if err := tx.SetStatementTimeout(ctx, planExplainStatementTimeout); err != nil {
+			return err
+		}
+		paths, emailPath, err := planCheckPaths(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if emailPath != nil {
+			paths = append(paths, *emailPath)
+		} else if pathSel == "" || strings.HasPrefix("Email/query: largest area, first page", pathSel) {
+			results = append(results, planExplainPath{Name: "Email/query: largest area, first page",
+				Skipped: "no area holds any mail on the desk, so there is no area view to page"})
+		}
+		if err := tx.SetPlanCacheMode(ctx, store.PlanCacheForceCustom); err != nil {
+			return err
+		}
+		for _, p := range paths {
+			if pathSel != "" && !strings.HasPrefix(p.name, pathSel) {
+				continue
+			}
+			rec.Start()
+			_, runErr := p.run(ctx, tx)
+			captured := rec.Stop()
+			if runErr != nil {
+				return fmt.Errorf("%s: %w", p.name, runErr)
+			}
+			r := planExplainPath{Name: p.name}
+			pos := 0
+			for _, c := range captured {
+				if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c.SQL)), "SELECT") &&
+					!strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c.SQL)), "WITH") {
+					continue
+				}
+				if strings.Contains(c.SQL, "set_config(") || strings.Contains(c.SQL, "current_setting(") {
+					continue
+				}
+				pos++
+				plan, err := tx.ExplainAnalyze(ctx, c)
+				if err != nil {
+					return fmt.Errorf("%s statement %d: %w", p.name, pos, err)
+				}
+				r.Statements = append(r.Statements, planExplainStatement{Pos: pos, SQL: c.SQL, Plan: plan, Exec: planExecTime(plan)})
+			}
+			sort.SliceStable(r.Statements, func(i, j int) bool { return r.Statements[i].Exec > r.Statements[j].Exec })
+			results = append(results, r)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("plan-check --explain: %w (a user whose desk was never opened has no areas or desk preferences yet, and this command cannot create them)", err)
+	}
+	if pathSel != "" && len(results) == 0 {
+		return fmt.Errorf("plan-check --explain: no path name starts with %q", pathSel)
+	}
+	printPlanExplain(w, results)
+	return nil
+}
+
+func printPlanExplain(w io.Writer, results []planExplainPath) {
+	p := func(f string, a ...any) { _, _ = fmt.Fprintf(w, f, a...) }
+	p("Plans may include values from your own mail (addresses, label ids). Do not paste them into public places.\n\n")
+	p("=== plan-check --explain: real plans of the statements each hot path sends (custom plan mode, one run) ===\n")
+	for _, r := range results {
+		p("\n##### %s\n", r.Name)
+		if r.Skipped != "" {
+			p("not exercised: %s\n", r.Skipped)
+			continue
+		}
+		if len(r.Statements) == 0 {
+			p("no SELECT statements were sent\n")
+			continue
+		}
+		for _, s := range r.Statements {
+			sql := strings.Join(strings.Fields(s.SQL), " ")
+			if len(sql) > planExplainSQLHeader {
+				sql = sql[:planExplainSQLHeader]
+			}
+			p("\n--- statement %d of the path, execution %s ms: %s\n", s.Pos, planMS(s.Exec), sql)
+			p("%s", s.Plan)
 		}
 	}
 	p("\nREAD ONLY: nothing was written (rolled back).\n")
