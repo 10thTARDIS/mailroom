@@ -567,3 +567,66 @@ func timePtrStr(p *time.Time) string {
 	}
 	return p.UTC().Format(time.RFC3339Nano)
 }
+
+// TestAnUnbackfilledColumnIsNeverRead is the gate's own negative control: the
+// column is wiped (the state of every user the moment the migration lands) and
+// the user is not ready, so every reader must still answer from the resolver.
+// With the readiness check skipped (always stored) this goes red.
+func TestAnUnbackfilledColumnIsNeverRead(t *testing.T) {
+	f := seedPrefilterFixture(t)
+	d := f.d
+	ctx := context.Background()
+	baseline := runAreaBattery(t, f)
+	tag, err := d.h.super.Exec(ctx, `UPDATE app.messages SET area_id = NULL WHERE user_id = $1 AND area_id IS NOT NULL`, d.userID.String())
+	if err != nil || tag.RowsAffected() == 0 {
+		t.Fatalf("wipe the column: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if diffs := diffBatteries(baseline, runAreaBattery(t, f)); len(diffs) > 0 {
+		t.Fatalf("a user who is not ready reads the stored column (%d answers changed when it was wiped):\n%s", len(diffs), strings.Join(diffs, "\n"))
+	}
+}
+
+// TestStoredAreaReadersDetectAMissingTrigger: with the label trigger dropped,
+// labels added afterwards leave the column stale. A user marked ready WITHOUT
+// the backfill (the operator skipping it) reads the stale values, and the
+// two-mode battery must say so. This is the control that the agreement tests
+// above would go red if the triggers stopped keeping the column right.
+func TestStoredAreaReadersDetectAMissingTrigger(t *testing.T) {
+	f := seedPrefilterFixture(t)
+	d := f.d
+	ctx := context.Background()
+	var def string
+	if err := d.h.super.QueryRow(ctx, `SELECT pg_get_triggerdef(oid) FROM pg_trigger
+		WHERE tgname='message_labels_area_ins' AND tgrelid='app.message_labels'::regclass`).Scan(&def); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.h.super.Exec(ctx, `DROP TRIGGER message_labels_area_ins ON app.message_labels`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := d.h.super.Exec(ctx, def); err != nil {
+			t.Errorf("restore trigger: %v", err)
+		}
+	})
+	// Give 60 messages the label of the Empty area: they now resolve there, and
+	// the column (not updated) still says what it said before.
+	var emptyLabel string
+	if err := d.h.super.QueryRow(ctx, `SELECT label_id FROM app.areas WHERE user_id = $1 AND id = $2`,
+		d.userID.String(), f.areas["Empty"].String()).Scan(&emptyLabel); err != nil {
+		t.Fatal(err)
+	}
+	tag, err := d.h.super.Exec(ctx, `
+		INSERT INTO app.message_labels (user_id, message_id, label_id)
+		SELECT user_id, id, $2 FROM app.messages WHERE user_id = $1 AND trashed_at IS NULL ORDER BY id LIMIT 60
+		ON CONFLICT DO NOTHING`, d.userID.String(), emptyLabel)
+	if err != nil || tag.RowsAffected() == 0 {
+		t.Fatalf("add labels: %v (%d rows)", err, tag.RowsAffected())
+	}
+	resolver := runAreaBattery(t, f)
+	if err := d.st.UserTx(ctx, d.userID, func(tx *UserTx) error { return tx.MarkAreaIndexReady(ctx) }); err != nil {
+		t.Fatal(err)
+	}
+	if diffs := diffBatteries(resolver, runAreaBattery(t, f)); len(diffs) == 0 {
+		t.Fatal("the battery stayed identical with stale stored areas: the two-mode comparison cannot see a missing trigger")
+	}
+}
