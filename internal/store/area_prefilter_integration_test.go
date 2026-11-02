@@ -896,9 +896,11 @@ func testDeskResolvedScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 			args = append(args, v)
 			return "$" + strconv.Itoa(len(args))
 		}
-		body := deskResolvedSQLScoped(bind, tx.userID, accountID, "$2", scoped)
+		var body string
 		if len(stored) > 0 && stored[0] {
 			body = deskResolvedSQL(bind, tx.userID, accountID, "$2", true)
+		} else {
+			body = deskResolvedSQLScoped(bind, tx.userID, accountID, "$2", scoped)
 		}
 		rows, err := tx.tx.Query(ctx, `SELECT id, COALESCE(area_id::text, '-'), COALESCE(side, '-') FROM (`+body+`) r ORDER BY id`, args...)
 		if err != nil {
