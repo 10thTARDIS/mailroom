@@ -9,6 +9,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Under the hood
+
+- **A new read-only operator check for slow database plans.** `mailroom-admin
+  plan-check --user-id U` times the desk, the area views and the mailbox counts
+  with the database forced to each of its two planning styles and says which
+  paths would benefit from planning with the real values. It changes nothing.
+
 ## [1.99.0-beta.3] — 2026-11-02
 
 **The third beta of 1.99.0: learned sorting shows its work, and checking for new mail is much lighter on the server.** Settings now tells you what learned sorting has filed for you, and which senders you keep moving by hand that it isn't picking up, each with a one-tap rule. Separately, the constant "has anything changed?" check that every open window and the search index make now uses the database index instead of reading the whole change history each time.
