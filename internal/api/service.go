@@ -706,6 +706,7 @@ func New(st *store.Store, opts ...Option) *API {
 		"Area/getDesk":                 a.areaGetDesk,
 		"Area/ruleSuggestion":          a.areaRuleSuggestion,
 		"Area/dismissRuleSuggestion":   a.areaDismissRuleSuggestion,
+		"LearnedPlacement/getStatus":   a.learnedPlacementGetStatus,
 		"DeskPreferences/get":          a.deskPreferencesGet,
 		"DeskPreferences/changes":      a.deskPreferencesChanges,
 		"DeskPreferences/set":          a.deskPreferencesSet,

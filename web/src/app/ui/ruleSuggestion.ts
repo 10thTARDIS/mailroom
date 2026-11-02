@@ -108,9 +108,9 @@ export async function offerRuleSuggestion(deps: RuleSuggestionDeps, ids: Id[], a
 /** "Make a rule": exactly the rule the rule editor produces for "move to area" --
  * from equals the address, the area's own label applied -- then, when older mail
  * from the sender is elsewhere, the offer to move it too. */
-async function makeRule(deps: RuleSuggestionDeps, areaId: Id, address: string, answer: AreaRuleSuggestion): Promise<void> {
+async function makeRule(deps: RuleSuggestionDeps, areaId: Id, address: string, answer: AreaRuleSuggestion): Promise<boolean> {
   const area = deps.store.getState().areas[areaId];
-  if (!area) return;
+  if (!area) return false;
   const rule = await deps.actions.createRule({
     name: t("ruleSuggestion.ruleName", { address, area: area.name }),
     priority: 100,
@@ -119,7 +119,7 @@ async function makeRule(deps: RuleSuggestionDeps, areaId: Id, address: string, a
     enabled: true,
   });
   // createRule has already said why, in an error toast.
-  if (!rule) return;
+  if (!rule) return false;
   if (answer.earlier > 0) {
     deps.pushToast({
       kind: "info",
@@ -130,6 +130,24 @@ async function makeRule(deps: RuleSuggestionDeps, areaId: Id, address: string, a
   } else {
     deps.pushToast({ kind: "info", message: t("ruleSuggestion.made") });
   }
+  return true;
+}
+
+/**
+ * "Make a rule" from Settings' list of senders learned placement is not
+ * learning: the SAME flow as the offer's toast (the rule, then "Move them" for
+ * earlier mail). The count of earlier mail comes from a fresh Area/ruleSuggestion
+ * answer; if that cannot be had the rule is still made, without the offer to
+ * move earlier mail. Resolves true when the rule was made.
+ */
+export async function makeRuleForSender(deps: RuleSuggestionDeps, areaId: Id, address: string): Promise<boolean> {
+  let answer: AreaRuleSuggestion | null = null;
+  try {
+    answer = await deps.actions.ruleSuggestion(areaId, address);
+  } catch {
+    answer = null;
+  }
+  return makeRule(deps, areaId, address, answer ?? { suggest: true, reason: "", address, areaId, filings: 0, earlier: 0 });
 }
 
 /** "Move them": every message from the address, minus those already carrying the

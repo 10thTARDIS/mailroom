@@ -9,6 +9,22 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### What's new
+
+- **Settings now show what learned sorting has been doing.** Under the Learned
+  sorting switch, a short line says how many messages it filed for you in the
+  last 30 days and how many of those you moved somewhere else (or that it
+  hasn't filed anything). It counts new mail only, not mail sorted in bulk
+  afterwards, and it is hidden while the switch is off.
+- **See the senders it isn't learning.** A list headed "Senders you keep moving
+  by hand" names senders you have filed into the same area at least three times
+  in the last 30 days where learned sorting would not file their next message,
+  with a plain reason (for example "filed in more than one place" or "not
+  confirmed as genuine"). Each has a **Make a rule** button that works exactly
+  like the offer after a move, including the offer to move earlier mail. Senders
+  you have already covered with a rule, or told "Not now", are not listed. Up to
+  five are shown, with a count of the rest.
+
 ### Faster
 
 - **Checking for new mail uses far less database time.** Mailroom asks the database "has anything changed?" every few seconds, for every open window and for its search index. On a server with one user, the database had settled on a way of answering that read the whole change history each time. It now works out the answer from the index, so this constant background check costs a small fraction of what it did. The same fix applies to the sender lookup used when scoring new mail.

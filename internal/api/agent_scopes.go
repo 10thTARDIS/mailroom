@@ -264,6 +264,7 @@ var keyPolicies = map[string]keyPolicy{
 	"Area/getDesk":               notForKeys(whyNotOpened),
 	"Area/ruleSuggestion":        notForKeys(whyNotOpened),
 	"Area/dismissRuleSuggestion": notForKeys(whyNotOpened),
+	"LearnedPlacement/getStatus": notForKeys(whyNotOpened),
 	"DeskPreferences/get":        notForKeys(whyNotOpened),
 	"DeskPreferences/changes":    notForKeys(whyNotOpened),
 	"DeskPreferences/set":        notForKeys(whyNotOpened),

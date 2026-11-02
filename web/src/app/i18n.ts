@@ -1590,6 +1590,28 @@ const en = {
   "settings.learned.explain":
     "When you have moved a sender’s mail into the same area at least twice, Mailroom files that sender’s new mail there too. Moving one back teaches it otherwise. Rules you write always come first.",
   "settings.learned.failed": "Could not change learned sorting",
+  // The status block under the switch (LearnedPlacement/getStatus): 30 days,
+  // new mail only. Singular and plural are separate entries.
+  "settings.learned.status.none": "Learned sorting hasn’t filed anything in the last 30 days.",
+  "settings.learned.status.filed.one": "In the last 30 days learned sorting filed 1 message for you.",
+  "settings.learned.status.filed.other": "In the last 30 days learned sorting filed {count} messages for you.",
+  "settings.learned.status.movedIt": "You moved it somewhere else.",
+  "settings.learned.status.moved.one": "You moved 1 of them somewhere else.",
+  "settings.learned.status.moved.other": "You moved {count} of them somewhere else.",
+  "settings.learned.senders.heading": "Senders you keep moving by hand",
+  "settings.learned.senders.more": "and {count} more",
+  "settings.learned.senders.atLeastMore": "and at least {count} more",
+  "settings.learned.senders.make": "Make a rule",
+  "settings.learned.senders.makeFor": "Make a rule for {address}",
+  "settings.learned.reason.mixed": "filed in more than one place",
+  "settings.learned.reason.thin": "not enough moves yet",
+  "settings.learned.reason.unauthenticated": "not confirmed as genuine",
+  "settings.learned.reason.contradicted": "you corrected it",
+  "settings.learned.reason.gated": "paused for this area after corrections",
+  "settings.learned.reason.elsewhere": "it would file them elsewhere",
+  "settings.learned.reason.blocked": "shared domain",
+  "settings.learned.reason.warned": "sender warning",
+  "settings.learned.reason.ambiguous": "unclear sender",
 
   // FOLLOW-UP REMINDERS (#58), on the in-tray settings (rows/FollowUpSettings.tsx).
   "settings.followUp.title": "Follow-up reminders",
