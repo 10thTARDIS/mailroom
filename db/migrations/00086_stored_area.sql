@@ -11,7 +11,7 @@
 --                                 by `mailroom-admin area-index --apply` only
 --   app.resolve_message_area      the resolver's single-message form
 --   app.recompute_message_areas   its set-based per-user form
---   triggers                      message_labels, messages, areas, area_feeds,
+--   triggers                      message_labels (statement), messages, areas, area_feeds,
 --                                 labels (see each function)
 --
 -- EXPAND-ONLY (ADR-008): a nullable column, a table, functions, triggers and an
@@ -102,7 +102,8 @@ $$;
 
 -- The set-based form: one pass over a user's messages, three joins, as the
 -- resolver's areaJoinSQL does (a per-message call here would re-evaluate RLS
--- per row). Returns how many messages changed.
+-- per row). Writes only rows whose stored area differs. Returns how many
+-- messages changed.
 -- +goose StatementBegin
 CREATE FUNCTION app.recompute_message_areas(p_user_id app.ulid) RETURNS bigint
 LANGUAGE plpgsql AS $$
@@ -143,26 +144,85 @@ END;
 $$;
 -- +goose StatementEnd
 
--- A label added to or removed from a message: re-resolve that message.
+-- Labels added to or removed from messages: re-resolve the touched messages in
+-- ONE statement per SQL statement, driven by the transition table: each touched
+-- message is resolved by two indexed LATERAL lookups (its feeding label, its
+-- mapped tab), the single-message resolver's shape, so a bulk relabel pays no
+-- per-row query planning. A set-based DISTINCT ON form was measured an order of
+-- magnitude slower here: the planner cannot see how many rows a DISTINCT ON
+-- yields and chose a nested loop over it. The pairs are not de-duplicated: a
+-- message named twice resolves to the same answer twice. Writes only rows that
+-- differ. The resolution is MATERIALIZED so the planner cannot re-run it per
+-- joined row.
 -- +goose StatementBegin
-CREATE FUNCTION app.trg_message_labels_area() RETURNS trigger
+CREATE FUNCTION app.trg_message_labels_ins() RETURNS trigger
 LANGUAGE plpgsql AS $$
-DECLARE
-  v_user app.ulid;
-  v_msg  app.ulid;
 BEGIN
-  IF TG_OP = 'DELETE' THEN
-    v_user := OLD.user_id; v_msg := OLD.message_id;
-  ELSE
-    v_user := NEW.user_id; v_msg := NEW.message_id;
-  END IF;
+  WITH r AS MATERIALIZED (
+      SELECT m2.user_id, m2.id, COALESCE(la.area_id, tf.area_id) AS area_id
+        FROM (SELECT user_id, message_id FROM newt) c
+        JOIN app.messages m2 ON m2.user_id = c.user_id AND m2.id = c.message_id
+        LEFT JOIN LATERAL (
+          SELECT f.area_id
+            FROM app.message_labels ml
+            JOIN app.area_feeds f ON f.user_id = ml.user_id AND f.label_id = ml.label_id
+            JOIN app.areas a ON a.user_id = f.user_id AND a.id = f.area_id
+           WHERE ml.user_id = m2.user_id AND ml.message_id = m2.id
+           ORDER BY a.position, a.id
+           LIMIT 1) la ON true
+        LEFT JOIN LATERAL (
+          SELECT l.tab::text AS tab
+            FROM app.message_labels ml
+            JOIN app.labels l ON l.user_id = ml.user_id AND l.id = ml.label_id
+           WHERE ml.user_id = m2.user_id AND ml.message_id = m2.id AND l.tab IS NOT NULL
+           ORDER BY array_position(app.area_tab_precedence(), l.tab::text)
+           LIMIT 1) lt ON true
+        LEFT JOIN app.area_feeds tf
+               ON tf.user_id = m2.user_id
+              AND tf.tab::text = COALESCE(lt.tab, m2.classified_tab::text)
+  )
   UPDATE app.messages m
-     SET area_id = x.a
-    FROM (SELECT app.resolve_message_area(m2.user_id, m2.id, m2.classified_tab) AS a
-            FROM app.messages m2
-           WHERE m2.user_id = v_user AND m2.id = v_msg) x
-   WHERE m.user_id = v_user AND m.id = v_msg
-     AND m.area_id IS DISTINCT FROM x.a;
+     SET area_id = r.area_id
+    FROM r
+   WHERE m.user_id = r.user_id AND m.id = r.id
+     AND m.area_id IS DISTINCT FROM r.area_id;
+  RETURN NULL;
+END;
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE FUNCTION app.trg_message_labels_del() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  WITH r AS MATERIALIZED (
+      SELECT m2.user_id, m2.id, COALESCE(la.area_id, tf.area_id) AS area_id
+        FROM (SELECT user_id, message_id FROM oldt) c
+        JOIN app.messages m2 ON m2.user_id = c.user_id AND m2.id = c.message_id
+        LEFT JOIN LATERAL (
+          SELECT f.area_id
+            FROM app.message_labels ml
+            JOIN app.area_feeds f ON f.user_id = ml.user_id AND f.label_id = ml.label_id
+            JOIN app.areas a ON a.user_id = f.user_id AND a.id = f.area_id
+           WHERE ml.user_id = m2.user_id AND ml.message_id = m2.id
+           ORDER BY a.position, a.id
+           LIMIT 1) la ON true
+        LEFT JOIN LATERAL (
+          SELECT l.tab::text AS tab
+            FROM app.message_labels ml
+            JOIN app.labels l ON l.user_id = ml.user_id AND l.id = ml.label_id
+           WHERE ml.user_id = m2.user_id AND ml.message_id = m2.id AND l.tab IS NOT NULL
+           ORDER BY array_position(app.area_tab_precedence(), l.tab::text)
+           LIMIT 1) lt ON true
+        LEFT JOIN app.area_feeds tf
+               ON tf.user_id = m2.user_id
+              AND tf.tab::text = COALESCE(lt.tab, m2.classified_tab::text)
+  )
+  UPDATE app.messages m
+     SET area_id = r.area_id
+    FROM r
+   WHERE m.user_id = r.user_id AND m.id = r.id
+     AND m.area_id IS DISTINCT FROM r.area_id;
   RETURN NULL;
 END;
 $$;
@@ -263,7 +323,8 @@ GRANT EXECUTE ON FUNCTION
   app.resolve_message_area(app.ulid, app.ulid, app.category_tab),
   app.resolve_message_area(app.ulid, app.ulid),
   app.recompute_message_areas(app.ulid),
-  app.trg_message_labels_area(),
+  app.trg_message_labels_ins(),
+  app.trg_message_labels_del(),
   app.trg_messages_area(),
   app.trg_area_config_ins(),
   app.trg_area_config_del(),
@@ -273,9 +334,14 @@ GRANT EXECUTE ON FUNCTION
   app.trg_labels_detach()
 TO mailroom_app;
 
-CREATE TRIGGER message_labels_area
-  AFTER INSERT OR DELETE ON app.message_labels
-  FOR EACH ROW EXECUTE FUNCTION app.trg_message_labels_area();
+CREATE TRIGGER message_labels_area_ins
+  AFTER INSERT ON app.message_labels
+  REFERENCING NEW TABLE AS newt
+  FOR EACH STATEMENT EXECUTE FUNCTION app.trg_message_labels_ins();
+CREATE TRIGGER message_labels_area_del
+  AFTER DELETE ON app.message_labels
+  REFERENCING OLD TABLE AS oldt
+  FOR EACH STATEMENT EXECUTE FUNCTION app.trg_message_labels_del();
 
 CREATE TRIGGER messages_area_insert
   BEFORE INSERT ON app.messages
@@ -330,7 +396,8 @@ DROP TRIGGER IF EXISTS areas_area_del ON app.areas;
 DROP TRIGGER IF EXISTS areas_area_ins ON app.areas;
 DROP TRIGGER IF EXISTS messages_area_verdict ON app.messages;
 DROP TRIGGER IF EXISTS messages_area_insert ON app.messages;
-DROP TRIGGER IF EXISTS message_labels_area ON app.message_labels;
+DROP TRIGGER IF EXISTS message_labels_area_del ON app.message_labels;
+DROP TRIGGER IF EXISTS message_labels_area_ins ON app.message_labels;
 DROP FUNCTION IF EXISTS app.trg_labels_tab();
 DROP FUNCTION IF EXISTS app.trg_labels_detach();
 DROP FUNCTION IF EXISTS app.trg_area_feeds_upd();
@@ -338,7 +405,8 @@ DROP FUNCTION IF EXISTS app.trg_areas_position();
 DROP FUNCTION IF EXISTS app.trg_area_config_del();
 DROP FUNCTION IF EXISTS app.trg_area_config_ins();
 DROP FUNCTION IF EXISTS app.trg_messages_area();
-DROP FUNCTION IF EXISTS app.trg_message_labels_area();
+DROP FUNCTION IF EXISTS app.trg_message_labels_del();
+DROP FUNCTION IF EXISTS app.trg_message_labels_ins();
 DROP FUNCTION IF EXISTS app.recompute_message_areas(app.ulid);
 DROP FUNCTION IF EXISTS app.resolve_message_area(app.ulid, app.ulid);
 DROP FUNCTION IF EXISTS app.resolve_message_area(app.ulid, app.ulid, app.category_tab);

@@ -508,7 +508,8 @@ func TestAreaIndexAgreementDetectsADroppedTrigger(t *testing.T) {
 	ctx := context.Background()
 	type trig struct{ name, table string }
 	required := []trig{
-		{"message_labels_area", "app.message_labels"},
+		{"message_labels_area_ins", "app.message_labels"},
+		{"message_labels_area_del", "app.message_labels"},
 		{"messages_area_insert", "app.messages"},
 		{"messages_area_verdict", "app.messages"},
 		{"areas_area_del", "app.areas"},
@@ -581,7 +582,7 @@ func TestAreaIndexBulkRelabelCost(t *testing.T) {
 	// The bulk relabel: attach a label that feeds an area to every message, as a
 	// rule or a move-all does, in one statement; and the desk's per-message
 	// materialise path over the same mail.
-	timeIt := func(w *aiWorld) (bulk, perMsg time.Duration) {
+	timeIt := func(w *aiWorld) (bulk, perMsg, noChange time.Duration) {
 		var label string
 		if err := h.super.QueryRow(ctx, `SELECT f.label_id FROM app.area_feeds f
 			WHERE f.user_id=$1 AND f.label_id IS NOT NULL ORDER BY f.id LIMIT 1`, w.userID.String()).Scan(&label); err != nil {
@@ -596,6 +597,26 @@ func TestAreaIndexBulkRelabelCost(t *testing.T) {
 			t.Fatal(err)
 		}
 		bulk = time.Since(start)
+		// A relabel that moves no message between areas: a plain label that feeds
+		// nothing and maps to no tab, so the trigger resolves every message and
+		// finds nothing to write.
+		var plain ulid.ULID
+		if err := w.s.UserTx(ctx, w.userID, func(tx *UserTx) error {
+			var e error
+			plain, e = tx.CreateLabel(ctx, LabelRow{Name: "plain-" + w.tag, MirrorToIMAP: false})
+			return e
+		}); err != nil {
+			t.Fatal(err)
+		}
+		start = time.Now()
+		if err := w.s.UserTx(ctx, w.userID, func(tx *UserTx) error {
+			_, e := tx.tx.Exec(ctx, `INSERT INTO app.message_labels (user_id, message_id, label_id)
+				SELECT user_id, id, $2 FROM app.messages WHERE user_id=$1`, w.userID.String(), plain.String())
+			return e
+		}); err != nil {
+			t.Fatal(err)
+		}
+		noChange = time.Since(start)
 		// per-message: remove then re-add one row at a time, the shape of a rule applying per message.
 		ids, _ := func() ([]string, error) {
 			var out []string
@@ -622,23 +643,28 @@ func TestAreaIndexBulkRelabelCost(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		return bulk, time.Since(start)
+		perMsg = time.Since(start)
+		return bulk, perMsg, noChange
 	}
 	with := build()
-	withBulk, withPer := timeIt(with)
+	withBulk, withPer, withNo := timeIt(with)
 
-	var def string
-	if err := h.super.QueryRow(ctx, `SELECT pg_get_triggerdef(oid) FROM pg_trigger
-		WHERE tgname='message_labels_area' AND tgrelid='app.message_labels'::regclass`).Scan(&def); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"message_labels_area_ins", "message_labels_area_del"} {
+		var def string
+		if err := h.super.QueryRow(ctx, `SELECT pg_get_triggerdef(oid) FROM pg_trigger
+			WHERE tgname=$1 AND tgrelid='app.message_labels'::regclass`, name).Scan(&def); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.super.Exec(ctx, `DROP TRIGGER `+name+` ON app.message_labels`); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = h.super.Exec(ctx, def) })
 	}
-	if _, err := h.super.Exec(ctx, `DROP TRIGGER message_labels_area ON app.message_labels`); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = h.super.Exec(ctx, def) })
 	without := build()
-	woBulk, woPer := timeIt(without)
+	woBulk, woPer, woNo := timeIt(without)
 	t.Logf("MEASURED (%d messages): single-statement bulk relabel with=%v without=%v ratio=%.2f; "+
-		"per-message relabel with=%v without=%v ratio=%.2f",
-		n, withBulk, woBulk, float64(withBulk)/float64(woBulk), withPer, woPer, float64(withPer)/float64(woPer))
+		"per-message relabel with=%v without=%v ratio=%.2f; "+
+		"bulk relabel that changes no area with=%v without=%v ratio=%.2f",
+		n, withBulk, woBulk, float64(withBulk)/float64(woBulk), withPer, woPer, float64(withPer)/float64(woPer),
+		withNo, woNo, float64(withNo)/float64(woNo))
 }

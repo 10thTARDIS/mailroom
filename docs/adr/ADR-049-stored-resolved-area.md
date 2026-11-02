@@ -138,6 +138,17 @@ for that user.
   the caller's rows. Cascades from a message, an area and a user are unaffected
   (the rows they remove are gone, or the area's own statement trigger recomputes
   afterwards).
+- **The message-label triggers are statement-level** (transition tables): one
+  statement per SQL statement resolves every touched message (two indexed
+  lateral lookups each) and writes only rows whose area differs. A set-based
+  DISTINCT ON form was tried and measured slower, because the planner cannot
+  size a DISTINCT ON and picked a nested loop. The single-message function
+  remains for the `BEFORE` triggers on `app.messages`.
+- **Noted, not done in increment 1:** a configuration edit issues several
+  statements (one per feed), each firing a full per-user recompute, so a
+  per-transaction dedupe is worth doing in increment 2; and deleting an area
+  makes the foreign key's SET NULL scan `app.messages`, because no index leads
+  with `area_id`.
 - **`app.resolve_message_area` takes the verdict as a third argument** (a
   two-argument form reads it from the row), because the `BEFORE` triggers run
   before the row holds the new verdict.
