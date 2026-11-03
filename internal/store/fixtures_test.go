@@ -391,7 +391,7 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 
 	// One stored-area readiness row (migration 00086), so the RLS inventory
 	// probes it: a leak tells one user whether another's area index is built.
-	exec(`INSERT INTO app.area_index_state (user_id, ready_at) VALUES ($1, now())`, u.ID)
+	exec(`INSERT INTO app.area_index_state (user_id, ready_at) VALUES ($1, now()) ON CONFLICT (user_id) DO NOTHING`, u.ID)
 
 	// One out-of-office reply (#50, migration 00065), so the RLS inventory
 	// probes it. A leak of it is a leak of the user's own words and, usually,
