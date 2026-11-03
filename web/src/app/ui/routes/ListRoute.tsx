@@ -43,6 +43,7 @@ import { LabelMenu } from "../LabelMenu";
 import { RefilePicker } from "../RefilePicker";
 import { importantTarget } from "../importantVerb";
 import { moveToArea } from "../moveToArea";
+import { offerRuleSuggestion } from "../ruleSuggestion";
 import type { RefileTarget } from "../desk/SelectionToolbar";
 import { areasInDeskOrder } from "../../../core/refile";
 import { SnoozeMenu } from "../SnoozeMenu";
@@ -405,8 +406,12 @@ export function ListRoute(): JSX.Element {
         allMatching !== null && allMatching.length === list.length
           ? Math.max(allMatchingTotal, list.length)
           : list.length;
-      void moveToArea({ store, sync, actions, offerUndo, pushToast }, list, areaId, total).then((r) => {
-        if (r) clearSelection();
+      const deps = { store, sync, actions, offerUndo, pushToast };
+      void moveToArea(deps, list, areaId, total).then((r) => {
+        if (r) {
+          clearSelection();
+          void offerRuleSuggestion(deps, list, areaId, r.moved);
+        }
       });
     },
     [verbTargets, allMatching, allMatchingTotal, store, sync, actions, offerUndo, pushToast, clearSelection],
@@ -1088,9 +1093,12 @@ export function ListRoute(): JSX.Element {
         // and the pane stays on it — no advance, no selection touched.
         <RefilePicker
           areas={areaTargets}
-          onPick={(areaId) =>
-            void moveToArea({ store, sync, actions, offerUndo, pushToast }, [open.id], areaId, 1)
-          }
+          onPick={(areaId) => {
+            const deps = { store, sync, actions, offerUndo, pushToast };
+            void moveToArea(deps, [open.id], areaId, 1).then((r) => {
+              if (r) void offerRuleSuggestion(deps, [open.id], areaId, r.moved);
+            });
+          }}
           onClose={() => setRefilePickerOpen(false)}
         />
       ) : null}

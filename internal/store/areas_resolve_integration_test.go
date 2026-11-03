@@ -24,11 +24,16 @@ import (
 )
 
 func TestAreaResolverAgreesWithTheQueryExpression(t *testing.T) {
+	eachAreaMode(t, testAreaResolverAgreesWithTheQueryExpression)
+}
+
+func testAreaResolverAgreesWithTheQueryExpression(t *testing.T, ready bool) {
 	h := newHarness(t)
 	s := h.appStore()
 	ctx := context.Background()
 	u := seedUser(t, h.super, "arr-"+NewULID().String())
 	userID := mustULID(t, u.ID)
+	dropJobsAtCleanup(t, h, userID)
 
 	// A plan built via CreateArea/UpdateArea, covering every shape #442
 	// distinguishes: Alpha is fed by its own label alone (earliest position,
@@ -136,6 +141,9 @@ func TestAreaResolverAgreesWithTheQueryExpression(t *testing.T) {
 	attachLabel(deadEnd, deadEndLabelID)
 
 	ids := []ulid.ULID{labelWin, tie, tabMapping, tabVerdict, unsorted, deadEnd}
+	if ready {
+		readyAreaIndex(t, s, userID)
+	}
 
 	var (
 		cfg    areas.Config
@@ -283,11 +291,16 @@ func TestAreaResolverAgreesWithTheQueryExpression(t *testing.T) {
 }
 
 func TestAreaSummary(t *testing.T) {
+	eachAreaMode(t, testAreaSummary)
+}
+
+func testAreaSummary(t *testing.T, ready bool) {
 	h := newHarness(t)
 	s := h.appStore()
 	ctx := context.Background()
 	u := seedUser(t, h.super, "asum-"+NewULID().String())
 	userID := mustULID(t, u.ID)
+	dropJobsAtCleanup(t, h, userID)
 
 	var workID, emptyID, ownLabel ulid.ULID
 	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
@@ -364,6 +377,9 @@ func TestAreaSummary(t *testing.T) {
 	inOtherAccount := seedMsg("other-account", &surfaceScore)
 	provenance(inOtherAccount, otherAccount, otherMailbox)
 
+	if ready {
+		readyAreaIndex(t, s, userID)
+	}
 	var summary []AreaCounts
 	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
 		var e error

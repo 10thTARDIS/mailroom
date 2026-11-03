@@ -107,6 +107,9 @@
 //	                   plan through the one place that can until the desk client exists —
 //	                   diffs the file against the STORED areas and creates/updates; never
 //	                   deletes a stored area the plan omits.)
+//	area-index         [--user-id] [--apply] [--batch N]   (ADR-049: the stored resolved area.
+//	                   Report-only by default: per user, where messages.area_id disagrees
+//	                   with the resolver. --apply backfills it and marks the user ready.)
 //	materialize-area-labels --user-id [--apply] [--batch N] [--verbose]
 //	                   (#442 increment 3: write an area's own label onto existing mail
 //	                   that only landed there via its tab verdict — "areas are labels".
@@ -115,6 +118,8 @@
 //	map-label-tabs     --user-id --plan FILE [--apply]   (mailroom#219 point labels at tabs)
 //	classify-tabs      --user-id [--apply] [--batch N]   (mailroom#228 fill in stored tab verdicts)
 //	blob-report        [--user U] [--verbose]   (mailroom#300 blob/file reconciliation, read-only)
+//	jobs-report                                 (background job rows per kind and state, and what
+//	                   the daily job sweep would delete today. Read-only.)
 //	mailbox-roles      [--user U] [--verbose]   (#351: which SPECIAL-USE roles a provider
 //	                   actually advertises. Read-only; EXITS NON-ZERO when a required role
 //	                   (drafts, sent) is missing, so it can gate a provider cutover.)
@@ -217,6 +222,17 @@
 //	                   and the first check that refused. Evidence is as of NOW unless
 //	                   --as-of (filings made before the message was ingested). Read-only
 //	                   transaction, never committed; prints addresses, never subjects.)
+//	plan-check         --user-id [--runs N] [--explain [--path NAME]]
+//	                   (do the hot read paths suffer from generic plans? Runs the real
+//	                   store calls behind Area/getSummary, Area/getDesk, Email/query for
+//	                   the largest area and Mailbox/get, N times each with the planner
+//	                   forced to the generic plan and then to a custom plan, and prints
+//	                   median times, the ratio and a verdict per path. Read-only
+//	                   transaction, never committed; needs a desk that was opened once.
+//	                   --explain instead prints the real EXPLAIN (ANALYZE, BUFFERS) plan of
+//	                   every statement each path sends, slowest first; --path limits it
+//	                   to the paths whose name starts with NAME. Plans can contain
+//	                   addresses from your mail.)
 //	placement-backfill --user-id [--exclude ADDRESS-or-DOMAIN ...] [--apply] [--undo BATCH_ID]
 //	                   (mailroom#714: apply learned placement to mail already on the
 //	                   desk. Report only by default: totals, area pairs, a line per
@@ -406,6 +422,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"collapse-duplicates":       runCollapseDuplicates,
 	"collapse-provenance":       runCollapseProvenance,
 	"blob-report":               runBlobReport,
+	"jobs-report":               runJobsReport,
 	"backfill-model-blobs":      runBackfillModelBlobs,
 	"css-report":                runCSSReport,
 	"auth-report":               runAuthReport,
@@ -429,6 +446,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"tabs":                      runTabs,
 	"area-report":               runAreaReport,
 	"area-plan":                 runAreaPlan,
+	"area-index":                runAreaIndex,
 	"materialize-area-labels":   runMaterializeAreaLabels,
 	"classify-tabs":             runClassifyTabs,
 	"map-label-tabs":            runMapLabelTabs,
@@ -436,6 +454,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"drawer-report":             runDrawerReport,
 	"placement-report":          runPlacementReport,
 	"placement-explain":         runPlacementExplain,
+	"plan-check":                runPlanCheck,
 	"nudge-report":              runNudgeReport,
 	"from-field-report":         runFromFieldReport,
 	"placement-backfill":        runPlacementBackfill,

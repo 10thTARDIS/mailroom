@@ -58,7 +58,6 @@ import type { JSX } from "react";
 
 import type { BlockDestination, Contact } from "../../../core/jmap/types";
 import { SenderBulkPanel, useSenderBulk } from "../SenderBulk";
-import { looksLikeAddress } from "../compose/chips";
 
 import { senderIdentity } from "../../../core/hostileText";
 import { senderAuthNotice } from "../../../core/senderAuth";
@@ -72,6 +71,7 @@ import { navigate } from "../../routing";
 import { AreaMenu } from "../AreaMenu";
 import { moveText, moveToArea } from "../moveToArea";
 import type { MoveOutcome } from "../moveToArea";
+import { movableSenderAddress } from "../ruleSuggestion";
 import { aliasOf } from "../desk/format";
 import { draftRuleFrom } from "../ruleDraft";
 import { useShell } from "../shellContext";
@@ -330,7 +330,7 @@ export function SenderPopover({ email }: { email: EffectiveEmail }): JSX.Element
   // A From with no local part ("example.com", "@example.com") would be read by
   // `from:` as a whole DOMAIN (#712); only a well-formed address is movable
   // (#53 security review).
-  const movable = from.address !== "" && !/[\s"]/.test(from.address) && looksLikeAddress(from.address) && !from.address.startsWith("*");
+  const movable = movableSenderAddress(from.address);
   const senderView = useMemo(
     () => ({ kind: "search" as const, query: `from:${from.address}` }),
     [from.address],

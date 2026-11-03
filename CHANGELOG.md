@@ -9,6 +9,161 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0] — 2026-11-03
+
+**Mailroom gets noticeably faster on a large mailbox, learns to say when it isn't learning, and tidies up after itself.** The desk, area lists, folder counts and the constant check for new mail all do far less work than before, and Settings now shows what learned sorting has filed for you. When you keep moving the same sender's mail by hand, Mailroom offers to make a rule for it. Old background-job records are cleaned up automatically, and the person who runs Mailroom gets new read-only tools to see what the server is doing. This release gathers everything from the eight 1.99.0 betas. OAuth sign-in for AI tools, first planned for 1.99, moves to 1.100.
+
+### Sorting
+
+- **A one-tap rule for senders you keep moving by hand.** The third time in 30 days you move mail from one sender into the same area yourself (by dragging it to the sidebar, using Move to area, the Labels menu or Re-file), a message under the move asks "Always put mail from alice@example.com in Updates?" with **Make a rule** and **Not now**. The move's Undo stays where it was.
+- **It asks only when nothing else will do it.** If learned sorting is going to file that sender's next message there itself, or one of your rules already does, you are not asked. You are asked when your moves for that sender have been inconsistent, when its mail can't be confirmed as genuine, or when learned sorting is off or paused for that area.
+- **Make a rule makes an ordinary rule** you can see and edit under Rules. It applies to new mail. If older mail from that sender is somewhere else, Mailroom then offers to move it too, and moves nothing until you tap **Move them** (with its own Undo).
+- **Not now** stops the offer for that sender and area for 30 days. If you ignore it, it goes away when the move's Undo does.
+
+### Learned sorting shows its work
+
+- **Settings › Learned sorting says what it has done**: how many messages it filed for you in the last 30 days, and how many of those you moved somewhere else. It counts new mail only, and is hidden while the switch is off.
+- **"Senders you keep moving by hand"** lists senders you have filed into the same area at least three times in 30 days that learned sorting won't take over, each with a plain reason (for example "filed in more than one place" or "not confirmed as genuine") and a **Make a rule** button that works like the offer after a move. Up to five are shown, with a count of the rest.
+
+### Faster
+
+- **Checking for new mail uses a small fraction of the database time it did.** Every open window and the search index ask "has anything changed?" every few seconds. On a server with one user, the database had settled on a way of answering that read the whole change history each time; it now answers from the index. A per-message sender lookup used when scoring new mail had the same problem and the same fix.
+- **The desk and its area counts load several times faster** on a long-used mailbox. They used to work out the area of every message you have and then keep only the ones on the desk; they now look only at the desk's messages.
+- **Refreshing your folders is nearly free when nothing has changed.** Folder counts are remembered and recounted only when mail or folders actually change.
+- **Area lists become fast** once existing mail has been filled in (see Upgrading). Each message now remembers which area it belongs to, kept current automatically whenever a label, a feed or the sorting changes, so an area's list and its count read that directly instead of working it out for the whole area on every request. What you see is exactly the same.
+
+### Housekeeping
+
+- **Old background-job records are cleaned up once a day.** Every snooze, scheduled send, attachment scan, Trash purge and drawer sweep left a small record behind forever. Finished records now go after 30 days, and records of jobs that failed for good after 90 days, so a failure can still be looked at. Jobs that are waiting or running are never touched.
+- **Both windows can be changed** with `MAILROOM_JOB_RETENTION` and `MAILROOM_DEAD_JOB_RETENTION` (at least 24 hours each).
+- **A job that fails for good now records when it failed**, so the clean-up can age it.
+
+### For the person who runs Mailroom
+
+- **`mailroom-admin jobs-report`** lists background-job records by kind and state and how many the daily clean-up would remove.
+- **`mailroom-admin area-index`** reports, per person, how many messages still need their area filled in and whether any stored area differs from the one Mailroom works out live; `--apply` fills them in (in batches, safe to run again) and switches area lists over only when nothing disagrees.
+- **`mailroom-admin plan-check`** times the desk, area views and folder counts and says which way each one is answered; `--explain` prints the database's plan for each, slowest first. Plans can include values from your own mail, so don't paste them anywhere public.
+- All three are read-only unless you add `--apply` where it exists.
+
+### Upgrading
+
+- **Three database migrations (00084–00086)**: the job clean-up, a small table that remembers "Not now" answers, and the stored area with the triggers that keep it current. All are quick and need no downtime.
+- **After upgrading, fill in the stored area for existing mail**: run `mailroom-admin area-index` to see the report, then `mailroom-admin area-index --apply`. Until you do, area lists work exactly as before, just without the speed-up.
+- **Two new optional settings**, `MAILROOM_JOB_RETENTION` and `MAILROOM_DEAD_JOB_RETENTION`; if you run the provided compose file, update it to pass them through.
+- **Moving very many messages at once is a little slower than before** (each move now also updates the stored area): a few seconds for thousands of messages. Single moves and new mail are unaffected.
+
+### Under the hood
+
+- **Dependency updates come from Dependabot**, weekly, with security fixes as soon as an advisory is published, and code is scanned with CodeQL on every change.
+
+## [1.99.0-beta.8] — 2026-11-03
+
+**The eighth beta of 1.99.0: area lists can become fast.** Each message now remembers which area it belongs to, kept up to date automatically whenever a label, a feed or the sorting changes. Once the person who runs Mailroom has run one command to fill it in for existing mail, area lists and counts read it directly instead of working it out from scratch each time. Until then nothing changes.
+
+### Upgrading
+
+- One database migration (00086). It adds the stored area and the triggers that keep it current; existing mail is filled in by `mailroom-admin area-index --apply` (run it without `--apply` first to see the report). Moving very many messages at once is a little slower than before, because each move now also updates the stored area.
+
+### Faster
+
+- **Area lists and counts now read the stored area once you have run the backfill.** After `mailroom-admin area-index --apply` has marked a person ready, the area views, the desk, the counts beside them, the drawer's archive sweep and the label shown on each message read the area Mailroom already keeps for every message instead of working it out again for each request. The answers are the same; they simply stop costing time in proportion to the size of the mailbox. The first page of an area in the usual newest-first, one-row-per-conversation view now reads the area in small steps and stops as soon as it has the conversations the page needs, and the count of conversations shown beside it is still exact. Until the backfill has been run for a person, nothing changes for them at all. `mailroom-admin plan-check` now says, for each hot path, whether it is reading the stored area or working it out.
+
+### Under the hood
+
+- **Mailroom now remembers which area each message belongs to, to make area lists faster later.** A new `mailroom-admin area-index` command prepares this. Run without options it only reports, per person, how many messages would be filled in and where any stored answer differs from the one Mailroom works out today, and it changes nothing. Add `--apply` to fill it in (in batches, safe to run again) and mark that person ready; a person is only marked ready once the stored answers match for every message. From the moment this version is installed, Mailroom keeps the stored answer correct as mail is labelled, reclassified or moved between areas, and when areas are created, deleted, reordered or re-fed. Nothing you see changes yet: the lists and counts still work the area out as before until a later version starts using the stored answer.
+
+## [1.99.0-beta.7] — 2026-11-02
+
+**The seventh beta of 1.99.0: folder counts are only recounted when something changed.** Your mail app asks for folder counts every time it refreshes. Mailroom now remembers the last answer and recounts only when mail or folders have actually changed, so an idle refresh costs almost nothing. Nothing you see changes.
+
+### Faster
+
+- **Refreshing your mail folders is now nearly free when nothing has changed.** Mailroom used to recount the total and unread mail in every folder each time a client asked for the folder list, even when no mail had arrived, moved or been read since the last time. It now remembers the last answer for each person and reuses it for as long as nothing that could change a count or a folder name has happened; the moment mail arrives, is read, moved or deleted, or a folder is renamed, the next request recounts. What you see is exactly the same, and the operator gets a new `mailroom_mailbox_counts_cache_total` metric (hit or miss) to watch it work.
+
+## [1.99.0-beta.6] — 2026-11-02
+
+**The sixth beta of 1.99.0: the desk loads faster on a large mailbox.** The desk and its per-area counts used to work out the area of every message you have before keeping the ones on the desk. They now look only at the desk's messages. Nothing you see changes.
+
+### Faster
+
+- **The desk and its area counts load faster on a large mailbox.** To show the desk, Mailroom works out which area each message belongs to. It used to do that for every message you have and then keep only the ones on the desk. It now works out only the desk's messages, which on a long-used mailbox is a small fraction of the work. What you see is exactly the same.
+
+## [1.99.0-beta.5] — 2026-11-02
+
+**The fifth beta of 1.99.0: a deeper diagnostic for the person who runs Mailroom.** Nothing changes in how Mailroom looks or behaves. The read-only `plan-check` command can now show exactly how the database answers the desk, area views and mailbox counts, so the slow steps can be found and fixed.
+
+### Under the hood
+
+- **`plan-check --explain` shows the real database plans.** `mailroom-admin
+  plan-check --user-id U --explain [--path NAME]` prints the execution plan of
+  every query the desk, area views and mailbox counts send, slowest first,
+  without changing anything.
+
+## [1.99.0-beta.4] — 2026-11-02
+
+**The fourth beta of 1.99.0: a diagnostic for the person who runs Mailroom.** Nothing changes in how Mailroom looks or behaves. This beta adds a read-only check that shows whether the desk, the area views and the mailbox counts would get faster with a different database planning style, so the next speed work goes where it actually helps.
+
+### Under the hood
+
+- **A new read-only operator check for slow database plans.** `mailroom-admin
+  plan-check --user-id U` times the desk, the area views and the mailbox counts
+  with the database forced to each of its two planning styles and says which
+  paths would benefit from planning with the real values. It changes nothing.
+
+## [1.99.0-beta.3] — 2026-11-02
+
+**The third beta of 1.99.0: learned sorting shows its work, and checking for new mail is much lighter on the server.** Settings now tells you what learned sorting has filed for you, and which senders you keep moving by hand that it isn't picking up, each with a one-tap rule. Separately, the constant "has anything changed?" check that every open window and the search index make now uses the database index instead of reading the whole change history each time.
+
+### What's new
+
+- **Settings now show what learned sorting has been doing.** Under the Learned
+  sorting switch, a short line says how many messages it filed for you in the
+  last 30 days and how many of those you moved somewhere else (or that it
+  hasn't filed anything). It counts new mail only, not mail sorted in bulk
+  afterwards, and it is hidden while the switch is off.
+- **See the senders it isn't learning.** A list headed "Senders you keep moving
+  by hand" names senders you have filed into the same area at least three times
+  in the last 30 days where learned sorting would not file their next message,
+  with a plain reason (for example "filed in more than one place" or "not
+  confirmed as genuine"). Each has a **Make a rule** button that works exactly
+  like the offer after a move, including the offer to move earlier mail. Senders
+  you have already covered with a rule, or told "Not now", are not listed. Up to
+  five are shown, with a count of the rest.
+
+### Faster
+
+- **Checking for new mail uses far less database time.** Mailroom asks the database "has anything changed?" every few seconds, for every open window and for its search index. On a server with one user, the database had settled on a way of answering that read the whole change history each time. It now works out the answer from the index, so this constant background check costs a small fraction of what it did. The same fix applies to the sender lookup used when scoring new mail.
+
+## [1.99.0-beta.2] — 2026-11-01
+
+**The second beta of 1.99.0: when you keep moving one sender's mail by hand, Mailroom offers to make a rule.** Learned placement can't help with every sender: some have been filed in more than one place, and some send mail that can't be confirmed as genuine. Until now you just kept moving their mail yourself. This beta notices, and offers a one-tap rule right under the move.
+
+### Sorting
+
+- **Mailroom now offers to make a rule when you keep moving the same sender's mail by hand.** After you file mail from one sender into an area for the third time in 30 days (by dragging it to the sidebar, using Move to area, the Labels menu or Re-file), a message appears under the move: "Always put mail from alice@example.com in Updates?" with "Make a rule" and "Not now". The Undo for the move stays where it was.
+- **It only asks when it will not already be handled.** If learned placement is going to file that sender's next message there itself, or a rule you have already turned on does, you are not asked. You are asked when learned placement is switched off or paused for that area, when your moves for that sender are not consistent, or when the sender's latest message could not be confirmed as genuine.
+- **"Not now" is remembered for 30 days** for that sender and area. It does not stop the offer for other senders or other areas. If you ignore the offer, it goes away when the move's Undo does, and you may be asked again next time.
+- **"Make a rule" makes an ordinary rule you can see and edit** under Rules, named "Mail from alice@example.com → Updates". It applies to future mail only. If older mail from that sender is somewhere else, Mailroom then asks "Also move the 12 earlier messages?" and moves nothing until you tap "Move them" (with its own Undo).
+
+### Upgrading
+
+- One database migration (00085). It adds a small table that remembers "Not now" answers. It is quick and needs no downtime.
+
+## [1.99.0-beta.1] — 2026-10-31
+
+**The first beta of 1.99.0: Mailroom now tidies up after its own background work.** Every finished background job used to leave a record behind forever. This beta deletes old ones once a day and adds a report for the person who runs Mailroom. Nothing about reading or sorting mail changes. Later betas add learned placement improvements, and the final 1.99.0 adds OAuth sign-in for AI tools.
+
+### Housekeeping
+
+- **Old background-job records are cleaned up automatically.** Every snooze, scheduled send, attachment scan, Trash purge and drawer sweep leaves a small record behind when it finishes, and until now nothing ever removed them, so the table only grew. Mailroom now deletes finished records after 30 days, and records of jobs that failed for good after 90 days, once a day. Jobs that are still waiting or running are never touched.
+- **You can change how long they are kept** with `MAILROOM_JOB_RETENTION` and `MAILROOM_DEAD_JOB_RETENTION` (at least 24 hours each).
+- **The person who runs your Mailroom can see what is there** with `mailroom-admin jobs-report`, which lists the records by kind and state and how many the daily clean-up would remove. It changes nothing.
+- **A job that fails for good now records when it failed**, so the clean-up can age it.
+
+### Upgrading
+
+- One database migration (00084). It changes a foreign key so a sent message's record no longer blocks clean-up, and adds the clean-up functions. It is quick and needs no downtime.
+
 ### Under the hood
 
 - **Dependency updates come from Dependabot**, weekly, with security fixes as soon as an advisory is published. Code is also scanned with CodeQL on every change.

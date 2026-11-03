@@ -418,6 +418,12 @@ type API struct {
 	// follow_up.go explains why a parse is paid once per message.
 	followUps *followUpCache
 
+	// mailboxCache holds each user's latest Mailbox/get ids:null answer under the
+	// (Email, Mailbox) change sequences (mailbox_cache.go); onMailboxCache counts
+	// its hits and misses (WithMailboxCacheObserver). The observer is optional.
+	mailboxCache   *mailboxCache
+	onMailboxCache func(result string)
+
 	// outOfOffice is the out-of-office reply service (#50). Nil means the
 	// OutOfOffice methods answer serverFail ("not configured").
 	outOfOffice OutOfOfficeService
@@ -606,6 +612,7 @@ func New(st *store.Store, opts ...Option) *API {
 		a.raw = a.composer
 	}
 	a.followUps = newFollowUpCache(followUpCacheSize)
+	a.mailboxCache = newMailboxCache(mailboxCacheUsers)
 	if a.baseCtx == nil {
 		a.baseCtx = context.Background()
 	}
@@ -704,6 +711,9 @@ func New(st *store.Store, opts ...Option) *API {
 		"Area/set":                     a.areaSet,
 		"Area/getSummary":              a.areaGetSummary,
 		"Area/getDesk":                 a.areaGetDesk,
+		"Area/ruleSuggestion":          a.areaRuleSuggestion,
+		"Area/dismissRuleSuggestion":   a.areaDismissRuleSuggestion,
+		"LearnedPlacement/getStatus":   a.learnedPlacementGetStatus,
 		"DeskPreferences/get":          a.deskPreferencesGet,
 		"DeskPreferences/changes":      a.deskPreferencesChanges,
 		"DeskPreferences/set":          a.deskPreferencesSet,

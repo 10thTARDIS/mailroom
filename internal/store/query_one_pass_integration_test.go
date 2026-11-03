@@ -90,6 +90,12 @@ func TestQueryEmailsOnePassAgreesWithTwoPass(t *testing.T) {
 	// counts the same statement without LIMIT/OFFSET, via the old shape.
 	referenceTwoPass := func(tx *UserTx, q EmailQuery) ([]string, int) {
 		t.Helper()
+		if q.CollapseThreads {
+			// The collapsed date-sorted shape no longer sends the window
+			// statement (bounded scan, collapse_page_integration_test.go):
+			// the reference is the old full-ranking statement itself.
+			return oldCollapsedQuery(t, tx, q)
+		}
 		var page, full recordedSQL
 		rec.stmts = nil
 		if _, _, err := tx.QueryEmails(ctx, q); err != nil {

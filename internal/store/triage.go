@@ -244,10 +244,12 @@ func (tx *UserTx) OutboundCountForAddress(ctx context.Context, addr string) (out
 	if norm == "" {
 		return 0, 0, nil
 	}
+	// planForValues: the generic plan scans every address instead of using
+	// the unique index on a single-user instance (see plans.go).
 	err = tx.tx.QueryRow(ctx, `
 		SELECT outbound_count, seen_count FROM app.contact_addresses
 		 WHERE user_id = $1 AND address = $2`,
-		tx.userID.String(), norm).Scan(&outbound, &inbound)
+		planForValues, tx.userID.String(), norm).Scan(&outbound, &inbound)
 	if isNoRows(err) {
 		return 0, 0, nil
 	}

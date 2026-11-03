@@ -244,6 +244,19 @@ var plan = map[string]Entry{
 		"\"Done\" on a follow-up nudge, which expires by itself 30 days after its message; " +
 			"the follow-up settings travel in desk_preferences.json"},
 
+	// Rule-suggestion dismissals (migration 00085). DROPPED: a "Not now" on an
+	// offer that lapses by itself after 30 days and names an area id of this
+	// instance; on import it would hide an offer the user can simply decline again.
+	"rule_suggestion_dismissals": {Dropped, "",
+		"\"Not now\" on a rule offer, which lapses by itself after 30 days and is keyed by " +
+			"this instance's area ids"},
+
+	// Stored-area readiness (ADR-049, migration 00086). DROPPED: whether THIS
+	// instance's stored area column is complete for the user; an import writes
+	// messages through the triggers and the flag is earned by `area-index`.
+	"area_index_state": {Dropped, "",
+		"whether this instance's stored area column is complete, which an import does not carry over"},
+
 	// Local DKIM verdicts (#776, migration 00066). DROPPED: a verdict about
 	// signatures checked at THIS instance's ingest, against DNS keys of that
 	// moment; the exported bytes still carry the signatures themselves.

@@ -120,6 +120,12 @@ func seedDeskScale(t *testing.T, n int) *deskScale {
 	t.Cleanup(pool.Close)
 
 	d := &deskScale{h: h, st: NewFromPool(pool), rec: rec, userID: NewULID(), accountA: NewULID()}
+	// Label and area changes through the store enqueue writeback jobs; leave none
+	// due behind (the dispatcher tests claim at most 50 and would not find their
+	// own).
+	t.Cleanup(func() {
+		_, _ = h.super.Exec(context.Background(), `DELETE FROM app.jobs WHERE user_id = $1`, d.userID.String())
+	})
 	u := d.userID.String()
 	exec := func(sql string, args ...any) {
 		t.Helper()

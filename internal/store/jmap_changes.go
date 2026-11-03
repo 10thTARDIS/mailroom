@@ -76,6 +76,9 @@ func (tx *UserTx) Changes(ctx context.Context, t ObjectType, since int64, maxCha
 	// every change_log column NULL — whenever since is out of range, so a
 	// since below the floor or above the current state never pays for a scan
 	// whose answer is going to be discarded as ErrCannotCalculateChanges.
+	//
+	// planForValues: the generic plan for this statement scans the whole log
+	// on a single-user instance (see plans.go).
 	rows, err := tx.tx.Query(ctx, `
 		WITH f AS (
 			SELECT COALESCE(
@@ -92,7 +95,7 @@ func (tx *UserTx) Changes(ctx context.Context, t ObjectType, since int64, maxCha
 		    ON l.user_id = $1 AND l.object_type = $2 AND l.seq > $3
 		   AND $3 >= f.floor_seq AND $3 <= c.cur
 		 ORDER BY l.seq`,
-		tx.userID.String(), t, since)
+		planForValues, tx.userID.String(), t, since)
 	if err != nil {
 		return ChangesPage{}, fmt.Errorf("store: scan change log (%s): %w", t, err)
 	}

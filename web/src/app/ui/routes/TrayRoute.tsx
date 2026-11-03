@@ -30,6 +30,7 @@ import type { JSX } from "react";
 
 import { effectiveEmail, sectionIds } from "../../../core/store";
 import { invertChanges, refileChanges } from "../../../core/refile";
+import { offerRuleSuggestion } from "../ruleSuggestion";
 import type { EffectiveEmail } from "../../../core/store";
 import { groupByWait, sectionKey, syncedAgoSeconds, trayStats } from "../../../core/desk";
 import type { WaitBucket } from "../../../core/desk";
@@ -95,7 +96,7 @@ const BUCKET_LABEL: Record<WaitBucket, MessageKey> = {
 };
 
 export function TrayRoute(): JSX.Element {
-  const { actions, sync, pushToast, offerUndo } = useApp();
+  const { actions, sync, store, pushToast, offerUndo } = useApp();
   const state = useMailState();
   const shell = useShell();
   const { byId: accountsById, accounts } = useAccounts();
@@ -447,7 +448,11 @@ export function TrayRoute(): JSX.Element {
       // labels come off and the target's goes on, and the undo is the exact
       // per-message inverse — so it restores the prior label set.
       const changes = refileChanges(state, list, areaId);
-      void actions.relabel(changes, filedText(list.length, area.name));
+      void actions
+        .relabel(changes, filedText(list.length, area.name))
+        .then(() =>
+          void offerRuleSuggestion({ store, sync, actions, offerUndo, pushToast }, list, areaId, changes.length),
+        );
       const inverse = invertChanges(changes);
       offerUndo(filedText(list.length, area.name), async () => {
         await actions.relabel(inverse, "Re-file undone");
@@ -460,7 +465,7 @@ export function TrayRoute(): JSX.Element {
         clearSelection();
       }
     },
-    [actions, state, targets, clearSelection, offerUndo],
+    [actions, sync, store, pushToast, state, targets, clearSelection, offerUndo],
   );
 
   /**

@@ -182,7 +182,7 @@ func TestLoadTreatsEmptyPassthroughVarsAsUnset(t *testing.T) {
 		EnvIndexInterval, EnvSearchDisabled, EnvWritebackDisabled, EnvAllowPrivateAccountHosts,
 		EnvUndoSendWindow, EnvRateLimitPerSecond, EnvRateLimitBurst, EnvWKDRateLimitPerSecond,
 		EnvWKDRateLimitBurst, EnvImageProxyPrefetch, EnvImageProxyPrefetchMaxAge, EnvImageProxyPrefetchMaxBytes,
-		EnvTrustedProxies,
+		EnvTrustedProxies, EnvJobRetention, EnvDeadJobRetention,
 	}
 
 	base := func(t *testing.T) {

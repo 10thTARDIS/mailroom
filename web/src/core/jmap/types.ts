@@ -2746,6 +2746,47 @@ export interface InducedRule {
 }
 
 /**
+ * `Area/ruleSuggestion` (urn:mailroom:desk): whether to offer "Always put mail
+ * from {address} in {area}?" after the user filed mail from one sender into an
+ * area by hand. The SERVER decides; `reason` says why either way, and
+ * `earlier` is how many live messages from the sender are not in the area.
+ */
+export interface AreaRuleSuggestion {
+  suggest: boolean;
+  reason: string;
+  address: string;
+  areaId: Id;
+  filings: number;
+  earlier: number;
+}
+
+/** One line of LearnedPlacement/getStatus's "senders you keep moving by hand". */
+export interface LearningStatusSender {
+  address: string;
+  areaId: Id;
+  /** Why learned placement is not filing this sender (a placement reason or an Area/ruleSuggestion one). */
+  reason: string;
+  filings: number;
+}
+
+/**
+ * LearnedPlacement/getStatus: what learned placement did in the last 30 days
+ * (arrival placements only) and the senders it is not learning. When `enabled`
+ * is false nothing else is meaningful. `moreSenders` is a lower bound when
+ * `sendersTruncated`.
+ */
+export interface LearningStatus {
+  enabled: boolean;
+  placed: number;
+  corrected: number;
+  kept: number;
+  open: number;
+  senders: LearningStatusSender[];
+  moreSenders: number;
+  sendersTruncated: boolean;
+}
+
+/**
  * What Rule/induce reports (#168).
  *
  * `examples < required` is the normal answer for a new label, and the UI must

@@ -27,12 +27,14 @@ const relabel = vi.fn(async (changes: LabelChange[]) => {
   }
 });
 const undos: Array<{ label: string; inverse: () => Promise<boolean> }> = [];
+const ruleSuggestion = vi.fn(async (): Promise<unknown> => null);
+const toasts: Array<{ message: string }> = [];
 vi.mock("../state", () => ({
   useApp: () => ({
-    actions: { applyLabel, relabel, createLabel: async () => null },
+    actions: { applyLabel, relabel, createLabel: async () => null, ruleSuggestion, settle: async () => true },
     sync: { loadEmails: async () => ({ notFound: [], failed: false }) },
     store: liveStore,
-    pushToast: () => 1,
+    pushToast: (t: { message: string }) => toasts.push(t),
     offerUndo: (label: string, inverse: () => Promise<boolean>) => void undos.push({ label, inverse }),
   }),
   useMailState: () => state,
@@ -67,7 +69,10 @@ let host: HTMLElement;
 beforeEach(() => {
   applyLabel.mockClear();
   relabel.mockClear();
+  ruleSuggestion.mockReset();
+  ruleSuggestion.mockImplementation(async () => null);
   undos.length = 0;
+  toasts.length = 0;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -169,6 +174,36 @@ describe("LabelMenu adding an area's label moves the message (#728)", () => {
     await undos[0]!.inverse();
     expect(labelsOf("m1")).toBe("L-PRO,L-WORK");
     expect(labelsOf("m2")).toBe("");
+  });
+
+  // One rule prompt at a time: when the targeted offer fires, the older
+  // induction prompt stands down; when it stays silent, induction runs as before.
+  it("the rule-suggestion offer replaces the induction prompt, and only when it fires", async () => {
+    const from = [{ name: "Alerts", email: "noreply@alerts.example" }];
+    const offer = { suggest: true, reason: "mixed", address: "noreply@alerts.example", areaId: "A-UPD", filings: 3, earlier: 0 };
+
+    ruleSuggestion.mockImplementation(async () => offer);
+    const suggested = vi.fn();
+    mount([email("m1", { labelIds: { "L-PRO": true }, from }), email("m2", { labelIds: {}, from })], seedAreas, suggested);
+    flushSync(() => box("Updates").click());
+    await settle();
+    await settle();
+    expect(ruleSuggestion).toHaveBeenCalledTimes(1);
+    expect(toasts.some((t) => t.message.includes("noreply@alerts.example"))).toBe(true);
+    expect(suggested).not.toHaveBeenCalled();
+
+    // Control: the server says no, so the induction prompt runs.
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    toasts.length = 0;
+    ruleSuggestion.mockImplementation(async () => ({ ...offer, suggest: false, reason: "learned" }));
+    const suggested2 = vi.fn();
+    mount([email("m3", { labelIds: { "L-PRO": true }, from })], seedAreas, suggested2);
+    flushSync(() => box("Updates").click());
+    await settle();
+    await settle();
+    expect(suggested2).toHaveBeenCalledWith("L-UPD");
+    expect(toasts.some((t) => t.message.includes("noreply@alerts.example"))).toBe(false);
   });
 
   it("removing an area's label is still a plain removal", () => {

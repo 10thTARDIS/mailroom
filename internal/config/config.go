@@ -162,6 +162,17 @@ const (
 	// every week, forever; refusing to load below a week makes that
 	// mistake a config error instead of a standing correctness surprise.
 	MinChangeLogRetention = 7 * 24 * time.Hour
+	// DefaultJobRetention is how long a finished ('done') job row is kept
+	// before the daily job sweep deletes it (migration 00084). Nothing reads a
+	// done row except someone investigating, so a month is plenty.
+	DefaultJobRetention = 30 * 24 * time.Hour
+	// DefaultDeadJobRetention is the same for a dead-lettered job, kept three
+	// times as long so a failure stays inspectable after it is noticed.
+	DefaultDeadJobRetention = 90 * 24 * time.Hour
+	// MinJobRetention is the floor Load() enforces on both job windows: a typo
+	// that collapsed one to minutes would delete the evidence of a job that
+	// failed this morning.
+	MinJobRetention = 24 * time.Hour
 
 	// DefaultRateLimitPerSecond / DefaultRateLimitBurst are the enforced per-user
 	// API rate-limit defaults (spec §10: enforced in v1.0, admin UI may lag).
@@ -351,8 +362,14 @@ const (
 	// see DefaultChangeLogRetention for why a shorter value is refused
 	// rather than merely discouraged.
 	EnvChangeLogRetention = "MAILROOM_CHANGE_LOG_RETENTION"
-	EnvBlobRoot           = "MAILROOM_BLOB_ROOT"
-	EnvWebRoot            = "MAILROOM_WEB_ROOT"
+	// EnvJobRetention / EnvDeadJobRetention set how long finished and
+	// dead-lettered job rows are kept before the daily job sweep deletes them.
+	// Go durations of at least MinJobRetention (24h).
+	EnvJobRetention     = "MAILROOM_JOB_RETENTION"
+	EnvDeadJobRetention = "MAILROOM_DEAD_JOB_RETENTION"
+
+	EnvBlobRoot = "MAILROOM_BLOB_ROOT"
+	EnvWebRoot  = "MAILROOM_WEB_ROOT"
 	// EnvWKDDomain is the mail domain whose keys this instance publishes over
 	// WKD (#48, spec §9). UNSET DISABLES PUBLICATION, which is the right
 	// default: the direct method carries no domain in the request path, so a
@@ -693,6 +710,13 @@ type Config struct {
 	// ever-growing change_log is exactly what this job exists to prevent.
 	ChangeLogRetention time.Duration
 
+	// JobRetention and DeadJobRetention are how long finished and dead-lettered
+	// job rows are kept before the daily job sweep deletes them. Default
+	// DefaultJobRetention (30 days) and DefaultDeadJobRetention (90 days); each
+	// at least MinJobRetention.
+	JobRetention     time.Duration
+	DeadJobRetention time.Duration
+
 	// UndoSendWindow is how long a submission is held (and cancelable) before
 	// the send job fires. Defaults to DefaultUndoSendWindow; zero is legal and
 	// means "send immediately, no undo".
@@ -890,6 +914,8 @@ func Load() (*Config, error) {
 		TrashRetention:           DefaultTrashRetention,
 		PurgeInterval:            DefaultPurgeInterval,
 		ChangeLogRetention:       DefaultChangeLogRetention,
+		JobRetention:             DefaultJobRetention,
+		DeadJobRetention:         DefaultDeadJobRetention,
 		IndexInterval:            DefaultIndexInterval,
 		UndoSendWindow:           DefaultUndoSendWindow,
 
@@ -1180,6 +1206,25 @@ func Load() (*Config, error) {
 				EnvChangeLogRetention, MinChangeLogRetention, raw))
 		default:
 			cfg.ChangeLogRetention = d
+		}
+	}
+
+	for _, w := range []struct {
+		env string
+		dst *time.Duration
+	}{{EnvJobRetention, &cfg.JobRetention}, {EnvDeadJobRetention, &cfg.DeadJobRetention}} {
+		raw := strings.TrimSpace(os.Getenv(w.env))
+		if raw == "" {
+			continue
+		}
+		d, perr := time.ParseDuration(raw)
+		switch {
+		case perr != nil:
+			problems = append(problems, fmt.Sprintf("%s must be a Go duration (e.g. 720h), got %q", w.env, raw))
+		case d < MinJobRetention:
+			problems = append(problems, fmt.Sprintf("%s must be at least %s, got %q", w.env, MinJobRetention, raw))
+		default:
+			*w.dst = d
 		}
 	}
 

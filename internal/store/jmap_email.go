@@ -911,8 +911,25 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		return nil, 0, err
 	}
 
+	// The area-list shape (collapse + arrival sort) is served by a bounded scan
+	// whose cost follows the page, not the area (queryCollapsedBounded) — but
+	// ONLY on the stored path, where the scan is a range over
+	// messages_user_area_arrival. With the resolver every batch would resolve
+	// the whole area again. Every other shape keeps the full-ranking statement
+	// below. (The readiness answer is cached by emailQueryWhere's own ask.)
+	bounded := false
+	if q.InArea != nil || q.Unsorted {
+		ready, rerr := tx.areaIndexReady(ctx)
+		if rerr != nil {
+			return nil, 0, rerr
+		}
+		bounded = ready && collapseBoundedEligible(q)
+	}
+
 	var countSQL, pageSQL string
-	if q.CollapseThreads {
+	if bounded {
+		// Nothing to build: collapsedPage writes its own statements.
+	} else if q.CollapseThreads {
 		// RFC 8621 §4.4.4: "Emails in the same Thread as a previous Email in
 		// the list (given the filter and sort order) will be removed from the
 		// list" — for the returned page AND for `total`.
@@ -972,6 +989,20 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		).Scan(&restorePlan, new(string)); err != nil {
 			return nil, 0, fmt.Errorf("store: query emails (plan mode): %w", err)
 		}
+	}
+
+	if bounded {
+		// LIMIT/OFFSET are not bound: the bounded scan windows in Go.
+		ids, total, err = tx.queryCollapsedBounded(ctx, q, from, where, countArgs)
+		if err != nil {
+			return nil, 0, err
+		}
+		if restorePlan != "" {
+			if _, err := tx.tx.Exec(ctx, `SELECT set_config('plan_cache_mode', $1, true)`, restorePlan); err != nil {
+				return nil, 0, fmt.Errorf("store: query emails (plan mode): %w", err)
+			}
+		}
+		return ids, total, nil
 	}
 
 	rows, err := tx.tx.Query(ctx, pageSQL, args...)
@@ -1036,8 +1067,20 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 	// never changes which messages match or how many times.
 	from = "app.messages m"
 	customArea := areaCond != nil
+	areaStored := false
+	// A ready user's column is read; anyone else gets the resolver, exactly as
+	// before (area_source.go). Only asked when the query names an area.
+	if q.InArea != nil || q.Unsorted || (q.Search != nil && q.Search.Uses(SearchArea)) {
+		if areaStored, err = tx.areaIndexReady(ctx); err != nil {
+			return "", "", err
+		}
+	}
 	if areaCond == nil {
-		areaCond = func(areaID *ulid.ULID) string { return AreaPredicate(areaID, bind) }
+		if areaStored {
+			areaCond = func(areaID *ulid.ULID) string { return areaPredicateStored(areaID, bind) }
+		} else {
+			areaCond = func(areaID *ulid.ULID) string { return AreaPredicate(areaID, bind) }
+		}
 	}
 	if q.InThread != nil {
 		conds = append(conds, "m.thread_id = "+bind(q.InThread.String()))
@@ -1058,7 +1101,7 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 		deskPred = deskMessageSQL(bind, tx.userID, q.InAccount)
 	}
 	if q.InArea != nil {
-		if !customArea && q.OnDesk != nil && *q.OnDesk {
+		if !customArea && !areaStored && q.OnDesk != nil && *q.OnDesk {
 			// Resolve only the desk's messages, not the area's candidates: the
 			// outer onDesk condition below keeps the answer identical (#706).
 			conds = append(conds, AreaPredicateOnDesk(*q.InArea, bind, deskPred))
@@ -1256,7 +1299,7 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 		if q.Search.Uses(SearchAboveLine) {
 			from += searchScoreJoin
 		}
-		cond, err := searchPredicateSQL(*q.Search, bind, q.LineThreshold)
+		cond, err := searchPredicateSQL(*q.Search, bind, q.LineThreshold, areaStored)
 		if err != nil {
 			return "", "", err
 		}
