@@ -9,6 +9,14 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.0-beta.8] — 2026-11-03
+
+**The eighth beta of 1.99.0: area lists can become fast.** Each message now remembers which area it belongs to, kept up to date automatically whenever a label, a feed or the sorting changes. Once the person who runs Mailroom has run one command to fill it in for existing mail, area lists and counts read it directly instead of working it out from scratch each time. Until then nothing changes.
+
+### Upgrading
+
+- One database migration (00086). It adds the stored area and the triggers that keep it current; existing mail is filled in by `mailroom-admin area-index --apply` (run it without `--apply` first to see the report). Moving very many messages at once is a little slower than before, because each move now also updates the stored area.
+
 ### Faster
 
 - **Area lists and counts now read the stored area once you have run the backfill.** After `mailroom-admin area-index --apply` has marked a person ready, the area views, the desk, the counts beside them, the drawer's archive sweep and the label shown on each message read the area Mailroom already keeps for every message instead of working it out again for each request. The answers are the same; they simply stop costing time in proportion to the size of the mailbox. The first page of an area in the usual newest-first, one-row-per-conversation view now reads the area in small steps and stops as soon as it has the conversations the page needs, and the count of conversations shown beside it is still exact. Until the backfill has been run for a person, nothing changes for them at all. `mailroom-admin plan-check` now says, for each hot path, whether it is reading the stored area or working it out.
