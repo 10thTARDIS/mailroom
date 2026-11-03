@@ -25,10 +25,12 @@ import (
 //
 //	WITH desk AS MATERIALIZED (deskResolvedSQL)   -- the resolver, once
 //	     by_area, unsorted                         -- AreaSummary's own CTEs
-//	     s<i>_ranked                               -- collapsedRankSQL over the
-//	                                                  section's own Email/query
-//	                                                  predicates, with the area
-//	                                                  filter read from `desk`
+//	     desk_cand                                 -- the sections' shared
+//	                                                  Email/query predicates,
+//	                                                  once, over `desk`
+//	     s<i>_ranked                               -- collapsedRankSQL over
+//	                                                  desk_cand, filtered on
+//	                                                  the section's area and side
 //	     s<i>_total, s<i>_page                     -- count and window
 //	SELECT … one result set, tagged by kind and section
 //
@@ -36,14 +38,17 @@ import (
 // re-expressed here: DeskSectionQuery builds the EmailQuery the web client's
 // sectionFilter produces (the api package pins that equivalence against its own
 // parser), and emailQueryWhere — the ONE compiler QueryEmails uses — turns it
-// into SQL. The single substitution is where the area filter READS the resolved
-// area from: `desk` instead of a fresh AreaPredicate resolution. That is the
-// same resolver (deskResolvedSQL is built from areaJoinSQL/areaResolvedSQL), and
-// restricting it to desk messages cannot change a section's answer because
-// every section also carries `onDesk`, through the same deskMessageSQL with the
-// same account. The agreement test (desk_snapshot_integration_test.go) holds
-// both claims to per-section QueryEmails and AreaSummary on a fixture with
-// every shape the predicates distinguish.
+// into SQL. The substitution is that three of a section's filters are READ
+// from `desk` instead of compiled again: its area (the same resolver —
+// deskResolvedSQL is built from areaJoinSQL/areaResolvedSQL, or reads the
+// stored area exactly as areaPredicateStored does), its side of the line (the
+// same lineSideSQL against the same threshold) and onDesk itself (desk's rows
+// ARE deskMessageSQL's, with the same account). Every other predicate a
+// section has is compiled by emailQueryWhere, once for all sections, since
+// they share all of them (#27). The agreement test
+// (desk_snapshot_integration_test.go) holds every section to a per-section
+// QueryEmails and the counts to AreaSummary, in both area modes, on a fixture
+// with every shape the predicates distinguish.
 //
 // WHY A MATERIALIZED CTE AND NOT A TEMP TABLE. Both run the resolver once. A
 // temp table needs the TEMP privilege on the database (a hardened deployment may
@@ -52,9 +57,8 @@ import (
 // no statistics unless it is ANALYZEd — another statement — and turns one round
 // trip into three or more. The CTE needs nothing, is one statement and one
 // snapshot (so the counts and the lists are from the same instant by
-// construction), and its lack of statistics does not matter here: every
-// section reads it through `(m.id IN (SELECT … FROM desk …)) IS TRUE`, which is
-// always a hashed SubPlan built once (see areaMatchSQL for why the IS TRUE).
+// construction), and its lack of statistics does not matter here: the
+// sections read it through one hash join (desk_cand, below).
 // MATERIALIZED is stated rather than left to the planner's "referenced more
 // than once" rule, so a future edit that leaves one reference cannot quietly
 // inline the resolver back into every section.
@@ -142,27 +146,61 @@ func (tx *UserTx) DeskSnapshot(ctx context.Context, q DeskSnapshotQuery) (DeskSn
 		` + areaSummaryCTEs("desk") + `,
 		summary AS (SELECT * FROM by_area UNION ALL SELECT * FROM unsorted)`)
 
-	// The area filter, read from the resolution above. NOT NULL on both sides
-	// (desk.id is a message id, m.id a primary key), so the IN is strictly true
-	// or false; `IS TRUE` keeps it a hashed SubPlan rather than a semi-join the
-	// planner could put on the inner side of a nested loop (areaMatchSQL).
-	areaCond := func(areaID *ulid.ULID) string {
-		if areaID == nil {
-			return `((m.id IN (SELECT dk.id FROM desk dk WHERE dk.area_id IS NULL)) IS TRUE)`
-		}
-		return `((m.id IN (SELECT dk.id FROM desk dk WHERE dk.area_id = ` + bind(areaID.String()) + `)) IS TRUE)`
-	}
-
+	// THE SECTIONS SHARE ONE PASS OVER THE MESSAGES (#27). A section is its
+	// Email/query (DeskSectionQuery), and every section's query is the same
+	// apart from two things: WHICH AREA, and (for an area) THE SURFACE SIDE
+	// of the line. `desk` already holds both for every desk message — its
+	// area from the one resolution, its side from lineSideSQL against the
+	// same threshold the section's OnSurface uses — and its rows are exactly
+	// the messages the section's OnDesk filter admits (the same
+	// deskMessageSQL with the same account, in the same statement). So the
+	// rest of the section's predicates (snoozed, account, deleted, junk, …)
+	// are compiled ONCE by emailQueryWhere, from the section query with the
+	// area, side and on-desk filters taken out, and evaluated once over the
+	// desk in `desk_cand`; each section is then a filter on its area and side.
+	//
+	// It used to be one emailQueryWhere per section with the area read from
+	// `desk` through a hashed SubPlan: each section scanned the user's whole
+	// mailbox and triage scores again to keep the messages `desk` had already
+	// found, so a desk cost one full scan per section on top of the
+	// resolution. Driving each section from `desk` by primary key instead was
+	// tried and measured slower on a large desk (thousands of key lookups and
+	// score probes per section); one hash join for all sections is cheaper
+	// at every desk size.
+	//
+	// desk_cand carries the columns collapsedRankSQL and the desk sections'
+	// order (effective arrival, then id: DeskSectionQuery's sort) read, under
+	// the names app.messages gives them, so it stands in for `m` there. desk's
+	// area and side are renamed so that nothing reads like the stored column
+	// (messages.area_id), which only a ready user's statements may name.
 	final := []string{`SELECT 0 AS kind, -1 AS sec,
 		       row_number() OVER (ORDER BY position NULLS LAST, area_id NULLS LAST) AS ord,
 		       area_id::text AS area_id, surface, drawer, unscored, NULL::text AS id
 		  FROM summary`}
-	for i, sec := range q.Sections {
-		eq := DeskSectionQuery(sec, q.Scope)
-		from, where, err := tx.emailQueryWhere(ctx, eq, bind, areaCond)
+	if len(q.Sections) > 0 {
+		common := DeskSectionQuery(q.Sections[0], q.Scope)
+		common.InArea, common.Unsorted, common.OnSurface, common.OnDesk = nil, false, nil, nil
+		from, where, err := tx.emailQueryWhere(ctx, common, bind, nil)
 		if err != nil {
 			return DeskSnapshotResult{}, err
 		}
+		b.WriteString(`,
+		desk_cand AS MATERIALIZED (
+			SELECT m.id, m.user_id, m.thread_id, m.snooze_woke_at, m.received_at, dk.area_id AS desk_area, dk.side AS desk_side
+			  FROM ` + from + `
+			  JOIN desk dk ON dk.id = m.id
+			 WHERE ` + where + `)`)
+	}
+	for i, sec := range q.Sections {
+		eq := DeskSectionQuery(sec, q.Scope)
+		// The section's own area and side, read from desk_cand (above).
+		where := `m.desk_area IS NULL`
+		if eq.InArea != nil {
+			// Unjudged mail counts as surface, exactly as emailQueryWhere's
+			// OnSurface and AreaSummary's unscored bucket do.
+			where = `m.desk_area = ` + bind(eq.InArea.String()) + ` AND (m.desk_side IS NULL OR m.desk_side = 'surface')`
+		}
+		from := "desk_cand m"
 		body, outerOrder := collapsedRankSQL(from, where, emailOrderTerms(eq, bind))
 		n := "s" + strconv.Itoa(i)
 		page := `SELECT id, row_number() OVER (ORDER BY ` + outerOrder + `) AS ord
