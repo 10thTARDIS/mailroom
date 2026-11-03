@@ -102,7 +102,7 @@ func newOAHarness(t *testing.T) *oaHarness {
 	mux.Handle("GET /.well-known/oauth-protected-resource", h.os.ProtectedResource())
 	mux.Handle("GET /.well-known/oauth-authorization-server", h.os.AuthorizationServer())
 	mux.Handle("GET /oauth/authorize", session(h.os.Authorize()))
-	mux.Handle("POST /oauth/consent", session(auth.CSRFGuard(h.os.Consent(), "", nil)))
+	mux.Handle("POST /oauth/consent", session(h.os.Consent()))
 	mux.Handle("POST /oauth/token", h.os.Token())
 	mux.Handle("POST /oauth/revoke", h.os.Revoke())
 	mux.Handle("/mcp", MCPChallengeWith(gate.Wrap(apiH, apiSession), auth.DefaultSessionCookieName, h.os.Challenge()))
@@ -529,7 +529,7 @@ func TestOAuthCrossUser(t *testing.T) {
 		t.Fatalf("B approving A's request: %d %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	var grants int
-	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.api_keys WHERE kind='oauth'`).Scan(&grants)
+	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.api_keys WHERE kind='oauth' AND user_id IN ($1,$2)`, h.a.UserID.String(), h.b.UserID.String()).Scan(&grants)
 	if grants != 0 {
 		t.Errorf("B's attempt created %d grants", grants)
 	}
@@ -751,7 +751,7 @@ func TestOAuthConsentForgery(t *testing.T) {
 		t.Errorf("deny after approve: %d, want 400", resp.StatusCode)
 	}
 	var codes int
-	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.oauth_codes`).Scan(&codes)
+	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.oauth_codes WHERE user_id=$1`, h.a.UserID.String()).Scan(&codes)
 	if codes != 1 {
 		t.Errorf("codes issued = %d, want 1", codes)
 	}
@@ -869,9 +869,8 @@ func TestOAuthScopeCeiling(t *testing.T) {
 	if st != 400 || out["error"] != "invalid_scope" {
 		t.Errorf("widening refresh: %d %v", st, out)
 	}
-	// ...and it can narrow.
-	_, rt := h.connectAgain(t, tok)
-	_ = rt
+	// ...and it can narrow (a refused refresh consumed that token, so use a new connection).
+	h.connectAgain(t, h.connect(t, h.a.UserID))
 }
 
 func (h *oaHarness) connectAgain(t *testing.T, tok oaTokens) (int, map[string]any) {
@@ -900,8 +899,8 @@ func TestOAuthGrantIsKeyGated(t *testing.T) {
 	keyID, _, _, _ := h.grantFor(t, h.a.UserID, cid)
 	if rows := h.auditRows(t, keyID, "api_key.create"); len(rows) != 1 {
 		t.Errorf("api_key.create audit rows = %d", len(rows))
-	} else if d, _ := rows[0]["detail"].(map[string]any); d["kind"] != "oauth" {
-		t.Errorf("audit detail = %v", d)
+	} else if rows[0]["kind"] != "oauth" || rows[0]["_actor"] != "user" {
+		t.Errorf("audit detail = %v", rows[0])
 	}
 	// Send and delete together need the typed confirmation, and start in confirm mode.
 	_, challenge := pkce()

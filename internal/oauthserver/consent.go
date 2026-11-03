@@ -242,11 +242,12 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 var errRefused = errors.New("oauthserver: decision refused")
 
 // Consent is POST /oauth/consent: the user's decision. It must be mounted
-// behind the session gate and auth.CSRFGuard. The request id is single use and
+// behind the session gate; it carries its own auth.CSRFGuard, so a cross-site
+// POST is refused (403) wherever it is mounted. The request id is single use and
 // is the caller's own (RLS): a forged, replayed, expired or other user's
 // decision is refused identically.
 func (s *Server) Consent() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return auth.CSRFGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := auth.UserIDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -357,7 +358,7 @@ func (s *Server) Consent() http.Handler {
 			return
 		}
 		s.redirectBack(w, r, req.RedirectURI, req.State, map[string]string{"code": redirect})
-	})
+	}), "", s.log)
 }
 
 // parseDecision turns the posted form into a grant approval, enforcing the

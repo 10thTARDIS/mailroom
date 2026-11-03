@@ -66,10 +66,10 @@ func oauthRoutes(s *oauthserver.Server, logger *slog.Logger) []route {
 		oauthserver.NotFound(), oauthserver.NotFound(), oauthserver.NotFound(), oauthserver.NotFound()
 	if s != nil {
 		disc, prm, authz = s.AuthorizationServer(), s.ProtectedResource(), s.Authorize()
-		// CSRF defence in depth for the decision: a cross-site POST is refused
-		// before the handler. The request id (unguessable, single use, the
+		// The decision carries its own CSRF guard (a cross-site POST is refused
+		// before the handler); the request id (unguessable, single use, the
 		// caller's own) is the second layer.
-		consent = auth.CSRFGuard(s.Consent(), "", logger)
+		consent = s.Consent()
 		token, revoke = s.Token(), s.Revoke()
 	}
 	return []route{
