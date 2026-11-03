@@ -9,6 +9,14 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **The desk opens faster on a large mailbox.** The desk's sections now share one pass over your mail, instead of each section going through all of it again. The more areas you have, the bigger the difference.
+
+### Under the hood
+
+- Updated the library Mailroom uses to check sign-in tokens (go-jose 4.1.6) for a security fix. It now refuses RSA keys larger than 4096 bits, which sign-in providers do not use in practice.
+
 ## [1.99.0] — 2026-11-03
 
 **Mailroom gets noticeably faster on a large mailbox, learns to say when it isn't learning, and tidies up after itself.** The desk, area lists, folder counts and the constant check for new mail all do far less work than before, and Settings now shows what learned sorting has filed for you. When you keep moving the same sender's mail by hand, Mailroom offers to make a rule for it. Old background-job records are cleaned up automatically, and the person who runs Mailroom gets new read-only tools to see what the server is doing. This release gathers everything from the eight 1.99.0 betas. OAuth sign-in for AI tools, first planned for 1.99, moves to 1.100.

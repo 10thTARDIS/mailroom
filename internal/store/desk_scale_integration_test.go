@@ -328,6 +328,35 @@ type explainNode struct {
 	Plans        []explainNode `json:"Plans"`
 }
 
+// relationReads counts the scan nodes (sequential, index or bitmap) reading
+// each relation in a plan, read off plain EXPLAIN (its shape, not a timing).
+func relationReads(t *testing.T, ctx context.Context, tx *UserTx, sql string, args []any) map[string]int {
+	t.Helper()
+	var raw []byte
+	if err := tx.tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+		t.Fatalf("explain: %v\n%s", err, sql)
+	}
+	var doc []struct {
+		Plan explainNode `json:"Plan"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil || len(doc) != 1 {
+		t.Fatalf("parse explain: %v", err)
+	}
+	n := map[string]int{}
+	var walk func(e explainNode)
+	walk = func(e explainNode) {
+		switch e.NodeType {
+		case "Seq Scan", "Index Scan", "Index Only Scan", "Bitmap Heap Scan":
+			n[e.Relation]++
+		}
+		for _, c := range e.Plans {
+			walk(c)
+		}
+	}
+	walk(doc[0].Plan)
+	return n
+}
+
 // perRowWork returns every place in the plan that does per-message work of
 // the two kinds #660 was made of, each read off EXPLAIN ANALYZE rather than
 // inferred from a timing:

@@ -623,6 +623,26 @@ func TestDeskSnapshotResolvesOnceAtScale(t *testing.T) {
 			t.Errorf("control: a per-section Email/query shows %d resolver nodes / %d label scans, want 2/2 — "+
 				"the counter cannot see the resolver", passes, scans)
 		}
+		// THE SECTIONS SHARE ONE PASS OVER THE MAILBOX (#27). Each section
+		// used to scan the user's messages, triage scores and provenance again
+		// to keep the messages `desk` had already found, so a desk's cost grew
+		// by a full scan per section. The same statement with one section must
+		// read these tables exactly as many times as with all of them.
+		if _, err := tx.DeskSnapshot(ctx, DeskSnapshotQuery{Scope: scope, Sections: sections[:1]}); err != nil {
+			return err
+		}
+		one := d.rec.find(t, "WITH desk AS MATERIALIZED")
+		all, single := relationReads(t, ctx, tx, stmt.sql, stmt.args), relationReads(t, ctx, tx, one.sql, one.args)
+		t.Logf("table reads with %d sections %v, with 1 section %v", len(sections), all, single)
+		for _, rel := range []string{"messages", "triage_scores", "message_provenance"} {
+			if all[rel] != single[rel] {
+				t.Errorf("DeskSnapshot reads %s %d times with %d sections and %d times with one: "+
+					"each section is reading the mailbox again", rel, all[rel], len(sections), single[rel])
+			}
+		}
+		if single["messages"] == 0 {
+			t.Errorf("control: no read of messages counted at all — the desk CTE itself reads it, so the counter is not looking")
+		}
 		bad, text := perRowWork(t, ctx, tx, stmt.sql, stmt.args)
 		if len(bad) > 0 {
 			t.Errorf("DeskSnapshot does per-message work (#660): %s\n%s", strings.Join(bad, "; "), text)
