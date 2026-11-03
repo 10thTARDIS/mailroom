@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.2] — 2026-11-03
+
+**Area lists and folder counts get faster.** Counting the conversations in an area, and recounting each folder's messages and unread mail, spent most of their time sorting message ids by your server's language rules, which they never needed. They now compare ids byte by byte. Every count comes out exactly as before, and conversation-grouped lists, including the desk's sections, get the same speed-up. There are no upgrade steps.
+
 ### Faster
 
 - **Area lists and folder counts are faster on a large mailbox.** Counting an area's conversations, and recounting the messages and unread mail in each folder, now compare message ids byte by byte instead of by your server's language rules. The counts are exactly the same; working them out takes a fraction of the time. Thread-grouped lists, including the desk's sections, get the same speed-up.
