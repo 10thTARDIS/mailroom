@@ -44,8 +44,11 @@ import (
 // statement, and the first custom run may be warmer or colder for the data
 // pages, so the cold figures are context and the medians carry the verdict.
 // Run it a couple of times; a small or cold database can show noise. A path
-// that already opts out of the statement cache (store.planForValues) is not
-// affected by either mode, and none of the paths below does today. The
+// that plans its own statements is not affected by either mode: the desk
+// snapshot and an area's Email/query set plan_cache_mode=force_custom_plan for
+// themselves (#665, #697), so their two columns differ only by noise and warm
+// pages, and their verdict says so instead of naming a candidate
+// (planSelfPlanned). The
 // diagnostic needs a user whose desk has been opened at least once (areas and
 // desk preferences exist): materialising them is a write, which this command
 // refuses.
@@ -120,6 +123,20 @@ type planPathResult struct {
 
 // planPath is one hot path: run calls the real store function(s) and returns
 // how many rows came back.
+// planSelfPlanned names the paths whose store code forces a custom plan for
+// its own statements, overriding the mode this command sets. A gap between
+// their columns is not a plan-mode effect, and reading it as one sent a fix
+// after a cost that was really a sort (#27).
+var planSelfPlanned = map[string]bool{
+	planDeskPath:  true,
+	planEmailPath: true,
+}
+
+const (
+	planDeskPath  = "Area/getDesk: DeskSnapshot"
+	planEmailPath = "Email/query: largest area, first page"
+)
+
 type planPath struct {
 	name string
 	// source is store.AreaSourceStored / AreaSourceResolver, or "none".
@@ -201,7 +218,7 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 			m, err := tx.DrawerArchiveCounts(ctx)
 			return len(m), err
 		}},
-		{"Area/getDesk: DeskSnapshot", src, func(ctx context.Context, tx *store.UserTx) (int, error) {
+		{planDeskPath, src, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			s, err := tx.DeskSnapshot(ctx, store.DeskSnapshotQuery{Scope: scope, Sections: sections})
 			n := 0
 			for _, sec := range s.Sections {
@@ -220,7 +237,7 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 	}
 	if largest != nil && best > 0 {
 		area := *largest
-		emailPath = &planPath{"Email/query: largest area, first page", src, func(ctx context.Context, tx *store.UserTx) (int, error) {
+		emailPath = &planPath{planEmailPath, src, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			// What the web client sends for an area view: inArea, the default
 			// returnedAt-descending sort, thread-collapsed, one page.
 			ids, _, err := tx.QueryEmails(ctx, store.EmailQuery{
@@ -245,7 +262,7 @@ func planCheckTimeAll(ctx context.Context, tx *store.UserTx, paths []planPath, e
 			return nil, err
 		}
 		out = append(out, r)
-		if p.name == "Area/getDesk: DeskSnapshot" && emailPath != nil {
+		if p.name == planDeskPath && emailPath != nil {
 			er, err := planCheckPath(ctx, tx, *emailPath, runs)
 			if err != nil {
 				return nil, err
@@ -254,7 +271,7 @@ func planCheckTimeAll(ctx context.Context, tx *store.UserTx, paths []planPath, e
 		}
 	}
 	if emailPath == nil {
-		out = append(out, planPathResult{Name: "Email/query: largest area, first page",
+		out = append(out, planPathResult{Name: planEmailPath,
 			Skipped: "no area holds any mail on the desk, so there is no area view to page"})
 	}
 	// No restore to auto here, on purpose: the modes are transaction-local, so the
@@ -344,7 +361,9 @@ func printPlanCheck(w io.Writer, results []planPathResult, runs int) {
 			continue
 		}
 		g, c := medianDuration(r.Generic), medianDuration(r.Custom)
-		if cand, ratio := planVerdict(g, c); cand {
+		if planSelfPlanned[r.Name] {
+			p("  %-42s plans its own statements (custom), so the modes do not apply\n", r.Name)
+		} else if cand, ratio := planVerdict(g, c); cand {
 			p("  %-42s generic plan is slower by %.1fx - candidate for planForValues\n", r.Name, ratio)
 		} else {
 			p("  %-42s no plan-mode effect\n", r.Name)
@@ -413,8 +432,8 @@ func planExplain(ctx context.Context, w io.Writer, st *store.Store, rec *store.S
 		}
 		if emailPath != nil {
 			paths = append(paths, *emailPath)
-		} else if pathSel == "" || strings.HasPrefix("Email/query: largest area, first page", pathSel) {
-			results = append(results, planExplainPath{Name: "Email/query: largest area, first page",
+		} else if pathSel == "" || strings.HasPrefix(planEmailPath, pathSel) {
+			results = append(results, planExplainPath{Name: planEmailPath,
 				Skipped: "no area holds any mail on the desk, so there is no area view to page"})
 		}
 		if err := tx.SetPlanCacheMode(ctx, store.PlanCacheForceCustom); err != nil {

@@ -9,6 +9,14 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **Area lists and folder counts are faster on a large mailbox.** Counting an area's conversations, and recounting the messages and unread mail in each folder, now compare message ids byte by byte instead of by your server's language rules. The counts are exactly the same; working them out takes a fraction of the time. Thread-grouped lists, including the desk's sections, get the same speed-up.
+
+### Under the hood
+
+- `mailroom-admin plan-check` no longer suggests a plan fix for the desk and area-list paths. Those already choose their own plans, so a difference between its two columns for them is noise. It now says so instead.
+
 ## [1.99.1] — 2026-11-03
 
 **The desk opens faster, and a security fix for sign-in.** The desk was the slowest view left after 1.99.0, because each of its sections went through all of your mail again on its own. The sections now share that work. This release also updates the library that checks sign-in tokens to pick up a security fix. Nothing changes in how you use Mailroom, and there are no upgrade steps.
