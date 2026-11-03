@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.99.1] — 2026-11-03
+
+**The desk opens faster, and a security fix for sign-in.** The desk was the slowest view left after 1.99.0, because each of its sections went through all of your mail again on its own. The sections now share that work. This release also updates the library that checks sign-in tokens to pick up a security fix. Nothing changes in how you use Mailroom, and there are no upgrade steps.
+
 ### Faster
 
 - **The desk opens faster on a large mailbox.** The desk's sections now share one pass over your mail, instead of each section going through all of it again. The more areas you have, the bigger the difference.
