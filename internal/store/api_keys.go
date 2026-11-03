@@ -53,7 +53,23 @@ type APIKey struct {
 	RevokedAt        *time.Time
 	SuspendedAt      *time.Time
 	SuspendedReason  string
+
+	// Kind is KeyKindKey for an API key and KeyKindOAuth for a grant to an
+	// OAuth client (ADR-050 section 3). The OAuth fields are set for a grant
+	// and empty for a key. A grant has no token hash and an empty TokenHint;
+	// its tokens are app.oauth_tokens.
+	Kind              string
+	OAuthClientID     string
+	OAuthClientName   string
+	OAuthClientKind   string
+	OAuthRedirectHost string
 }
+
+// The two kinds of app.api_keys row.
+const (
+	KeyKindKey   = "key"
+	KeyKindOAuth = "oauth"
+)
 
 // Active reports whether the key may be used right now.
 func (k APIKey) Active() bool { return k.RevokedAt == nil && k.SuspendedAt == nil }
@@ -73,7 +89,8 @@ type NewAPIKey struct {
 
 const apiKeyColumns = `id, name, token_hint, scopes, account_ids, label_ids, confirm_scopes,
 	rate_per_min, daily_budget, suspend_on_anomaly, created_at, last_used_at, revoked_at,
-	suspended_at, COALESCE(suspended_reason, '')`
+	suspended_at, COALESCE(suspended_reason, ''), kind, COALESCE(oauth_client_id, ''),
+	COALESCE(oauth_client_name, ''), COALESCE(oauth_client_kind, ''), COALESCE(oauth_redirect_host, '')`
 
 func scanAPIKey(row interface{ Scan(...any) error }) (APIKey, error) {
 	var (
@@ -84,7 +101,8 @@ func scanAPIKey(row interface{ Scan(...any) error }) (APIKey, error) {
 	)
 	if err := row.Scan(&id, &k.Name, &k.TokenHint, &scopes, &accounts, &labels, &confirming,
 		&k.RatePerMin, &k.DailyBudget, &k.SuspendOnAnomaly, &k.CreatedAt, &k.LastUsedAt,
-		&k.RevokedAt, &k.SuspendedAt, &k.SuspendedReason); err != nil {
+		&k.RevokedAt, &k.SuspendedAt, &k.SuspendedReason, &k.Kind, &k.OAuthClientID,
+		&k.OAuthClientName, &k.OAuthClientKind, &k.OAuthRedirectHost); err != nil {
 		return APIKey{}, err
 	}
 	var err error
@@ -224,6 +242,17 @@ func (tx *UserTx) RevokeAPIKey(ctx context.Context, id ulid.ULID) (found bool, e
 	if err != nil {
 		return false, fmt.Errorf("store: revoke API key: %w", err)
 	}
+	if tag.RowsAffected() == 1 {
+		// An OAuth grant's tokens go with it. The gate already refuses them
+		// (it checks the grant on every request); marking them keeps the rows
+		// honest for the sweep and the families list.
+		if _, err := tx.tx.Exec(ctx, `
+			UPDATE app.oauth_tokens SET revoked_at = now()
+			 WHERE user_id = $1 AND api_key_id = $2 AND revoked_at IS NULL`,
+			tx.userID.String(), id.String()); err != nil {
+			return false, fmt.Errorf("store: revoke API key tokens: %w", err)
+		}
+	}
 	return tag.RowsAffected() == 1, nil
 }
 
@@ -341,6 +370,13 @@ const (
 	// AnomalyCriticalRefusals: a key went past its per-minute cap of
 	// security-meaningful refusals (#49 review).
 	AnomalyCriticalRefusals = "critical_refusals"
+	// AnomalyRefreshReuse: an OAuth refresh token that was already used was
+	// presented again (ADR-050 section 3). The family is revoked; the grant
+	// stays.
+	AnomalyRefreshReuse = "refresh_reuse"
+	// AnomalyCodeReplay: an authorization code was redeemed a second time
+	// (OAuth 2.1 4.1.3). The family it produced is revoked.
+	AnomalyCodeReplay = "code_replay"
 )
 
 // APIKeyEvent is one audit row. Summary holds ids and counts, never content.

@@ -211,10 +211,22 @@ func (a *API) mcpHandler() http.Handler {
 // reaches mcpHandler's 403. cmd/mailroom mounts it outside the auth chain on
 // MCPPath only.
 func MCPChallenge(next http.Handler, sessionCookie string) http.Handler {
+	return MCPChallengeWith(next, sessionCookie, "")
+}
+
+// MCPChallengeWith is MCPChallenge with the WWW-Authenticate value to send: the
+// OAuth resource-metadata challenge when the authorization server is on
+// (ADR-050 section 2). Empty means the plain `Bearer realm="mailroom"`.
+func MCPChallengeWith(next http.Handler, sessionCookie, challenge string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, hasAuth := r.Header["Authorization"]
 		_, cookieErr := r.Cookie(sessionCookie)
 		if !hasAuth && cookieErr != nil {
+			if challenge != "" {
+				w.Header().Set("WWW-Authenticate", challenge)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 			refuseKey(w)
 			return
 		}

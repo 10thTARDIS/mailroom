@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -250,6 +251,15 @@ const (
 	// the OAuth callback URLs are built. Optional: it defaults to the origin
 	// of MAILROOM_OIDC_REDIRECT_URL, and is required for OAuth under dev-auth.
 	EnvPublicURL = "MAILROOM_PUBLIC_URL"
+
+	// EnvOAuthAllowPrivateClientHosts lets the OAuth authorization server fetch
+	// a client's metadata document from a private or loopback address (ADR-050
+	// section 4). Off by default; modelled on EnvAllowPrivateAccountHosts, and
+	// narrower: link-local addresses (the instance-metadata range) stay refused.
+	EnvOAuthAllowPrivateClientHosts = "MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS"
+	// EnvOAuthDCR switches Dynamic Client Registration (ADR-050 section 4; the
+	// endpoint itself arrives in a later increment). On by default.
+	EnvOAuthDCR = "MAILROOM_OAUTH_DCR"
 
 	// Operator: a subject get-or-created at boot. Under OIDC this is now just an
 	// OPTIONAL declared-accounts owner (the accounts file is reconciled onto it) —
@@ -573,6 +583,11 @@ type Config struct {
 	OAuthMicrosoftTenant       string
 	PublicURL                  string
 
+	// OAuthAllowPrivateClientHosts: see EnvOAuthAllowPrivateClientHosts.
+	OAuthAllowPrivateClientHosts bool
+	// OAuthDCR: see EnvOAuthDCR. Default true.
+	OAuthDCR bool
+
 	// SessionKey is the HMAC key that signs session/login-state cookies
 	// (auth.Config.SigningKey). Required with OIDC, and at least
 	// MinSessionKeyLen bytes. Sourced from MAILROOM_SESSION_KEY or its _FILE.
@@ -859,6 +874,48 @@ func (c *Config) OIDCConfigured() bool {
 		c.OIDCRedirectURL != "" && len(c.SessionKey) >= MinSessionKeyLen
 }
 
+// OAuthIssuer is the origin the OAuth authorization server for /mcp is served
+// at (ADR-050 section 1), or "" when the OAuth surface is off. It is
+// MAILROOM_PUBLIC_URL, which defaults to the origin of
+// MAILROOM_OIDC_REDIRECT_URL, reduced to scheme://host[:port]. The surface is
+// off when neither is set, and when the origin is not https (OAuth 2.1 wants
+// HTTPS endpoints) unless its host is loopback, a developer's machine. The
+// caller logs why when it is off but a public URL was given (OAuthIssuerError).
+func (c *Config) OAuthIssuer() string {
+	origin, _ := c.oauthIssuer()
+	return origin
+}
+
+// OAuthIssuerError says why OAuthIssuer is empty although a URL was given, or ""
+// when it is simply not configured or is fine.
+func (c *Config) OAuthIssuerError() string {
+	_, why := c.oauthIssuer()
+	return why
+}
+
+func (c *Config) oauthIssuer() (origin, why string) {
+	raw := c.PublicURL
+	if raw == "" {
+		raw = c.OIDCRedirectURL
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return "", "the public URL is not an absolute http(s) URL"
+	}
+	if u.Scheme == "http" {
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+		default:
+			return "", "the public URL is not https"
+		}
+	}
+	return u.Scheme + "://" + u.Host, ""
+}
+
 // DevAuthConfigured reports whether the dev-auth escape hatch is selected: it
 // is honored only when OIDC is NOT configured and a dev-auth subject is set.
 func (c *Config) DevAuthConfigured() bool {
@@ -893,31 +950,34 @@ func Load() (*Config, error) {
 		SearchDisabled:           envBool(EnvSearchDisabled),
 		WritebackDisabled:        envBool(EnvWritebackDisabled),
 		AllowPrivateAccountHosts: envBool(EnvAllowPrivateAccountHosts),
-		AccountsFile:             strings.TrimSpace(os.Getenv(EnvAccountsFile)),
-		SyncInterval:             DefaultSyncInterval,
-		SyncMaxBackoff:           DefaultSyncMaxBackoff,
-		IMAPIdle:                 envBoolDefault(EnvIMAPIdle, DefaultIMAPIdle),
-		LocalDKIM:                envBoolDefault(EnvLocalDKIM, DefaultLocalDKIM),
-		IMAPIdleTimeout:          DefaultIMAPIdleTimeout,
-		IMAPPool:                 envBoolDefault(EnvIMAPPool, DefaultIMAPPool),
-		ImageProxy:               envBoolDefault(EnvImageProxy, DefaultImageProxy),
-		ImageProxyPrefetch:       envBoolDefault(EnvImageProxyPrefetch, DefaultImageProxyPrefetch),
-		ImageProxyPrefetchMaxAge: DefaultImageProxyPrefetchMaxAge,
-		IMAPPoolIdleTimeout:      DefaultIMAPPoolIdleTimeout,
-		IMAPSearchRate:           DefaultIMAPSearchRate,
-		GmailDailyDownloadMB:     DefaultGmailDailyDownloadMB,
-		GmailLabelSweepInterval:  DefaultGmailLabelSweepInterval,
-		FlagSweepInterval:        DefaultFlagSweepInterval,
-		FlagSweepWindow:          DefaultFlagSweepWindow,
-		FlagSweepFullInterval:    DefaultFlagSweepFullInterval,
-		ReapInterval:             DefaultReapInterval,
-		TrashRetention:           DefaultTrashRetention,
-		PurgeInterval:            DefaultPurgeInterval,
-		ChangeLogRetention:       DefaultChangeLogRetention,
-		JobRetention:             DefaultJobRetention,
-		DeadJobRetention:         DefaultDeadJobRetention,
-		IndexInterval:            DefaultIndexInterval,
-		UndoSendWindow:           DefaultUndoSendWindow,
+
+		OAuthAllowPrivateClientHosts: envBool(EnvOAuthAllowPrivateClientHosts),
+		OAuthDCR:                     envBoolDefault(EnvOAuthDCR, true),
+		AccountsFile:                 strings.TrimSpace(os.Getenv(EnvAccountsFile)),
+		SyncInterval:                 DefaultSyncInterval,
+		SyncMaxBackoff:               DefaultSyncMaxBackoff,
+		IMAPIdle:                     envBoolDefault(EnvIMAPIdle, DefaultIMAPIdle),
+		LocalDKIM:                    envBoolDefault(EnvLocalDKIM, DefaultLocalDKIM),
+		IMAPIdleTimeout:              DefaultIMAPIdleTimeout,
+		IMAPPool:                     envBoolDefault(EnvIMAPPool, DefaultIMAPPool),
+		ImageProxy:                   envBoolDefault(EnvImageProxy, DefaultImageProxy),
+		ImageProxyPrefetch:           envBoolDefault(EnvImageProxyPrefetch, DefaultImageProxyPrefetch),
+		ImageProxyPrefetchMaxAge:     DefaultImageProxyPrefetchMaxAge,
+		IMAPPoolIdleTimeout:          DefaultIMAPPoolIdleTimeout,
+		IMAPSearchRate:               DefaultIMAPSearchRate,
+		GmailDailyDownloadMB:         DefaultGmailDailyDownloadMB,
+		GmailLabelSweepInterval:      DefaultGmailLabelSweepInterval,
+		FlagSweepInterval:            DefaultFlagSweepInterval,
+		FlagSweepWindow:              DefaultFlagSweepWindow,
+		FlagSweepFullInterval:        DefaultFlagSweepFullInterval,
+		ReapInterval:                 DefaultReapInterval,
+		TrashRetention:               DefaultTrashRetention,
+		PurgeInterval:                DefaultPurgeInterval,
+		ChangeLogRetention:           DefaultChangeLogRetention,
+		JobRetention:                 DefaultJobRetention,
+		DeadJobRetention:             DefaultDeadJobRetention,
+		IndexInterval:                DefaultIndexInterval,
+		UndoSendWindow:               DefaultUndoSendWindow,
 
 		RateLimitPerSecond: DefaultRateLimitPerSecond,
 		RateLimitBurst:     DefaultRateLimitBurst,
@@ -1490,6 +1550,8 @@ var boolToggles = []string{
 	EnvWritebackDisabled,
 	EnvSearchDisabled,
 	EnvAllowPrivateAccountHosts,
+	EnvOAuthAllowPrivateClientHosts,
+	EnvOAuthDCR,
 	EnvIMAPIdle,
 	EnvIMAPPool,
 	EnvImageProxy,

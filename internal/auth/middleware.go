@@ -16,6 +16,10 @@ type middlewareOptions struct {
 // MiddlewareOption customizes Middleware.
 type MiddlewareOption func(*middlewareOptions)
 
+// OAuthAuthorizePath is the OAuth authorization endpoint, whose query survives
+// the sign-in round trip (see WithUnauthenticatedRedirect).
+const OAuthAuthorizePath = "/oauth/authorize"
+
 // WithUnauthenticatedRedirect makes Middleware redirect unauthenticated
 // requests to loginPath (with a "return_to" query parameter carrying the
 // original request path) instead of the default 401 response. Use this for
@@ -28,7 +32,16 @@ func WithUnauthenticatedRedirect(loginPath string) MiddlewareOption {
 		o.onUnauthenticated = func(w http.ResponseWriter, r *http.Request) {
 			dest := loginPath
 			rt := r.URL.RequestURI()
-			if q := r.URL.Query(); q.Has("code") || q.Has("state") {
+			q := r.URL.Query()
+			// The one exception: the OAuth authorization endpoint (ADR-050
+			// section 5) is a request, not a response. Its `state` is the
+			// client's own opaque value and it carries no code, so the request
+			// must come back from sign-in intact; a `code` is still dropped.
+			if r.URL.Path == OAuthAuthorizePath {
+				if q.Has("code") {
+					rt = r.URL.EscapedPath()
+				}
+			} else if q.Has("code") || q.Has("state") {
 				// An OAuth authorization response (the mail-provider connect
 				// callback, #52) reaching a signed-out browser: its code and
 				// state must not be carried on into return_to, where they would

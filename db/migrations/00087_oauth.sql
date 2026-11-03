@@ -18,9 +18,9 @@
 --      app.oauth_cimd_cache. The cache holds no user's data and has NO policy
 --      for mailroom_app; clients have an owner-scoped policy for manual rows
 --      only. Registered clients and the cache are reached through definers.
---   5. Ten SECURITY DEFINER functions, each returning the minimum its caller
---      needs: the bearer lookup of an access token, client and CIMD lookups,
---      request creation and binding (the one pre-sign-in write), code and
+--   5. Nine SECURITY DEFINER functions, each returning the minimum its caller
+--      needs: the bearer lookup of an access token, client lookup and creation
+--      (ids are minted server-side), CIMD cache get and put, code and
 --      refresh redemption, RFC 7009 revocation, and the daily sweep. They run as
 --      mailroom_owner, which FORCE binds too, hence one owner policy per table.
 --
@@ -43,7 +43,10 @@ ALTER TABLE app.api_keys
        AND oauth_client_kind IS NOT NULL AND oauth_redirect_host IS NOT NULL)
     OR (kind = 'key' AND oauth_client_id IS NULL AND oauth_client_name IS NULL
        AND oauth_client_kind IS NULL AND oauth_redirect_host IS NULL));
-CREATE UNIQUE INDEX api_keys_oauth_client ON app.api_keys (user_id, oauth_client_id) WHERE kind = 'oauth';
+-- Revoked grants are kept for their audit and must not block the same client
+-- being authorized again, so the uniqueness is over live grants only.
+CREATE UNIQUE INDEX api_keys_oauth_client ON app.api_keys (user_id, oauth_client_id)
+  WHERE kind = 'oauth' AND revoked_at IS NULL;
 
 ALTER TABLE app.api_key_events DROP CONSTRAINT api_key_events_anomaly_check;
 ALTER TABLE app.api_key_events ADD CONSTRAINT api_key_events_anomaly_check
@@ -90,16 +93,15 @@ CREATE POLICY oauth_tokens_owner ON app.oauth_tokens
 GRANT SELECT, INSERT ON app.oauth_tokens TO mailroom_app;
 GRANT UPDATE (revoked_at) ON app.oauth_tokens TO mailroom_app;
 
--- A validated authorization request, held server-side (ADR-050 section 5). The
--- consent page names it by an unguessable id (stored hashed) so the form cannot
--- change the client, redirect URI or PKCE challenge. It is created BEFORE
--- sign-in by app.oauth_request_create with user_id NULL (invisible to every
--- user), and bound to the first signed-in user who opens it by
--- app.oauth_request_bind; from then on only that user can see or decide it.
+-- A validated authorization request, held server-side (ADR-050 section 5). It
+-- exists only for a signed-in user, created after the client and redirect URI
+-- were validated; the consent page names it by an unguessable id (stored
+-- hashed) so the form cannot change the client, redirect URI or PKCE challenge.
+-- A user holds at most 20 live ones (the application evicts that user's oldest).
 CREATE TABLE app.oauth_requests (
   id            app.ulid PRIMARY KEY,
   request_hash  bytea NOT NULL UNIQUE,
-  user_id       app.ulid REFERENCES app.users(id) ON DELETE CASCADE,
+  user_id       app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
   client_id     text NOT NULL,
   client_name   text NOT NULL,
   client_kind   text NOT NULL CHECK (client_kind IN ('cimd', 'registered', 'manual')),
@@ -111,13 +113,10 @@ CREATE TABLE app.oauth_requests (
   scopes        text[] NOT NULL,
   state         text,
   expires_at    timestamptz NOT NULL,
-  bound_at      timestamptz,
   decided_at    timestamptz,
   created_at    timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT oauth_requests_hash_is_sha256 CHECK (octet_length(request_hash) = 32),
-  CONSTRAINT oauth_requests_state_bounded CHECK (state IS NULL OR char_length(state) <= 2048),
-  CONSTRAINT oauth_requests_bound CHECK ((user_id IS NULL) = (bound_at IS NULL)),
-  CONSTRAINT oauth_requests_decided_is_bound CHECK (decided_at IS NULL OR user_id IS NOT NULL)
+  CONSTRAINT oauth_requests_state_bounded CHECK (state IS NULL OR char_length(state) <= 2048)
 );
 CREATE INDEX oauth_requests_by_user ON app.oauth_requests (user_id, expires_at);
 CREATE INDEX oauth_requests_by_expiry ON app.oauth_requests (expires_at);
@@ -130,7 +129,7 @@ CREATE POLICY oauth_requests_isolation ON app.oauth_requests
 CREATE POLICY oauth_requests_owner ON app.oauth_requests
   FOR ALL TO mailroom_owner
   USING (true) WITH CHECK (true);
-GRANT SELECT ON app.oauth_requests TO mailroom_app;
+GRANT SELECT, INSERT, DELETE ON app.oauth_requests TO mailroom_app;
 GRANT UPDATE (decided_at) ON app.oauth_requests TO mailroom_app;
 
 -- An authorization code (ADR-050 sections 5 and 6): hashed, bound to the client,
@@ -179,6 +178,11 @@ CREATE TABLE app.oauth_clients (
   redirect_uris text[] NOT NULL,
   created_at    timestamptz NOT NULL DEFAULT now(),
   last_used_at  timestamptz,
+  -- The id is minted by the server (app.oauth_client_create) and its shape
+  -- follows its kind, so a stored id can never be URL-shaped: a client_id that
+  -- is an https URL is only ever a Client ID Metadata Document client.
+  CONSTRAINT oauth_clients_id_shape CHECK (
+    (kind = 'manual' AND id ~ '^mc_[0-9a-f]{32}$') OR (kind = 'registered' AND id ~ '^rc_[0-9a-f]{32}$')),
   CONSTRAINT oauth_clients_owner CHECK ((kind = 'manual') = (user_id IS NOT NULL)),
   CONSTRAINT oauth_clients_name_bounded CHECK (char_length(name) BETWEEN 1 AND 200),
   CONSTRAINT oauth_clients_uris_bounded CHECK (cardinality(redirect_uris) BETWEEN 1 AND 10)
@@ -193,7 +197,8 @@ CREATE POLICY oauth_clients_manual_isolation ON app.oauth_clients
 CREATE POLICY oauth_clients_owner ON app.oauth_clients
   FOR ALL TO mailroom_owner
   USING (true) WITH CHECK (true);
-GRANT SELECT, INSERT, DELETE ON app.oauth_clients TO mailroom_app;
+-- No INSERT: ids are minted by app.oauth_client_create only.
+GRANT SELECT, DELETE ON app.oauth_clients TO mailroom_app;
 
 -- The cache of fetched Client ID Metadata Documents (ADR-050 section 4). No
 -- user's data: FORCE RLS with NO policy for mailroom_app and no grant, so the
@@ -295,56 +300,30 @@ REVOKE ALL ON FUNCTION app.oauth_cimd_put(text, jsonb, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.oauth_cimd_put(text, jsonb, timestamptz) TO mailroom_app;
 ALTER FUNCTION app.oauth_cimd_put(text, jsonb, timestamptz) OWNER TO mailroom_owner;
 
--- Store a validated authorization request BEFORE sign-in: user_id stays NULL, so
--- no user can see it. Valid 10 minutes, always (the caller does not choose).
--- Reachable by an anonymous visitor, so it is bounded: past 2000 unexpired
--- unbound requests it refuses (returns false).
+-- Create one of the CALLER's manual clients (the user whose transaction this
+-- is, never a parameter). The client_id is minted here, so the application role
+-- cannot choose it (it has no INSERT on the table) and a manual client can never
+-- take the id of another client or of a URL.
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION app.oauth_request_create(
-    p_id app.ulid, p_hash bytea, p_client_id text, p_client_name text, p_client_kind text,
-    p_redirect_uri text, p_redirect_host text, p_all_loopback boolean, p_challenge text,
-    p_resource text, p_scopes text[], p_state text)
-RETURNS boolean
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = app, pg_temp AS $$
-BEGIN
-  IF (SELECT count(*) FROM app.oauth_requests r WHERE r.user_id IS NULL AND r.expires_at > now()) >= 2000 THEN
-    RETURN false;
-  END IF;
-  INSERT INTO app.oauth_requests (id, request_hash, client_id, client_name, client_kind, redirect_uri,
-                                  redirect_host, all_loopback, code_challenge, resource, scopes, state, expires_at)
-  VALUES (p_id, p_hash, p_client_id, p_client_name, p_client_kind, p_redirect_uri,
-          p_redirect_host, p_all_loopback, p_challenge, p_resource, p_scopes, p_state,
-          now() + interval '10 minutes');
-  RETURN true;
-END
-$$;
--- +goose StatementEnd
-REVOKE ALL ON FUNCTION app.oauth_request_create(app.ulid, bytea, text, text, text, text, text, boolean, text, text, text[], text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.oauth_request_create(app.ulid, bytea, text, text, text, text, text, boolean, text, text, text[], text) TO mailroom_app;
-ALTER FUNCTION app.oauth_request_create(app.ulid, bytea, text, text, text, text, text, boolean, text, text, text[], text) OWNER TO mailroom_owner;
-
--- Bind an unbound, unexpired request to the CALLER: the user whose transaction
--- this is (app.current_user_id()), never a parameter. First opener wins; a
--- request already bound, expired or unknown is left alone (returns false).
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION app.oauth_request_bind(p_hash bytea)
-RETURNS boolean
+CREATE OR REPLACE FUNCTION app.oauth_client_create(p_name text, p_redirect_uris text[])
+RETURNS text
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = app, pg_temp AS $$
 DECLARE
   v_user app.ulid := app.current_user_id();
+  v_id text := 'mc_' || replace(gen_random_uuid()::text, '-', '');
 BEGIN
   IF v_user IS NULL THEN
-    RETURN false;
+    RAISE EXCEPTION 'oauth_client_create needs a user identity';
   END IF;
-  UPDATE app.oauth_requests r SET user_id = v_user, bound_at = now()
-   WHERE r.request_hash = p_hash AND r.user_id IS NULL AND r.expires_at > now();
-  RETURN FOUND;
+  INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris)
+  VALUES (v_id, 'manual', v_user, p_name, p_redirect_uris);
+  RETURN v_id;
 END
 $$;
 -- +goose StatementEnd
-REVOKE ALL ON FUNCTION app.oauth_request_bind(bytea) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.oauth_request_bind(bytea) TO mailroom_app;
-ALTER FUNCTION app.oauth_request_bind(bytea) OWNER TO mailroom_owner;
+REVOKE ALL ON FUNCTION app.oauth_client_create(text, text[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.oauth_client_create(text, text[]) TO mailroom_app;
+ALTER FUNCTION app.oauth_client_create(text, text[]) OWNER TO mailroom_owner;
 
 -- Redeem an authorization code at the token endpoint, which has no user. The
 -- row is locked and marked used in one step, so two concurrent redemptions
@@ -503,8 +482,7 @@ DROP FUNCTION IF EXISTS app.sweep_oauth(timestamptz, interval, int);
 DROP FUNCTION IF EXISTS app.oauth_token_revoke(bytea);
 DROP FUNCTION IF EXISTS app.oauth_refresh_consume(bytea);
 DROP FUNCTION IF EXISTS app.oauth_code_consume(bytea);
-DROP FUNCTION IF EXISTS app.oauth_request_bind(bytea);
-DROP FUNCTION IF EXISTS app.oauth_request_create(app.ulid, bytea, text, text, text, text, text, boolean, text, text, text[], text);
+DROP FUNCTION IF EXISTS app.oauth_client_create(text, text[]);
 DROP FUNCTION IF EXISTS app.oauth_cimd_put(text, jsonb, timestamptz);
 DROP FUNCTION IF EXISTS app.oauth_cimd_get(text);
 DROP FUNCTION IF EXISTS app.oauth_client_resolve(text);
