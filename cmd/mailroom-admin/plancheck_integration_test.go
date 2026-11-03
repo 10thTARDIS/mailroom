@@ -235,3 +235,69 @@ func TestPlanCheckExplainPrintsPlansAndWritesNothing(t *testing.T) {
 		t.Errorf("--path Mailbox/get did not limit the output:\n%s", out.String())
 	}
 }
+
+// plan-check says, one word per hot path, where each reads a message's area:
+// the resolver until the operator has run area-index --apply, the stored column
+// after. A report that only ever said one of them could not tell the operator
+// which path a timing belongs to.
+func TestPlanCheckReportsWhereTheAreaIsRead(t *testing.T) {
+	h := newUntangleHarness(t)
+	ctx := context.Background()
+	userID := seedUntangleUser(t, h.super, "plansource-"+store.NewULID().String())
+	t.Cleanup(func() { // opening the desk enqueues writeback jobs; leave none due behind
+		_, _ = h.super.Exec(context.Background(), `DELETE FROM app.jobs WHERE user_id = $1`, userID.String())
+	})
+	if err := h.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+		if _, err := tx.ListAreas(ctx); err != nil {
+			return err
+		}
+		_, err := tx.GetDeskPreferences(ctx)
+		return err
+	}); err != nil {
+		t.Fatalf("open desk: %v", err)
+	}
+	section := func(report string) map[string]string {
+		t.Helper()
+		_, rest, ok := strings.Cut(report, "Where each path reads a message's area")
+		if !ok {
+			t.Fatalf("no area-source section in the report:\n%s", report)
+		}
+		_, rest, _ = strings.Cut(rest, "\n")
+		out := map[string]string{}
+		for _, line := range strings.Split(rest, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "READ ONLY") {
+				continue
+			}
+			f := strings.Fields(line)
+			out[strings.Join(f[:len(f)-1], " ")] = f[len(f)-1]
+		}
+		return out
+	}
+	want := func(mode string) map[string]string {
+		return map[string]string{
+			"Area/getSummary: AreaSummary":         mode,
+			"Area/getSummary: DrawerArchiveCounts": "none",
+			"Area/getDesk: DeskSnapshot":           mode,
+			"Mailbox/get: all mailboxes":           "none",
+		}
+	}
+	check := func(label, mode string) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := planCheck(ctx, &out, h.store, userID, 1); err != nil {
+			t.Fatalf("%s: planCheck: %v", label, err)
+		}
+		got := section(out.String())
+		for path, w := range want(mode) {
+			if got[path] != w {
+				t.Errorf("%s: %s reads the area from %q, want %q\n%s", label, path, got[path], w, out.String())
+			}
+		}
+	}
+	check("before the backfill", store.AreaSourceResolver)
+	if err := h.store.UserTx(ctx, userID, func(tx *store.UserTx) error { return tx.MarkAreaIndexReady(ctx) }); err != nil {
+		t.Fatal(err)
+	}
+	check("after the backfill", store.AreaSourceStored)
+}

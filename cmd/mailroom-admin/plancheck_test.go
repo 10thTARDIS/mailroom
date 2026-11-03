@@ -59,8 +59,8 @@ func TestPrintPlanCheck(t *testing.T) {
 	ms := time.Millisecond
 	var b bytes.Buffer
 	printPlanCheck(&b, []planPathResult{
-		{Name: "slow path", Generic: []time.Duration{90 * ms, 100 * ms, 110 * ms}, Custom: []time.Duration{9 * ms, 10 * ms, 11 * ms}, Rows: 4},
-		{Name: "same path", Generic: []time.Duration{10 * ms}, Custom: []time.Duration{10 * ms}, Rows: 1},
+		{Name: "slow path", Generic: []time.Duration{90 * ms, 100 * ms, 110 * ms}, Custom: []time.Duration{9 * ms, 10 * ms, 11 * ms}, Rows: 4, Source: "stored"},
+		{Name: "same path", Generic: []time.Duration{10 * ms}, Custom: []time.Duration{10 * ms}, Rows: 1, Source: "resolver"},
 		{Name: "missing path", Skipped: "no data"},
 	}, 3)
 	out := b.String()
@@ -68,6 +68,8 @@ func TestPrintPlanCheck(t *testing.T) {
 		"slow path", "generic plan is slower by 10.0x - candidate for planForValues",
 		"no plan-mode effect",
 		"not exercised: no data",
+		"slow path                                  stored\n",
+		"same path                                  resolver\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)

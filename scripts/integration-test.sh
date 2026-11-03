@@ -116,6 +116,20 @@ docker exec "$PGCID" psql -v ON_ERROR_STOP=1 -q -U postgres -d mailroom \
   -c "ALTER DATABASE mailroom SET lock_timeout = '30s';" \
   -c "ALTER DATABASE mailroom SET statement_timeout = '120s';"
 
+# MAILROOM_IT_AREA_READY=1 runs the WHOLE suite against users whose stored
+# area index is already ready (ADR-049): every user the suite inserts is marked
+# ready the moment it exists, so every reader that has a stored path takes it,
+# in every package. The default lane leaves users not ready (the resolver);
+# running both is the two-mode check for suites that compare area results.
+# Tests that assert the not-ready state itself (area_index) are expected to
+# disagree in this lane. Test-only: the function lives in the throwaway database.
+if [ "${MAILROOM_IT_AREA_READY:-}" = 1 ]; then
+  docker exec "$PGCID" psql -v ON_ERROR_STOP=1 -q -U postgres -d mailroom \
+    -c "CREATE FUNCTION public.it_area_ready() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS \$\$ BEGIN INSERT INTO app.area_index_state (user_id, ready_at) VALUES (NEW.id, now()) ON CONFLICT DO NOTHING; RETURN NEW; END \$\$;" \
+    -c "CREATE TRIGGER it_area_ready AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION public.it_area_ready();"
+  echo "area index: every test user starts ready (MAILROOM_IT_AREA_READY=1)"
+fi
+
 # (#855) A lock wait or a runaway statement in a test must FAIL, not hang: one
 # once sat 10 minutes in a change_log INSERT with nothing to say what it was
 # waiting on. These are database-level defaults, so they reach every connection

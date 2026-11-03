@@ -89,8 +89,9 @@ const searchScoreJoin = " LEFT JOIN app.triage_scores srch_ts ON srch_ts.user_id
 
 // searchPredicateSQL compiles the tree. lineThreshold is the desk's line, bound
 // only if SearchAboveLine occurs; the caller must have added searchScoreJoin to
-// the FROM clause in that case.
-func searchPredicateSQL(p SearchPredicate, bind func(any) string, lineThreshold float32) (string, error) {
+// the FROM clause in that case. storedArea says a SearchArea reads the stored
+// column (the caller's area index is ready) rather than running the resolver.
+func searchPredicateSQL(p SearchPredicate, bind func(any) string, lineThreshold float32, storedArea bool) (string, error) {
 	var threshold string
 	var compile func(p SearchPredicate) (string, error)
 	compile = func(p SearchPredicate) (string, error) {
@@ -132,6 +133,9 @@ func searchPredicateSQL(p SearchPredicate, bind func(any) string, lineThreshold 
 			// The resolver Email/query's inArea uses — `(… IN (…)) IS TRUE`,
 			// two-valued, a hashed SubPlan built once (areas_resolve.go).
 			id := p.AreaID
+			if storedArea {
+				return areaPredicateStored(&id, bind), nil
+			}
 			return AreaPredicate(&id, bind), nil
 		case SearchIDs:
 			// An empty set is a real answer ("that subtree matched nothing"):

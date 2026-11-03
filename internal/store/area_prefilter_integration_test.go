@@ -484,8 +484,15 @@ func seedPrefilterFixture(t *testing.T) *prefilterFixture {
 }
 
 func TestAreaPrefilterAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testAreaPrefilterAgreesWithFullResolution)
+}
+
+func testAreaPrefilterAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)
 	d := f.d
+	if ready {
+		readyAreaIndex(t, f.d.st, f.d.userID)
+	}
 	ctx := context.Background()
 
 	var allIDs []ulid.ULID
@@ -770,8 +777,15 @@ func setMinus(a, b []ulid.ULID) []ulid.ULID {
 // desk (the trashed one), desk mail in other areas, and mail fed by tabs and
 // by labels; every area is checked, with and without an account.
 func TestAreaOnDeskScopeAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testAreaOnDeskScopeAgreesWithFullResolution)
+}
+
+func testAreaOnDeskScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)
 	d := f.d
+	if ready {
+		readyAreaIndex(t, f.d.st, f.d.userID)
+	}
 	ctx := context.Background()
 	yes := true
 	acct := d.accountA
@@ -861,19 +875,33 @@ func TestAreaOnDeskScopeAgreesWithFullResolution(t *testing.T) {
 // return exactly the rows the unscoped one does: every desk message, its area
 // and its side of the line, with and without an account scope.
 func TestDeskResolvedScopeAgreesWithFullResolution(t *testing.T) {
+	eachAreaMode(t, testDeskResolvedScopeAgreesWithFullResolution)
+}
+
+func testDeskResolvedScopeAgreesWithFullResolution(t *testing.T, ready bool) {
 	f := seedPrefilterFixture(t)
 	d := f.d
+	if ready {
+		readyAreaIndex(t, f.d.st, f.d.userID)
+	}
 	ctx := context.Background()
 	acct := d.accountA
 
-	resolve := func(tx *UserTx, accountID *ulid.ULID, scoped bool) []string {
+	// resolve runs the desk CTE: unscoped and scoped resolver forms, and the
+	// stored form (reads m.area_id; only meaningful for a ready user).
+	resolve := func(tx *UserTx, accountID *ulid.ULID, scoped bool, stored ...bool) []string {
 		t.Helper()
 		args := []any{tx.userID.String(), 0.5}
 		bind := func(v any) string {
 			args = append(args, v)
 			return "$" + strconv.Itoa(len(args))
 		}
-		body := deskResolvedSQLScoped(bind, tx.userID, accountID, "$2", scoped)
+		var body string
+		if len(stored) > 0 && stored[0] {
+			body = deskResolvedSQL(bind, tx.userID, accountID, "$2", true)
+		} else {
+			body = deskResolvedSQLScoped(bind, tx.userID, accountID, "$2", scoped)
+		}
 		rows, err := tx.tx.Query(ctx, `SELECT id, COALESCE(area_id::text, '-'), COALESCE(side, '-') FROM (`+body+`) r ORDER BY id`, args...)
 		if err != nil {
 			t.Fatalf("scoped=%v: %v", scoped, err)
@@ -901,6 +929,11 @@ func TestDeskResolvedScopeAgreesWithFullResolution(t *testing.T) {
 			scoped := resolve(tx, accountID, true)
 			if !slices.Equal(full, scoped) {
 				t.Errorf("account=%v: scoped resolution differs\n full:   %v\n scoped: %v", accountID != nil, full, scoped)
+			}
+			if ready {
+				if fromColumn := resolve(tx, accountID, true, true); !slices.Equal(full, fromColumn) {
+					t.Errorf("account=%v: the stored desk differs from the resolved one\n resolved: %v\n stored:   %v", accountID != nil, full, fromColumn)
+				}
 			}
 			total += len(full)
 			for _, r := range full {

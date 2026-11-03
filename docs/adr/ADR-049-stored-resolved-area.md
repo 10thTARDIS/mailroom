@@ -1,6 +1,6 @@
 # ADR-049: Each message stores its resolved area, maintained by triggers
 
-**Status:** Accepted (increment 1 in v1.99.0-beta.N: expand, backfill, report; readers switch in increment 2). Deviates from nothing in the spec; changes how
+**Status:** Accepted (increment 1: expand, backfill, report; increment 2: readers switch per user). Deviates from nothing in the spec; changes how
 the area resolver of #442 (`internal/store/areas_resolve.go`) is used, not what it
 answers.
 
@@ -156,6 +156,31 @@ for that user.
   holds it to `tabs.PrecedenceNames()`.
 - **A backfill batch locks its rows (`FOR UPDATE`) before it resolves them**,
   so a concurrent change cannot be overwritten with an answer read before it.
+
+## Amendments found while building increment 2
+
+- **Readiness is asked once per transaction** (`areaIndexReady`, one indexed
+  row) and cached on it; the one writer of the flag drops the cache. A user who
+  is not ready gets exactly the resolver SQL, so nothing changes for them until
+  `area-index --apply`.
+- **`Email/query` `inArea` is `m.area_id = x` and `unsorted` is `m.area_id IS
+  NULL`.** Inside a search tree the area atom is written two-valued
+  (`m.area_id IS NOT NULL AND m.area_id = x`), because a search can wrap it in
+  NOT and a NULL would silently drop the message from the negation.
+- **`ResolveAreas` still reports which arm decided.** The column does not carry
+  it, so a ready user's answer derives it: a label decided exactly when one of
+  the message's labels feeds the stored area. The resolver is labels-first, so
+  that is both necessary and sufficient, and the two-mode test compares it.
+- **Not switched, on purpose:** day-one setup's "tab-decided and not yet
+  labelled" predicate and the learned-placement explanation, which need the
+  label arm and the tab arm separately and are paid once or run on request; the
+  resolver itself, the triggers, `area-index` and the agreement tests that use
+  the resolver as the oracle.
+- **The bounded keyset page serves the stored path only.** An arrival-ordered,
+  thread-collapsed `inArea`/`unsorted` list for a ready user walks
+  `messages_user_area_arrival` in doubling batches; `total` is `count(DISTINCT
+  thread key)` over the same range. Every other shape, and every user who is not
+  ready, keeps the full ranking.
 
 ## Consequences
 

@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Faster
+
+- **Area lists and counts now read the stored area once you have run the backfill.** After `mailroom-admin area-index --apply` has marked a person ready, the area views, the desk, the counts beside them, the drawer's archive sweep and the label shown on each message read the area Mailroom already keeps for every message instead of working it out again for each request. The answers are the same; they simply stop costing time in proportion to the size of the mailbox. The first page of an area in the usual newest-first, one-row-per-conversation view now reads the area in small steps and stops as soon as it has the conversations the page needs, and the count of conversations shown beside it is still exact. Until the backfill has been run for a person, nothing changes for them at all. `mailroom-admin plan-check` now says, for each hot path, whether it is reading the stored area or working it out.
+
 ### Under the hood
 
 - **Mailroom now remembers which area each message belongs to, to make area lists faster later.** A new `mailroom-admin area-index` command prepares this. Run without options it only reports, per person, how many messages would be filled in and where any stored answer differs from the one Mailroom works out today, and it changes nothing. Add `--apply` to fill it in (in batches, safe to run again) and mark that person ready; a person is only marked ready once the stored answers match for every message. From the moment this version is installed, Mailroom keeps the stored answer correct as mail is labelled, reclassified or moved between areas, and when areas are created, deleted, reordered or re-fed. Nothing you see changes yet: the lists and counts still work the area out as before until a later version starts using the stored answer.

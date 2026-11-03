@@ -90,6 +90,9 @@ func runPlanCheck(ctx context.Context, args []string) error {
 	return planCheck(ctx, os.Stdout, d.store, userID, *runs)
 }
 
+// planSourceNone is the Source of a path that reads no area.
+const planSourceNone = "none"
+
 const (
 	// planCheckStatementTimeout is the safety net on every statement: the point
 	// of the command is to force the worse plan, which can be a slow one.
@@ -110,13 +113,18 @@ type planPathResult struct {
 	Generic []time.Duration
 	Custom  []time.Duration
 	Rows    int
+	// Source is where the path reads a message's area: stored, resolver, or
+	// none for a path that does not use areas (ADR-049).
+	Source string
 }
 
 // planPath is one hot path: run calls the real store function(s) and returns
 // how many rows came back.
 type planPath struct {
 	name string
-	run  func(ctx context.Context, tx *store.UserTx) (int, error)
+	// source is store.AreaSourceStored / AreaSourceResolver, or "none".
+	source string
+	run    func(ctx context.Context, tx *store.UserTx) (int, error)
 }
 
 // planCheck does the work of the command against st and writes the report to
@@ -161,6 +169,10 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 		return nil, nil, err
 	}
 	scope := store.DeskScope{Threshold: prefs.LineThreshold}
+	src, err := tx.AreaSource(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	counts, err := tx.AreaSummary(ctx, scope)
 	if err != nil {
 		return nil, nil, err
@@ -181,15 +193,15 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 	sections = append(sections, store.DeskSectionPage{Limit: planCheckPageSize})
 
 	paths = []planPath{
-		{"Area/getSummary: AreaSummary", func(ctx context.Context, tx *store.UserTx) (int, error) {
+		{"Area/getSummary: AreaSummary", src, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			c, err := tx.AreaSummary(ctx, scope)
 			return len(c), err
 		}},
-		{"Area/getSummary: DrawerArchiveCounts", func(ctx context.Context, tx *store.UserTx) (int, error) {
+		{"Area/getSummary: DrawerArchiveCounts", planSourceNone, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			m, err := tx.DrawerArchiveCounts(ctx)
 			return len(m), err
 		}},
-		{"Area/getDesk: DeskSnapshot", func(ctx context.Context, tx *store.UserTx) (int, error) {
+		{"Area/getDesk: DeskSnapshot", src, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			s, err := tx.DeskSnapshot(ctx, store.DeskSnapshotQuery{Scope: scope, Sections: sections})
 			n := 0
 			for _, sec := range s.Sections {
@@ -197,7 +209,7 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 			}
 			return n, err
 		}},
-		{"Mailbox/get: all mailboxes", func(ctx context.Context, tx *store.UserTx) (int, error) {
+		{"Mailbox/get: all mailboxes", planSourceNone, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			ids, err := tx.ListMailboxIDs(ctx)
 			if err != nil {
 				return 0, err
@@ -208,7 +220,7 @@ func planCheckPaths(ctx context.Context, tx *store.UserTx) (paths []planPath, em
 	}
 	if largest != nil && best > 0 {
 		area := *largest
-		emailPath = &planPath{"Email/query: largest area, first page", func(ctx context.Context, tx *store.UserTx) (int, error) {
+		emailPath = &planPath{"Email/query: largest area, first page", src, func(ctx context.Context, tx *store.UserTx) (int, error) {
 			// What the web client sends for an area view: inArea, the default
 			// returnedAt-descending sort, thread-collapsed, one page.
 			ids, _, err := tx.QueryEmails(ctx, store.EmailQuery{
@@ -253,7 +265,7 @@ func planCheckTimeAll(ctx context.Context, tx *store.UserTx, paths []planPath, e
 
 // planCheckPath times one path under each forced mode.
 func planCheckPath(ctx context.Context, tx *store.UserTx, p planPath, runs int) (planPathResult, error) {
-	r := planPathResult{Name: p.name}
+	r := planPathResult{Name: p.name, Source: p.source}
 	for _, m := range []struct {
 		mode store.PlanCacheMode
 		into *[]time.Duration
@@ -338,6 +350,14 @@ func printPlanCheck(w io.Writer, results []planPathResult, runs int) {
 			p("  %-42s no plan-mode effect\n", r.Name)
 		}
 	}
+	p("\nWhere each path reads a message's area (stored = the per-message stored area, resolver = worked out in the query, none = no area involved):\n")
+	for _, r := range results {
+		if r.Skipped != "" {
+			p("  %-42s not exercised\n", r.Name)
+			continue
+		}
+		p("  %-42s %s\n", r.Name, r.Source)
+	}
 	p("\nREAD ONLY: nothing was written (rolled back).\n")
 }
 
@@ -359,6 +379,7 @@ type planExplainStatement struct {
 // planExplainPath is one path's captured statements with plans.
 type planExplainPath struct {
 	Name       string
+	Source     string
 	Skipped    string
 	Statements []planExplainStatement
 }
@@ -409,7 +430,7 @@ func planExplain(ctx context.Context, w io.Writer, st *store.Store, rec *store.S
 			if runErr != nil {
 				return fmt.Errorf("%s: %w", p.name, runErr)
 			}
-			r := planExplainPath{Name: p.name}
+			r := planExplainPath{Name: p.name, Source: p.source}
 			pos := 0
 			for _, c := range captured {
 				if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(c.SQL)), "SELECT") &&
@@ -446,6 +467,9 @@ func printPlanExplain(w io.Writer, results []planExplainPath) {
 	p("=== plan-check --explain: real plans of the statements each hot path sends (custom plan mode, one run) ===\n")
 	for _, r := range results {
 		p("\n##### %s\n", r.Name)
+		if r.Source != "" {
+			p("area source: %s\n", r.Source)
+		}
 		if r.Skipped != "" {
 			p("not exercised: %s\n", r.Skipped)
 			continue
