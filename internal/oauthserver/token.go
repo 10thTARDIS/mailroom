@@ -125,7 +125,7 @@ func validVerifier(v string) bool {
 		return false
 	}
 	for _, c := range v {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("-._~", c)) {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("-._~", c) {
 			return false
 		}
 	}

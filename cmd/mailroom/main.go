@@ -743,7 +743,7 @@ type route struct {
 // JMAP surface, and the catch-all web route that swallows every path no earlier
 // pattern claimed — which is what makes "no route falls through to the SPA
 // unauthenticated" a property of the mux rather than a hope.
-func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service, oauthSrv *oauthserver.Server, logger *slog.Logger) []route {
+func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service, oauthSrv *oauthserver.Server) []route {
 	rs := make([]route, 0, len(open)+len(api.JMAPPaths())+4)
 	rs = append(rs, open...)
 
@@ -823,7 +823,7 @@ func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service,
 		)
 	}
 
-	rs = append(rs, oauthRoutes(oauthSrv, logger)...)
+	rs = append(rs, oauthRoutes(oauthSrv)...)
 
 	// Straight from internal/api rather than restated here: a route the API
 	// serves but this list forgets is a 404 that looks exactly like a missing
@@ -1230,7 +1230,7 @@ func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operator
 	csp := appCSPFor(cfg.OIDCRedirectURL)
 
 	mux := http.NewServeMux()
-	for _, rt := range routes(jmap, web, oauthCB, open, keyPub, oauthSrv, logger) {
+	for _, rt := range routes(jmap, web, oauthCB, open, keyPub, oauthSrv) {
 		h := rt.handler
 		switch rt.gate {
 		case gateOpen:

@@ -155,7 +155,7 @@ func (h *oaHarness) do(t *testing.T, req *http.Request) (*http.Response, string)
 	if err != nil {
 		t.Fatalf("%s %s: %v", req.Method, req.URL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp, string(b)
 }
@@ -588,11 +588,11 @@ func TestOAuthPKCE(t *testing.T) {
 			t.Errorf("authorize with %s: %d %q", name, resp.StatusCode, resp.Header.Get("Location"))
 		}
 	}
-	code, verifier := h.grantCode(t, h.a.UserID, cid)
+	code, _ := h.grantCode(t, h.a.UserID, cid)
 	if st, out := h.exchange(t, code, "", cid); st != 400 || out["error"] != "invalid_request" {
 		t.Errorf("missing verifier: %d %v", st, out)
 	}
-	code, verifier = h.grantCode(t, h.a.UserID, cid)
+	code, verifier := h.grantCode(t, h.a.UserID, cid)
 	wrong := verifier[:len(verifier)-1] + "X"
 	if verifier[len(verifier)-1] == 'X' {
 		wrong = verifier[:len(verifier)-1] + "Y"
@@ -1045,7 +1045,7 @@ func TestOAuthCIMDEgressGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	var mu sync.Mutex
 	accepted := 0
 	go func() {
@@ -1068,7 +1068,7 @@ func TestOAuthCIMDEgressGuard(t *testing.T) {
 		defer cancel()
 		resp, err := c.Do(req.WithContext(ctx))
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		return err
 	}

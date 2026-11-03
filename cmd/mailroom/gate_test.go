@@ -154,7 +154,7 @@ func gateHandler(t *testing.T, cfg *config.Config) (http.Handler, []route) {
 
 	ready := func(context.Context) error { return nil }
 	srv := server.New(":0", logger, metrics.New().Handler(), ready, server.WithAppHandler(app))
-	return srv.Handler(), routes(jmap, web, web, open, keyPub, gateOAuthServer(t, cfg), logger)
+	return srv.Handler(), routes(jmap, web, web, open, keyPub, gateOAuthServer(t, cfg))
 }
 
 // gateTestFingerprint is a realistic 40-hex-character OpenPGP fingerprint. The
@@ -662,8 +662,15 @@ func TestBearerTokensAreDecidedOnEveryAPIRoute(t *testing.T) {
 						t.Errorf("%s %s with an unknown key: status %d body %q — want 401 and the handler untouched",
 							p.method, p.url, rec.Code, rec.Body.String())
 					}
-					if got := rec.Header().Get("WWW-Authenticate"); got != `Bearer realm="mailroom"` {
-						t.Errorf("%s %s: WWW-Authenticate = %q", p.method, p.url, got)
+					want := `Bearer realm="mailroom"`
+					if p.url == "/mcp" && cfg.OAuthIssuer() != "" {
+						// With the OAuth surface on, /mcp's refusal names the
+						// resource metadata (ADR-050 section 2): still ONE answer.
+						want = `Bearer realm="mailroom", resource_metadata="` + cfg.OAuthIssuer() +
+							`/.well-known/oauth-protected-resource/mcp", scope="mail:read search:read"`
+					}
+					if got := rec.Header().Get("WWW-Authenticate"); got != want {
+						t.Errorf("%s %s: WWW-Authenticate = %q, want %q", p.method, p.url, got, want)
 					}
 				}
 			}

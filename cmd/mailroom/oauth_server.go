@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -61,9 +60,9 @@ func oauthAccessResolver(st *store.Store) auth.ResolveAPIKey {
 // oauthRoutes is the OAuth surface's part of the route inventory. It is
 // registered in every build (with 404 handlers when the surface is off), so the
 // gate tests always cover it.
-func oauthRoutes(s *oauthserver.Server, logger *slog.Logger) []route {
-	var disc, prm, authz, consent, token, revoke http.Handler = oauthserver.NotFound(), oauthserver.NotFound(),
-		oauthserver.NotFound(), oauthserver.NotFound(), oauthserver.NotFound(), oauthserver.NotFound()
+func oauthRoutes(s *oauthserver.Server) []route {
+	nf := oauthserver.NotFound()
+	disc, prm, authz, consent, token, revoke := nf, nf, nf, nf, nf, nf
 	if s != nil {
 		disc, prm, authz = s.AuthorizationServer(), s.ProtectedResource(), s.Authorize()
 		// The decision carries its own CSRF guard (a cross-site POST is refused

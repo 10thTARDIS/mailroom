@@ -125,7 +125,7 @@ func (s *Server) fetchCIMD(ctx context.Context, clientID string) (cimdDocument, 
 	if err != nil {
 		return cimdDocument{}, 0, fmt.Errorf("could not fetch the client metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return cimdDocument{}, 0, fmt.Errorf("the client metadata URL answered %d", resp.StatusCode)
 	}
