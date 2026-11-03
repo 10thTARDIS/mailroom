@@ -5,6 +5,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -97,5 +98,31 @@ func TestMiddleware_WithUnauthenticatedRedirect(t *testing.T) {
 	}
 	if !strings.Contains(loc, "%2Finbox") {
 		t.Fatalf("Location = %q, want the original path percent-encoded in return_to", loc)
+	}
+}
+
+// The OAuth authorization endpoint's query (its state included) survives the
+// sign-in round trip; every other path's code/state is still dropped, and a
+// code is dropped everywhere.
+func TestMiddleware_RedirectKeepsAuthorizeQuery(t *testing.T) {
+	a := testAuthenticator(t, true)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("next handler should not run") })
+	rt := func(target string) string {
+		rr := httptest.NewRecorder()
+		a.Middleware(next, WithUnauthenticatedRedirect("/auth/login")).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, target, nil))
+		u, err := url.Parse(rr.Header().Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u.Query().Get("return_to")
+	}
+	if got := rt("/oauth/authorize?client_id=c&state=s1&code_challenge=x"); got != "/oauth/authorize?client_id=c&state=s1&code_challenge=x" {
+		t.Errorf("authorize query not kept: %q", got)
+	}
+	if got := rt("/oauth/authorize?code=secret&state=s1"); got != "/oauth/authorize" {
+		t.Errorf("a code on authorize was carried: %q", got)
+	}
+	if got := rt("/oauth/callback/google?state=s1"); got != "/oauth/callback/google" {
+		t.Errorf("state on another path was carried: %q", got)
 	}
 }

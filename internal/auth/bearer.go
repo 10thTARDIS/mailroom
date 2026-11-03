@@ -301,17 +301,29 @@ func (g *BearerGate) Wrap(next, sessionGated http.Handler) http.Handler {
 		_, cookieErr := r.Cookie(cookie)
 		both := cookieErr == nil
 
-		// The lookup runs for EVERY presented credential, well-formed or not:
-		// a request refused on shape before the database would answer faster
-		// than one refused after it, and that difference is a signal.
-		userID, keyID, ok, err := g.Resolve(r.Context(), HashAPIToken(token))
+		// An OAuth access token is told by its prefix and resolved through its
+		// own table; anything else is looked up as an API key. Exactly ONE
+		// lookup runs for EVERY presented credential, well-formed or not: a
+		// request refused on shape before the database would answer faster than
+		// one refused after it, and that difference is a signal.
+		resolve, shapeOK, audienceOK := g.Resolve, WellFormedAPIToken(token), true
+		if g.ResolveOAuth != nil && strings.HasPrefix(token, OAuthAccessPrefix) {
+			resolve, shapeOK = g.ResolveOAuth, WellFormedOAuthToken(token, OAuthAccessPrefix)
+			audienceOK = r.URL.Path == g.OAuthPath
+		}
+		// A refresh token is never a bearer credential, whatever any table
+		// says about its hash.
+		if strings.HasPrefix(token, OAuthRefreshPrefix) {
+			shapeOK = false
+		}
+		userID, keyID, ok, err := resolve(r.Context(), HashAPIToken(token))
 		if err != nil {
 			// Never the token: only that a lookup failed, and from where.
 			log.ErrorContext(r.Context(), "API key lookup failed", "client", addr, "err", err)
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if !ok || both || !WellFormedAPIToken(token) {
+		if !ok || both || !shapeOK || !audienceOK {
 			// THE LIMITER IS CONSULTED ONLY ON THE FAILURE PATH (#49 review).
 			// Checked first, it would refuse a VALID key from an address that
 			// strangers had flooded — and behind a reverse proxy every request
@@ -324,7 +336,7 @@ func (g *BearerGate) Wrap(next, sessionGated http.Handler) http.Handler {
 			}
 			limiter.Fail(addr)
 			log.InfoContext(r.Context(), "API key authentication refused", "client", addr)
-			unauthorizedBearer(w)
+			g.refuse(w, r)
 			return
 		}
 		ctx := context.WithValue(contextWithUserID(r.Context(), userID), apiKeyIDContextKey, keyID)
