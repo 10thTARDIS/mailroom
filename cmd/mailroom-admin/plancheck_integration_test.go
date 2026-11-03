@@ -244,6 +244,9 @@ func TestPlanCheckReportsWhereTheAreaIsRead(t *testing.T) {
 	h := newUntangleHarness(t)
 	ctx := context.Background()
 	userID := seedUntangleUser(t, h.super, "plansource-"+store.NewULID().String())
+	t.Cleanup(func() { // opening the desk enqueues writeback jobs; leave none due behind
+		_, _ = h.super.Exec(context.Background(), `DELETE FROM app.jobs WHERE user_id = $1`, userID.String())
+	})
 	if err := h.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
 		if _, err := tx.ListAreas(ctx); err != nil {
 			return err

@@ -33,6 +33,7 @@ func testAreaResolverAgreesWithTheQueryExpression(t *testing.T, ready bool) {
 	ctx := context.Background()
 	u := seedUser(t, h.super, "arr-"+NewULID().String())
 	userID := mustULID(t, u.ID)
+	dropJobsAtCleanup(t, h, userID)
 
 	// A plan built via CreateArea/UpdateArea, covering every shape #442
 	// distinguishes: Alpha is fed by its own label alone (earliest position,
@@ -299,6 +300,7 @@ func testAreaSummary(t *testing.T, ready bool) {
 	ctx := context.Background()
 	u := seedUser(t, h.super, "asum-"+NewULID().String())
 	userID := mustULID(t, u.ID)
+	dropJobsAtCleanup(t, h, userID)
 
 	var workID, emptyID, ownLabel ulid.ULID
 	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {

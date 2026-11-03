@@ -45,6 +45,16 @@ func eachAreaMode(t *testing.T, body func(t *testing.T, ready bool)) {
 	t.Run("stored", func(t *testing.T) { body(t, true) })
 }
 
+// dropJobsAtCleanup deletes the writeback jobs the test's store calls enqueue
+// for userID when the test ends: the dispatcher tests claim at most 50 due jobs
+// and would not find their own behind a pile left by every two-mode run.
+func dropJobsAtCleanup(t *testing.T, h *harness, userID ulid.ULID) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = h.super.Exec(context.Background(), `DELETE FROM app.jobs WHERE user_id = $1`, userID.String())
+	})
+}
+
 // readyAreaIndex backfills the user's column and marks it ready, the way
 // `mailroom-admin area-index --apply` does, refusing to continue unless the
 // report then shows zero disagreements.
