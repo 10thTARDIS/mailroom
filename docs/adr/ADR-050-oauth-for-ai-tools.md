@@ -1,6 +1,9 @@
 # ADR-050: OAuth for AI tools — Mailroom as the authorization server for `/mcp`, and a consent that is an API key
 
-**Status:** Proposed (v1.100; #34). Follows the MCP authorization specification,
+**Status:** Accepted (v1.100; #34). The operator's decisions (2026-11-03):
+Dynamic Client Registration allowed, labelled unverified and switchable off
+(§4); OAuth tokens accepted only on `/mcp` (§3); a connection lasts until it is
+unused for 30 days, with no fixed end (§3). Follows the MCP authorization specification,
 revision 2026-07-28. Builds on ADR-042 (agent access) and ADR-044 (MCP tools) and
 widens neither: everything an approved client may do is decided by the gate
 ADR-042 already enforces.
@@ -156,7 +159,7 @@ Confidential clients and `private_key_jwt` are not supported in this release.
   registration not used by a completed consent within 24 hours is deleted. The
   client name a registration declares is **self-asserted** and the consent screen
   says so (§5). Enabled by default, `MAILROOM_OAUTH_DCR=off` turns it off, and
-  the metadata omits `registration_endpoint` when it is off. (Open question Q64.)
+  the metadata omits `registration_endpoint` when it is off.
 - **Manual registration.** A user can create a client in Settings (a name and its
   redirect URIs) and paste the `client_id` into a client that supports
   pre-registration. It is the fallback for a client that supports neither of the
