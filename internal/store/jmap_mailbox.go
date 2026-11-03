@@ -130,6 +130,11 @@ func (tx *UserTx) GetMailboxes(ctx context.Context, ids []ulid.ULID) ([]MailboxV
 	// Counting raw provenance instead is how an archived message keeps its
 	// unread badge on the Inbox until the IMAP round-trip (and, since provenance
 	// is never expunged, after it too).
+	//
+	// COLLATE "C" on the grouping and the distinct counts: they only compare
+	// ids for equality, which is bytewise under any deterministic collation, so
+	// the counts are unchanged; under the database's language-aware default
+	// the sort of every membership row was most of this statement's time.
 	rows, err := tx.tx.Query(ctx, `
 		WITH membership AS (`+effectiveMembershipSQL+`)
 		SELECT m.id, m.account_id, m.display_name, m.imap_name, COALESCE(m.special_use, ''),
@@ -137,12 +142,12 @@ func (tx *UserTx) GetMailboxes(ctx context.Context, ids []ulid.ULID) ([]MailboxV
 		       COALESCE(cnt.total, 0), COALESCE(cnt.unread, 0)
 		  FROM app.mailboxes m
 		  LEFT JOIN (
-		      SELECT mailbox_id,
-		             count(DISTINCT message_id) AS total,
-		             count(DISTINCT message_id)
+		      SELECT mailbox_id COLLATE "C" AS mailbox_id,
+		             count(DISTINCT message_id COLLATE "C") AS total,
+		             count(DISTINCT message_id COLLATE "C")
 		               FILTER (WHERE NOT is_seen AND trashed_at IS NULL) AS unread
 		        FROM membership
-		       GROUP BY mailbox_id
+		       GROUP BY 1
 		  ) cnt ON cnt.mailbox_id = m.id
 		 WHERE m.user_id = $1 AND m.id = ANY($2)`,
 		tx.userID.String(), ulidStrings(ids))

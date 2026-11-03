@@ -42,7 +42,14 @@ var (
 
 // collapseThreadKey is the grouping the full ranking partitions by: a message
 // with no thread is a thread of one.
-const collapseThreadKey = `COALESCE(m.thread_id::text, 'msg:' || m.id::text)`
+//
+// COLLATE "C" because it is only ever grouped or counted, never shown in
+// order: equality is the same bytewise under any deterministic collation, so
+// no thread is split or merged, but under the database's default (a
+// language-aware locale) every comparison in the sort behind a
+// count(DISTINCT) or a PARTITION BY goes through the locale's rules. On an
+// area of thousands of messages that sort was most of the exact total's cost.
+const collapseThreadKey = `(COALESCE(m.thread_id::text, 'msg:' || m.id::text) COLLATE "C")`
 
 // collapseBoundedEligible reports whether q is the shape the bounded scan
 // serves: an area list (inArea or unsorted) on the STORED path, collapsed,

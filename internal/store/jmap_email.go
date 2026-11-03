@@ -1469,7 +1469,8 @@ func emailOrderTerms(q EmailQuery, bind func(any) string) []orderTerm {
 // would collapse EVERY unthreaded message in the result into a SINGLE row.
 // COALESCE'ing to the message's own id when there is no thread makes an
 // unthreaded message a partition of one: it is never collapsed with another
-// unthreaded message.
+// unthreaded message. The key is collapseThreadKey, shared with the bounded
+// page and its exact total, so all three group threads identically.
 func collapsedRankSQL(from, where string, terms []orderTerm) (body, outerOrder string) {
 	orderByParts := make([]string, len(terms))
 	keyCols := make([]string, len(terms))
@@ -1483,7 +1484,7 @@ func collapsedRankSQL(from, where string, terms []orderTerm) (body, outerOrder s
 	body = `
 			SELECT m.id AS id,
 			       row_number() OVER (
-			           PARTITION BY COALESCE(m.thread_id::text, 'msg:' || m.id::text)
+			           PARTITION BY ` + collapseThreadKey + `
 			           ORDER BY ` + strings.Join(orderByParts, ", ") + `
 			       ) AS rn,
 			       ` + strings.Join(keyCols, ",\n\t\t       ") + `
