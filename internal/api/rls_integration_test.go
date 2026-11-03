@@ -1766,6 +1766,49 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 			}
 		}
 	},
+	// ---- OAuth clients and token families (ADR-050): a leak exposes which apps
+	// another user has registered or connected, and would let one user end
+	// another's connections.
+	"OAuthClient/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		bc := seedOAuthFixture(t, h, b)
+		res, mErr := invokeAs(t, h, "OAuthClient/get", a.UserID, map[string]any{})
+		if mErr != nil {
+			t.Fatalf("OAuthClient/get: %+v", mErr)
+		}
+		if raw, _ := json.Marshal(res); strings.Contains(string(raw), bc.clientID) {
+			t.Errorf("A's client list carries B's client: %s", raw)
+		}
+	},
+	"OAuthClient/set": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		bc := seedOAuthFixture(t, h, b)
+		res, mErr := invokeAs(t, h, "OAuthClient/set", a.UserID, map[string]any{"destroy": []string{bc.clientID}})
+		if mErr != nil {
+			t.Fatalf("OAuthClient/set: %+v", mErr)
+		}
+		if !mapHasKey(res, "notDestroyed", bc.clientID) {
+			t.Errorf("A's destroy of B's client was not refused: %v", res)
+		}
+		var n int
+		superScan2(t, h, `SELECT count(*) FROM app.oauth_clients WHERE id=$1`, []any{bc.clientID}, &n)
+		if n != 1 {
+			t.Errorf("A's set reached B's client (rows now %d)", n)
+		}
+	},
+	"OAuthFamily/set": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		bc := seedOAuthFixture(t, h, b)
+		res, mErr := invokeAs(t, h, "OAuthFamily/set", a.UserID, map[string]any{"destroy": []string{bc.familyID}})
+		if mErr != nil {
+			t.Fatalf("OAuthFamily/set: %+v", mErr)
+		}
+		if !mapHasKey(res, "notDestroyed", bc.familyID) {
+			t.Errorf("A's revoke of B's family was not refused: %v", res)
+		}
+		var revoked int
+		superScan2(t, h, `SELECT count(*) FROM app.oauth_tokens WHERE family_id=$1 AND revoked_at IS NOT NULL`, []any{bc.familyID}, &revoked)
+		if revoked != 0 {
+			t.Errorf("A's revoke reached B's tokens (%d revoked)", revoked)
+		}
+	},
 	"PendingAction/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		bk := seedAgentKey(t, h, b)
 		res, mErr := invokeAs(t, h, "PendingAction/get", a.UserID, map[string]any{"ids": []string{bk.pendingID}})
@@ -2830,6 +2873,36 @@ func seedAgentKey(t *testing.T, h *rlsHarness, u rlsUser) agentKeySeed {
 		}
 	}
 	return s
+}
+
+// oauthFixture is one user's manual client, OAuth grant and token family.
+type oauthFixture struct{ clientID, keyID, familyID string }
+
+func oaHash(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
+
+func seedOAuthFixture(t *testing.T, h *rlsHarness, u rlsUser) oauthFixture {
+	t.Helper()
+	ctx := context.Background()
+	f := oauthFixture{keyID: store.NewULID().String(), familyID: store.NewULID().String()}
+	f.clientID = "mc_" + hex.EncodeToString(oaHash(f.keyID))[:32]
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris) VALUES ($1,'manual',$2,'Fixture app',ARRAY['https://app.example.com/cb'])`,
+			[]any{f.clientID, u.UserID.String()}},
+		{`INSERT INTO app.api_keys (id, user_id, name, scopes, kind, oauth_client_id, oauth_client_name, oauth_client_kind, oauth_redirect_host)
+		  VALUES ($1,$2,$3,ARRAY['mail:read'],'oauth',$4,'Fixture app','manual','app.example.com')`,
+			[]any{f.keyID, u.UserID.String(), "grant-" + f.keyID, f.clientID}},
+		{`INSERT INTO app.oauth_tokens (id, user_id, api_key_id, kind, token_hash, family_id, resource, scopes, expires_at)
+		  VALUES ($1,$2,$3,'refresh',$4,$5,'https://mail.example.com/mcp',ARRAY['mail:read'], now() + interval '1 day')`,
+			[]any{store.NewULID().String(), u.UserID.String(), f.keyID, oaHash("refresh-" + f.keyID), f.familyID}},
+	} {
+		if _, err := h.super.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seed oauth fixture: %v", err)
+		}
+	}
+	return f
 }
 
 func superScan2(t *testing.T, h *rlsHarness, sql string, args []any, dest ...any) {

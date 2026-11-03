@@ -177,6 +177,9 @@ var crossUserProbedMethods = map[string]bool{
 	"ApiKey/get":        true,
 	"ApiKey/set":        true,
 	"ApiKey/getEvents":  true,
+	"OAuthClient/get":   true,
+	"OAuthClient/set":   true,
+	"OAuthFamily/set":   true,
 	"PendingAction/get": true,
 	"PendingAction/set": true,
 

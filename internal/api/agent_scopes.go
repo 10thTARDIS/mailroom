@@ -186,6 +186,12 @@ var keyPolicies = map[string]keyPolicy{
 	"ApiKey/set":       sessionOnly(whyKeyManagement),
 	"ApiKey/getEvents": sessionOnly(whyKeyManagement),
 
+	// OAuth clients and token families (ADR-050): managing what may connect to
+	// the account is a person's, never a key's.
+	"OAuthClient/get": sessionOnly(whyKeyManagement),
+	"OAuthClient/set": sessionOnly(whyKeyManagement),
+	"OAuthFamily/set": sessionOnly(whyKeyManagement),
+
 	"UserKey/get":         sessionOnly(whyPrivateKeys),
 	"UserKey/generate":    sessionOnly(whyPrivateKeys),
 	"UserKey/import":      sessionOnly(whyPrivateKeys),

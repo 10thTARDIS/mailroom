@@ -279,6 +279,9 @@ var methodCapabilities = map[string]string{
 	"ApiKey/get":        capAPIKeys,
 	"ApiKey/set":        capAPIKeys,
 	"ApiKey/getEvents":  capAPIKeys,
+	"OAuthClient/get":   capAPIKeys,
+	"OAuthClient/set":   capAPIKeys,
+	"OAuthFamily/set":   capAPIKeys,
 	"PendingAction/get": capAPIKeys,
 	"PendingAction/set": capAPIKeys,
 }

@@ -129,7 +129,7 @@ func gateHandler(t *testing.T, cfg *config.Config) (http.Handler, []route) {
 		_, _ = io.WriteString(w, webMarker)
 	})
 
-	app, err := mountApp(context.Background(), nil, cfg, operatorID, logger, jmap, web, web, gateTestKeys{}, nil)
+	app, err := mountApp(context.Background(), nil, cfg, operatorID, logger, jmap, web, web, gateTestKeys{}, nil, gateOAuthServer(t, cfg))
 	if err != nil {
 		t.Fatalf("mountApp: %v", err)
 	}
@@ -154,7 +154,7 @@ func gateHandler(t *testing.T, cfg *config.Config) (http.Handler, []route) {
 
 	ready := func(context.Context) error { return nil }
 	srv := server.New(":0", logger, metrics.New().Handler(), ready, server.WithAppHandler(app))
-	return srv.Handler(), routes(jmap, web, web, open, keyPub)
+	return srv.Handler(), routes(jmap, web, web, open, keyPub, gateOAuthServer(t, cfg), logger)
 }
 
 // gateTestFingerprint is a realistic 40-hex-character OpenPGP fingerprint. The
