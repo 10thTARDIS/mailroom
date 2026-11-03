@@ -142,8 +142,25 @@ func TestEveryDefinerPinsPgTempLast(t *testing.T) {
 	// no new policy was added. app.job_census is its read-only report, STABLE,
 	// returning counts per (kind, state) and the oldest finish time per group:
 	// less than dequeue_due_jobs already discloses, the count_due_jobs shape.
-	if seen != 16 {
-		t.Errorf("schema app has %d SECURITY DEFINER functions, want 16. If a definer was "+
+	//
+	// The seventeenth to twenty-fifth are the OAuth authorization server
+	// (migration 00087, ADR-050), nine, each returning the minimum its caller
+	// needs; none returns mail content. oauth_access_for_token is the bearer
+	// lookup of an access token, the api_key_for_token shape. oauth_client_resolve
+	// and oauth_cimd_get are STABLE reads of a client's name and redirect URIs
+	// and of a cached public document, for the authorization endpoint.
+	// oauth_client_create is the ONLY way a client row is written: it mints the
+	// id, so the application role (which has no INSERT) cannot choose one, and it
+	// takes the owner from the transaction's identity. oauth_cimd_put caches a
+	// fetched document (bounded). oauth_code_consume, oauth_refresh_consume and
+	// oauth_token_revoke run at the token and revocation endpoints, which have no
+	// user: each looks up by the hash of a secret the caller holds, marks it used
+	// or revoked atomically under a row lock, and returns ids and flags. The last,
+	// sweep_oauth, is the fourth definer that deletes across users: it takes a
+	// clock, a grace period and a limit, deletes only expired or long-revoked
+	// tokens, codes, requests and cached documents, and returns a count per kind.
+	if seen != 25 {
+		t.Errorf("schema app has %d SECURITY DEFINER functions, want 25. If a definer was "+
 			"added deliberately, bump this number in the same commit that argues for the new "+
 			"cross-user surface", seen)
 	}

@@ -28,26 +28,43 @@ func (s *Server) Authorize() http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		addr := clientIP(r)
-		if blocked, _ := s.authLimiter.Blocked(addr); blocked {
-			errorPage(w, http.StatusTooManyRequests, "Too many requests. Wait a moment and start again from the app.")
-			return
+		// The limiter is keyed by the signed-in user and charged ONLY on failure
+		// (and on a request that causes an outbound metadata fetch), never on a
+		// successful validation: a limiter charged on success would let one
+		// caller's burst lock others out behind a shared proxy address (ADR-042
+		// section 2, amended). The connection address is not used here: the one
+		// trusted-proxy-aware address helper (auth's forwardedClientAddr) is
+		// display-only by its own contract and unexported.
+		key := "u:" + userID.String()
+		refuse := func(status int, msg string) {
+			if blocked, _ := s.authLimiter.Blocked(key); blocked {
+				errorPage(w, http.StatusTooManyRequests, "Too many failed attempts. Wait a moment and start again from the app.")
+				return
+			}
+			s.authLimiter.Fail(key)
+			errorPage(w, status, msg)
 		}
-		s.authLimiter.Fail(addr)
+		allowFetch := func() bool {
+			if blocked, _ := s.authLimiter.Blocked(key); blocked {
+				return false
+			}
+			s.authLimiter.Fail(key)
+			return true
+		}
 
 		q := r.URL.Query()
 		for _, k := range []string{"client_id", "redirect_uri", "response_type", "code_challenge",
 			"code_challenge_method", "resource", "scope", "state"} {
 			if len(q[k]) > 1 {
-				errorPage(w, http.StatusBadRequest, "The request repeats a parameter ("+k+"), so it cannot be trusted.")
+				refuse(http.StatusBadRequest, "The request repeats a parameter ("+k+"), so it cannot be trusted.")
 				return
 			}
 		}
-		client, err := s.resolveClient(r.Context(), q.Get("client_id"))
+		client, err := s.resolveClient(r.Context(), q.Get("client_id"), allowFetch)
 		if err != nil {
 			var ec errClient
 			if asClientErr(err, &ec) {
-				errorPage(w, http.StatusBadRequest, ec.msg)
+				refuse(http.StatusBadRequest, ec.msg)
 				return
 			}
 			s.log.ErrorContext(r.Context(), "oauth: resolve client", "err", err)
@@ -55,17 +72,20 @@ func (s *Server) Authorize() http.Handler {
 			return
 		}
 		if client.Kind == store.OAuthClientManual && (client.OwnerID == nil || *client.OwnerID != userID) {
-			errorPage(w, http.StatusBadRequest, "This application is registered to a different account.")
+			refuse(http.StatusBadRequest, "This application is registered to a different account.")
 			return
 		}
 		redirectURI := q.Get("redirect_uri")
 		if redirectURI == "" || !MatchRedirectURI(client.RedirectURIs, redirectURI) {
-			errorPage(w, http.StatusBadRequest, "The address this application asked to be sent back to is not one it registered, so the request was refused.")
+			refuse(http.StatusBadRequest, "The address this application asked to be sent back to is not one it registered, so the request was refused.")
 			return
 		}
 
 		state := q.Get("state")
-		fail := func(code, desc string) { s.redirectError(w, r, redirectURI, state, code, desc) }
+		fail := func(code, desc string) {
+			s.authLimiter.Fail(key)
+			s.redirectError(w, r, redirectURI, state, code, desc)
+		}
 		if len(state) > 2048 {
 			fail("invalid_request", "state is too long")
 			return

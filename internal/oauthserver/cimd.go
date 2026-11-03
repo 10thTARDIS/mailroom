@@ -114,7 +114,7 @@ func (s *Server) fetchCIMD(ctx context.Context, clientID string) (cimdDocument, 
 	if err != nil {
 		return cimdDocument{}, 0, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, cimdTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.cimdTTO)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {

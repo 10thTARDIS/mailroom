@@ -85,7 +85,9 @@ type Config struct {
 	Alert func(userID ulid.ULID, key store.APIKey)
 	// CIMD is the metadata fetcher; nil builds the guarded one from
 	// AllowPrivateClientHosts.
-	CIMD                    Doer
+	CIMD Doer
+	// CIMDTimeout bounds one metadata fetch; zero means 5 seconds.
+	CIMDTimeout             time.Duration
 	AllowPrivateClientHosts bool
 	// DCR is MAILROOM_OAUTH_DCR. Parsed now; the endpoint arrives later, so the
 	// metadata never advertises a registration endpoint in this release.
@@ -103,6 +105,7 @@ type Server struct {
 	approve  ApproveFunc
 	alert    func(ulid.ULID, store.APIKey)
 	cimd     Doer
+	cimdTTO  time.Duration
 	limiter  *auth.FailureLimiter
 	// authLimiter is charged on every authorization request: the endpoint is
 	// reachable by anyone and may cause one outbound metadata fetch.
@@ -121,6 +124,10 @@ func New(c Config) (*Server, error) {
 	}
 	s := &Server{issuer: c.Issuer, resource: c.Issuer + MCPResourcePath, st: c.Store, policy: c.Policy,
 		approve: c.Approve, alert: c.Alert, cimd: c.CIMD, limiter: c.Limiter, log: c.Logger}
+	s.cimdTTO = c.CIMDTimeout
+	if s.cimdTTO <= 0 {
+		s.cimdTTO = cimdTimeout
+	}
 	if s.cimd == nil {
 		s.cimd = NewCIMDClient(c.AllowPrivateClientHosts)
 	}
@@ -179,12 +186,12 @@ func (e errClient) Error() string { return e.msg }
 // resolveClient decides by SHAPE first: an https URL is a metadata-document
 // client and is never looked up among registered clients; a minted id
 // (mc_/rc_ plus 32 hex) is looked up only there; anything else is unknown.
-func (s *Server) resolveClient(ctx context.Context, id string) (Client, error) {
+func (s *Server) resolveClient(ctx context.Context, id string, allowFetch func() bool) (Client, error) {
 	switch {
 	case id == "":
 		return Client{}, errClient{"The application did not say who it is (client_id is missing)."}
 	case IsCIMDClientID(id):
-		return s.resolveCIMD(ctx, id)
+		return s.resolveCIMD(ctx, id, allowFetch)
 	case manualClientID.MatchString(id):
 		c, found, err := s.st.ResolveOAuthClient(ctx, id)
 		if err != nil {
@@ -198,7 +205,7 @@ func (s *Server) resolveClient(ctx context.Context, id string) (Client, error) {
 	return Client{}, errClient{"This application is not registered."}
 }
 
-func (s *Server) resolveCIMD(ctx context.Context, id string) (Client, error) {
+func (s *Server) resolveCIMD(ctx context.Context, id string, allowFetch func() bool) (Client, error) {
 	if _, err := validCIMDURL(id); err != nil {
 		return Client{}, errClient{"This application's identity could not be verified: " + err.Error() + "."}
 	}
@@ -209,6 +216,10 @@ func (s *Server) resolveCIMD(ctx context.Context, id string) (Client, error) {
 		if json.Unmarshal(raw, &d) == nil && d.Name != "" && len(d.RedirectURIs) > 0 {
 			return Client{ID: id, Name: d.Name, Kind: store.OAuthClientCIMD, RedirectURIs: d.RedirectURIs}, nil
 		}
+	}
+	// A cache miss causes an outbound request: that is charged.
+	if allowFetch != nil && !allowFetch() {
+		return Client{}, errClient{"Too many applications were checked in a short time. Wait a moment and try again."}
 	}
 	doc, ttl, err := s.fetchCIMD(ctx, id)
 	if err != nil {

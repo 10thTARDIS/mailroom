@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -64,6 +65,7 @@ var appTables = []string{
 	"audit_log", "ai_providers", "sync_jobs",
 	"oauth_grants", "oauth_flows",
 	"sessions",
+	"oauth_tokens", "oauth_requests", "oauth_codes", "oauth_clients",
 }
 
 // systemTables are the tables in schema app that belong to the INSTANCE rather
@@ -75,7 +77,8 @@ var appTables = []string{
 // isolation test:
 //
 //	pgp_root_check   pgp_root_check_integration_test.go (#525)
-var systemTables = []string{"pgp_root_check"}
+//	oauth_cimd_cache oauth_integration_test.go (ADR-050): no policy, no grant for the app role
+var systemTables = []string{"pgp_root_check", "oauth_cimd_cache"}
 
 // userScopeColumn names the column that scopes a table to a user.
 // Everything is "user_id" except users itself.
@@ -523,6 +526,36 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	exec(`INSERT INTO app.sessions (id, user_id, token_hash, user_agent)
 	      VALUES ($1, $2, $3, 'Seed Browser')`,
 		NewULID().String(), u.ID, sessionHash[:])
+
+	// OAuth (migration 00087, ADR-050): a manual client, a grant with a token
+	// family, a pending authorization request and an issued code. A leak would
+	// tell one user which apps another connected and let it use their tokens.
+	oauthKeyID := NewULID().String()
+	clientSum := sha256.Sum256([]byte("client-" + tag))
+	oauthClientID := "mc_" + hex.EncodeToString(clientSum[:])[:32]
+	exec(`INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris)
+	      VALUES ($1, 'manual', $2, 'Seed app', ARRAY['https://app.example.com/cb'])`, oauthClientID, u.ID)
+	exec(`INSERT INTO app.api_keys (id, user_id, name, scopes, kind, oauth_client_id, oauth_client_name,
+	        oauth_client_kind, oauth_redirect_host)
+	      VALUES ($1, $2, 'seed grant', ARRAY['mail:read'], 'oauth', $3, 'Seed app', 'manual', 'app.example.com')`,
+		oauthKeyID, u.ID, oauthClientID)
+	oauthTokenHash := sha256.Sum256([]byte("oauth-token-" + tag))
+	oauthFamily := NewULID().String()
+	exec(`INSERT INTO app.oauth_tokens (id, user_id, api_key_id, kind, token_hash, family_id, resource, scopes, expires_at)
+	      VALUES ($1, $2, $3, 'access', $4, $5, 'https://mail.example.com/mcp', ARRAY['mail:read'], now() + interval '1 hour')`,
+		NewULID().String(), u.ID, oauthKeyID, oauthTokenHash[:], oauthFamily)
+	oauthReqHash := sha256.Sum256([]byte("oauth-request-" + tag))
+	exec(`INSERT INTO app.oauth_requests (id, request_hash, user_id, client_id, client_name, client_kind, redirect_uri,
+	        redirect_host, all_loopback, code_challenge, resource, scopes, expires_at)
+	      VALUES ($1, $2, $3, $4, 'Seed app', 'manual', 'https://app.example.com/cb', 'app.example.com', false,
+	        'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', 'https://mail.example.com/mcp', ARRAY['mail:read'], now() + interval '10 minutes')`,
+		NewULID().String(), oauthReqHash[:], u.ID, oauthClientID)
+	oauthCodeHash := sha256.Sum256([]byte("oauth-code-" + tag))
+	exec(`INSERT INTO app.oauth_codes (id, user_id, api_key_id, code_hash, client_id, redirect_uri, code_challenge,
+	        resource, scopes, expires_at)
+	      VALUES ($1, $2, $3, $4, $5, 'https://app.example.com/cb', 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+	        'https://mail.example.com/mcp', ARRAY['mail:read'], now() + interval '1 minute')`,
+		oauthFamily, u.ID, oauthKeyID, oauthCodeHash[:], oauthClientID)
 
 	return u
 }
