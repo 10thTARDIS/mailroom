@@ -392,6 +392,19 @@ var plan = map[string]Entry{
 		"signed-in browsers of this instance (a hashed cookie secret and a sealed sign-in " +
 			"provider token); credentials that are useless elsewhere. Everyone signs in again " +
 			"after a move"},
+	// OAuth for AI tools (migration 00087, ADR-050). All credentials or
+	// short-lived protocol state of THIS instance's authorization server; the
+	// grant itself is an api_keys row, withheld above.
+	"oauth_tokens": {Withheld, "",
+		"hashed access and refresh tokens issued by this instance to connected apps; useless " +
+			"elsewhere. Apps are authorized again after a move"},
+	"oauth_requests": {Withheld, "",
+		"an authorization awaiting the user's decision; it expires within ten minutes"},
+	"oauth_codes": {Withheld, "",
+		"a one-time authorization code; it expires within a minute"},
+	"oauth_clients": {Withheld, "",
+		"apps registered by hand for this instance's authorization server; their client ids " +
+			"are issued here and are registered again after a move"},
 	"pgp_decrypt_audit": {Withheld, "",
 		"the crypto process's record of each decryption on this instance (message id, " +
 			"outcome, key fingerprint, no content); an accountability trail, not the user's own data"},
