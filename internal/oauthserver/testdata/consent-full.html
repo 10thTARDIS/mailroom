@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer"><title>Approve an app - Mailroom</title><style>:root{color-scheme:light dark;--bg:#ffffff;--fg:#1a1a1a;--muted:#4b5563;--line:#6b7280;--btn:#1d4ed8;--btn-fg:#ffffff;--warn-bg:#fffbeb;--warn-line:#92400e;--err-bg:#fef2f2;--err-line:#b91c1c;--focus:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--bg:#111827;--fg:#f3f4f6;--muted:#d1d5db;--line:#9ca3af;--btn:#93c5fd;--btn-fg:#0b1220;--warn-bg:#2a1f05;--warn-line:#fbbf24;--err-bg:#3b0d0d;--err-line:#fca5a5;--focus:#93c5fd}}
+body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 system-ui,sans-serif}
+main{max-width:40rem;margin:0 auto;padding:1rem}
+h1{font-size:1.5rem;line-height:1.25}
+fieldset{border:1px solid var(--line);border-radius:.5rem;margin:1rem 0;padding:.5rem 1rem .75rem;min-width:0}
+legend{font-weight:600;padding:0 .25rem}
+label{display:block;padding:.3rem 0}
+.ask{margin-left:1.75rem}
+input[type=checkbox],input[type=radio]{width:1.25rem;height:1.25rem;margin:0 .5rem 0 0;vertical-align:-.2rem}
+input[type=number],input[type=text]{display:block;box-sizing:border-box;width:100%;max-width:20rem;min-height:2.75rem;margin-top:.25rem;padding:.4rem .6rem;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:.375rem}
+code{font-size:.875em;color:var(--muted);overflow-wrap:anywhere}
+.hint{margin:.25rem 0;color:var(--muted);font-size:.875rem}
+.warn,.err{margin:1rem 0;padding:.5rem 1rem;border:2px solid;border-radius:.5rem}
+.warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.err{background:var(--err-bg);border-color:var(--err-line)}
+.new{font-weight:700}
+.sub{margin-left:1.75rem}
+.actions{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.5rem 0}
+button{min-height:2.75rem;padding:.5rem 1.25rem;font:inherit;cursor:pointer;border:2px solid var(--btn);border-radius:.375rem}
+button.primary{background:var(--btn);color:var(--btn-fg)}
+button.secondary{background:transparent;color:var(--fg);border-color:var(--line)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+@media (max-width:30rem){main{padding:.75rem}.actions button{flex:1 1 100%}.ask,.sub{margin-left:0}}</style></head>
+<body><main>
+<h1>Approve Example Assistant?</h1>
+<p class="err" role="alert">To allow both sending and deleting, type: send and delete</p>
+<p><strong>Example Assistant</strong> from <strong>app.example.com</strong> wants to use your mailbox.</p>
+
+<p>After you decide, you are sent back to <strong>127.0.0.1</strong>.</p>
+<p class="warn" role="note">This app receives the approval on this computer. Approve only if you started this from an app you trust.</p>
+<p>This app is already connected. The settings below are its current ones; scopes marked <span class="new">new</span> are newly requested.</p>
+<form method="post" action="/oauth/consent">
+<input type="hidden" name="request" value="req-0123">
+<fieldset><legend>What it may read</legend>
+<p class="hint">Looking only; nothing is changed.</p>
+<label><input type="checkbox" name="scope" value="mail:read" checked> Read mail <code>mail:read</code></label>
+<label><input type="checkbox" name="scope" value="labels:read" checked> See labels <code>labels:read</code> <span class="new">(new)</span></label>
+<label><input type="checkbox" name="scope" value="search:read" checked> Search mail <code>search:read</code> <span class="new">(new)</span></label>
+<label><input type="checkbox" name="scope" value="contacts:read" checked> See contacts <code>contacts:read</code> <span class="new">(new)</span></label>
+
+
+</fieldset>
+<fieldset><legend>What it may change</legend>
+<p class="hint">Changes your mail, labels and contacts, but never sends or deletes.</p>
+<label><input type="checkbox" name="scope" value="mail:draft" checked> Write drafts <code>mail:draft</code> <span class="new">(new)</span></label>
+<label><input type="checkbox" name="scope" value="mail:move" checked> Move, mark and label mail <code>mail:move</code> <span class="new">(new)</span></label>
+<label><input type="checkbox" name="scope" value="labels:write" checked> Create and edit labels <code>labels:write</code> <span class="new">(new)</span></label>
+<label><input type="checkbox" name="scope" value="contacts:write" checked> Edit contacts <code>contacts:write</code> <span class="new">(new)</span></label>
+
+
+</fieldset>
+<fieldset><legend>Sending and deleting</legend>
+<p class="hint">These have the most effect, so each can wait for your approval before it happens.</p>
+<label><input type="checkbox" name="scope" value="mail:send" checked> Send mail <code>mail:send</code></label>
+<label class="ask"><input type="checkbox" name="confirm" value="mail:send"> Ask me before it can: Send mail</label>
+<label><input type="checkbox" name="scope" value="mail:delete" checked> Delete mail (to Trash) <code>mail:delete</code> <span class="new">(new)</span></label>
+<label class="ask"><input type="checkbox" name="confirm" value="mail:delete" checked> Ask me before it can: Delete mail (to Trash)</label>
+
+<p class="hint">Each request waits for you to approve or deny it here. Unanswered requests are denied after 24 hours.</p>
+<p class="hint" id="ack-help">Only needed if you allow both sending and deleting. An app with both can mail anyone as you and then remove the trace.</p>
+<label for="ack">To allow both, type: <code>send and delete</code></label>
+<input type="text" id="ack" name="ack" autocomplete="off" spellcheck="false" aria-describedby="ack-help">
+</fieldset>
+
+<p class="hint">Asked for, but not available here: <code>admin:all</code></p>
+<fieldset><legend>Which accounts</legend>
+<label><input type="radio" name="accounts_mode" value="all"> Every account</label>
+<label><input type="radio" name="accounts_mode" value="some" checked> Only these accounts</label>
+<label class="sub"><input type="checkbox" name="account" value="01J00000000000000000000001"> Personal</label><label class="sub"><input type="checkbox" name="account" value="01J00000000000000000000002" checked> Work</label>
+</fieldset>
+<fieldset><legend>Limits</legend>
+<label for="rate">Calls per minute</label>
+<input type="number" id="rate" name="rate" min="1" max="600" value="60" aria-describedby="rate-help">
+<p class="hint" id="rate-help">1 to 600.</p>
+<label for="budget">Calls per 24 hours</label>
+<input type="number" id="budget" name="budget" min="1" max="20000" value="500" aria-describedby="budget-help">
+<p class="hint" id="budget-help">1 to 20000.</p>
+<label><input type="checkbox" name="suspend" value="1" checked> Suspend the app automatically if it misbehaves</label>
+</fieldset>
+<div class="actions"><button type="submit" class="primary" name="action" value="approve">Approve</button>
+<button type="submit" class="secondary" name="action" value="deny">Deny</button></div>
+</form></main></body></html>

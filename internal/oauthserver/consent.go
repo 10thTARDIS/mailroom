@@ -21,17 +21,77 @@ import (
 )
 
 // The consent screen (ADR-050 section 5): server-rendered, one inline style
-// pinned by CSP hash, no script, framing refused. This is the minimal page of
-// increment 1; the full screen is increment 2.
+// pinned by CSP hash, no script, framing refused. It is the API key form for an
+// app: what it may read, what it may change, and sending and deleting with the
+// ask-first choice beside each, in the words Settings uses.
 //
 // form-action is deliberately NOT in the policy: Chromium applies it to the
 // redirect that follows the POST, which goes to the client's redirect URI, so
 // 'self' would break every approval there. With no script and every value
 // escaped by html/template there is no injection to exploit it through.
 
-const pageCSS = `body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}
-fieldset{margin:1rem 0}label{display:block}.warn{border:2px solid #b45309;padding:.5rem 1rem}
-.err{border:2px solid #b91c1c;padding:.5rem 1rem}.new{font-weight:bold}small{opacity:.8}`
+// ScopeWords is each scope in plain words, the primary text of the consent
+// screen (the raw name is shown beside it, secondary).
+//
+// TWIN: these are web/src/app/i18n.ts's "apiKeys.scope.*" entries, which the
+// key dialog shows. Change one, change the other: a test in internal/api
+// compares this table with the closed scope set (ADR-042) and with those
+// entries, so neither can drift.
+var ScopeWords = map[string]string{
+	"mail:read":      "Read mail",
+	"search:read":    "Search mail",
+	"labels:read":    "See labels",
+	"contacts:read":  "See contacts",
+	"mail:move":      "Move, mark and label mail",
+	"labels:write":   "Create and edit labels",
+	"mail:draft":     "Write drafts",
+	"contacts:write": "Edit contacts",
+	"mail:send":      "Send mail",
+	"mail:delete":    "Delete mail (to Trash)",
+}
+
+// Wording shared with the key dialog (i18n.ts "apiKeys.create.*"), copied
+// exactly.
+const (
+	wordsAskFirstFor  = "Ask me before it can: "                                                                                // apiKeys.create.askFirstFor
+	wordsAskFirstHint = "Each request waits for you to approve or deny it here. Unanswered requests are denied after 24 hours." // apiKeys.create.askFirstHint
+)
+
+// scopeWords is a scope in words; the raw name for one the table lacks, so a
+// new scope is shown rather than hidden.
+func scopeWords(scope string) string {
+	if w, ok := ScopeWords[scope]; ok {
+		return w
+	}
+	return scope
+}
+
+// The page's palette is CSS custom properties, light first and dark under
+// prefers-color-scheme. consent_test.go checks the contrast of every pair.
+const pageCSS = `:root{color-scheme:light dark;--bg:#ffffff;--fg:#1a1a1a;--muted:#4b5563;--line:#6b7280;--btn:#1d4ed8;--btn-fg:#ffffff;--warn-bg:#fffbeb;--warn-line:#92400e;--err-bg:#fef2f2;--err-line:#b91c1c;--focus:#1d4ed8}
+@media (prefers-color-scheme:dark){:root{--bg:#111827;--fg:#f3f4f6;--muted:#d1d5db;--line:#9ca3af;--btn:#93c5fd;--btn-fg:#0b1220;--warn-bg:#2a1f05;--warn-line:#fbbf24;--err-bg:#3b0d0d;--err-line:#fca5a5;--focus:#93c5fd}}
+body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 system-ui,sans-serif}
+main{max-width:40rem;margin:0 auto;padding:1rem}
+h1{font-size:1.5rem;line-height:1.25}
+fieldset{border:1px solid var(--line);border-radius:.5rem;margin:1rem 0;padding:.5rem 1rem .75rem;min-width:0}
+legend{font-weight:600;padding:0 .25rem}
+label{display:block;padding:.3rem 0}
+.ask{margin-left:1.75rem}
+input[type=checkbox],input[type=radio]{width:1.25rem;height:1.25rem;margin:0 .5rem 0 0;vertical-align:-.2rem}
+input[type=number],input[type=text]{display:block;box-sizing:border-box;width:100%;max-width:20rem;min-height:2.75rem;margin-top:.25rem;padding:.4rem .6rem;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:.375rem}
+code{font-size:.875em;color:var(--muted);overflow-wrap:anywhere}
+.hint{margin:.25rem 0;color:var(--muted);font-size:.875rem}
+.warn,.err{margin:1rem 0;padding:.5rem 1rem;border:2px solid;border-radius:.5rem}
+.warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.err{background:var(--err-bg);border-color:var(--err-line)}
+.new{font-weight:700}
+.sub{margin-left:1.75rem}
+.actions{display:flex;flex-wrap:wrap;gap:.75rem;margin:1.5rem 0}
+button{min-height:2.75rem;padding:.5rem 1.25rem;font:inherit;cursor:pointer;border:2px solid var(--btn);border-radius:.375rem}
+button.primary{background:var(--btn);color:var(--btn-fg)}
+button.secondary{background:transparent;color:var(--fg);border-color:var(--line)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+@media (max-width:30rem){main{padding:.75rem}.actions button{flex:1 1 100%}.ask,.sub{margin-left:0}}`
 
 func sha256Source(s string) string {
 	sum := sha256.Sum256([]byte(s))
@@ -45,15 +105,25 @@ var pageCSP = strings.Join([]string{
 	"frame-ancestors 'none'",
 }, "; ")
 
+// scopeRow is one scope on the page. Destructive scopes carry the ask-first
+// choice, shown right beside them.
 type scopeRow struct {
-	Name    string
-	Checked bool
-	New     bool
+	Name        string
+	Words       string
+	Checked     bool
+	New         bool
+	Destructive bool
+	AskChecked  bool
+	AskLabel    string
 }
 
-type confirmRow struct {
-	Scope   string
-	Checked bool
+// scopeGroup is one fieldset of scopes: read, change, or sending and deleting.
+type scopeGroup struct {
+	Title       string
+	Hint        string
+	Destructive bool
+	Rows        []scopeRow
+	ShowAck     bool // the typed confirmation, in the destructive group only
 }
 
 type accountRow struct {
@@ -71,9 +141,8 @@ type consentView struct {
 	Registered      string // "manual" for the user's own registration
 	RedirectHost    string
 	LoopbackWarning bool
-	Scopes          []scopeRow
+	Groups          []scopeGroup
 	Unavailable     []string
-	Confirms        []confirmRow
 	Accounts        []accountRow
 	Restricted      bool
 	Rate            int
@@ -83,10 +152,12 @@ type consentView struct {
 	Error           string
 	MaxRate         int
 	MaxBudget       int
+	AskHint         string
 }
 
 var consentTmpl = template.Must(template.New("consent").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer"><title>Approve an app - Mailroom</title><style>{{.CSS}}</style></head>
 <body><main>
 <h1>Approve {{.ClientName}}?</h1>
@@ -99,31 +170,40 @@ var consentTmpl = template.Must(template.New("consent").Parse(`<!doctype html>
 {{if .Reauth}}<p>This app is already connected. The settings below are its current ones; scopes marked <span class="new">new</span> are newly requested.</p>{{end}}
 <form method="post" action="/oauth/consent">
 <input type="hidden" name="request" value="{{.RequestID}}">
-<fieldset><legend>What it may do</legend>
-{{range .Scopes}}<label><input type="checkbox" name="scope" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Name}}{{if .New}} <span class="new">(new)</span>{{end}}</label>{{end}}
-{{if .Unavailable}}<p><small>Not available: {{range $i, $s := .Unavailable}}{{if $i}}, {{end}}{{$s}}{{end}}</small></p>{{end}}
-</fieldset>
-{{if .Confirms}}<fieldset><legend>Ask me first</legend>
-{{range .Confirms}}<label><input type="checkbox" name="confirm" value="{{.Scope}}"{{if .Checked}} checked{{end}}> Hold {{.Scope}} actions until I approve them</label>{{end}}
-</fieldset>{{end}}
-<fieldset><legend>Accounts</legend>
-<label><input type="radio" name="accounts_mode" value="all"{{if not .Restricted}} checked{{end}}> All my accounts</label>
-<label><input type="radio" name="accounts_mode" value="some"{{if .Restricted}} checked{{end}}> Only these:</label>
-{{range .Accounts}}<label><input type="checkbox" name="account" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Name}}</label>{{end}}
+{{range $g := .Groups}}<fieldset><legend>{{$g.Title}}</legend>
+<p class="hint">{{$g.Hint}}</p>
+{{range $g.Rows}}<label><input type="checkbox" name="scope" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Words}} <code>{{.Name}}</code>{{if .New}} <span class="new">(new)</span>{{end}}</label>
+{{if .Destructive}}<label class="ask"><input type="checkbox" name="confirm" value="{{.Name}}"{{if .AskChecked}} checked{{end}}> {{.AskLabel}}</label>
+{{end}}{{end}}
+{{if $g.Destructive}}<p class="hint">{{$.AskHint}}</p>{{end}}
+{{if $g.ShowAck}}<p class="hint" id="ack-help">Only needed if you allow both sending and deleting. An app with both can mail anyone as you and then remove the trace.</p>
+<label for="ack">To allow both, type: <code>send and delete</code></label>
+<input type="text" id="ack" name="ack" autocomplete="off" spellcheck="false" aria-describedby="ack-help">
+{{end}}</fieldset>
+{{end}}
+{{if .Unavailable}}<p class="hint">Asked for, but not available here: {{range $i, $s := .Unavailable}}{{if $i}}, {{end}}<code>{{$s}}</code>{{end}}</p>{{end}}
+<fieldset><legend>Which accounts</legend>
+<label><input type="radio" name="accounts_mode" value="all"{{if not .Restricted}} checked{{end}}> Every account</label>
+<label><input type="radio" name="accounts_mode" value="some"{{if .Restricted}} checked{{end}}> Only these accounts</label>
+{{range .Accounts}}<label class="sub"><input type="checkbox" name="account" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Name}}</label>{{end}}
 </fieldset>
 <fieldset><legend>Limits</legend>
-<label>Calls per minute (1 to {{.MaxRate}}) <input type="number" name="rate" min="1" max="{{.MaxRate}}" value="{{.Rate}}"></label>
-<label>Calls per day (1 to {{.MaxBudget}}) <input type="number" name="budget" min="1" max="{{.MaxBudget}}" value="{{.Budget}}"></label>
-<label><input type="checkbox" name="suspend" value="1"{{if .Suspend}} checked{{end}}> Suspend it automatically if it behaves unusually</label>
+<label for="rate">Calls per minute</label>
+<input type="number" id="rate" name="rate" min="1" max="{{.MaxRate}}" value="{{.Rate}}" aria-describedby="rate-help">
+<p class="hint" id="rate-help">1 to {{.MaxRate}}.</p>
+<label for="budget">Calls per 24 hours</label>
+<input type="number" id="budget" name="budget" min="1" max="{{.MaxBudget}}" value="{{.Budget}}" aria-describedby="budget-help">
+<p class="hint" id="budget-help">1 to {{.MaxBudget}}.</p>
+<label><input type="checkbox" name="suspend" value="1"{{if .Suspend}} checked{{end}}> Suspend the app automatically if it misbehaves</label>
 </fieldset>
-<p>If you allow both sending and deleting, type <code>send and delete</code> to confirm that an app with both can mail anyone as you and then remove the trace.</p>
-<label>Confirmation <input type="text" name="ack" autocomplete="off"></label>
-<p><button type="submit" name="action" value="approve">Approve</button> <button type="submit" name="action" value="deny">Deny</button></p>
+<div class="actions"><button type="submit" class="primary" name="action" value="approve">Approve</button>
+<button type="submit" class="secondary" name="action" value="deny">Deny</button></div>
 </form></main></body></html>`))
 
 var errorTmpl = template.Must(template.New("err").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mailroom</title><style>{{.CSS}}</style></head><body><main><h1>This request cannot continue</h1><p class="err" role="alert">{{.Msg}}</p></main></body></html>`))
+<meta name="color-scheme" content="light dark">
+<title>This request cannot continue - Mailroom</title><style>{{.CSS}}</style></head><body><main><h1>This request cannot continue</h1><p class="err" role="alert">{{.Msg}}</p></main></body></html>`))
 
 func setPageHeaders(w http.ResponseWriter) {
 	h := w.Header()
@@ -219,22 +299,7 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 		v.Rate, v.Budget, v.Suspend = grant.RatePerMin, grant.DailyBudget, grant.SuspendOnAnomaly
 		v.Restricted = grant.AccountIDs != nil
 	}
-	for _, sc := range scopes {
-		row := scopeRow{Name: sc, Checked: true}
-		if hasGrant && !slices.Contains(grant.Scopes, sc) {
-			row.New = true
-		}
-		v.Scopes = append(v.Scopes, row)
-		if slices.Contains(s.policy.Destructive, sc) {
-			// Destructive scopes start as "ask me first", and keep the grant's
-			// own choice on re-authorization unless newly requested.
-			checked := true
-			if hasGrant && slices.Contains(grant.Scopes, sc) {
-				checked = slices.Contains(grant.ConfirmScopes, sc)
-			}
-			v.Confirms = append(v.Confirms, confirmRow{Scope: sc, Checked: checked})
-		}
-	}
+	v.Groups, v.AskHint = s.groupsFor(scopes, grant, hasGrant)
 	for _, a := range accounts {
 		row := accountRow{ID: a.ID.String(), Name: a.Name}
 		if hasGrant && grant.AccountIDs != nil {
@@ -247,6 +312,50 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 		v.Accounts = append(v.Accounts, row)
 	}
 	return v, nil
+}
+
+// groupsFor arranges the offered scopes into the page's groups: read, change,
+// and sending and deleting, each scope in words with its raw name beside it.
+func (s *Server) groupsFor(scopes []string, grant store.APIKey, hasGrant bool) ([]scopeGroup, string) {
+	groups := []*scopeGroup{
+		{Title: "What it may read", Hint: "Looking only; nothing is changed."},
+		{Title: "What it may change", Hint: "Changes your mail, labels and contacts, but never sends or deletes."},
+		{Title: "Sending and deleting", Destructive: true,
+			Hint: "These have the most effect, so each can wait for your approval before it happens."},
+	}
+	offeredDestructive := 0
+	for _, sc := range scopes {
+		row := scopeRow{Name: sc, Words: scopeWords(sc), Checked: true}
+		if hasGrant && !slices.Contains(grant.Scopes, sc) {
+			row.New = true
+		}
+		g := groups[1]
+		switch {
+		case slices.Contains(s.policy.Destructive, sc):
+			g = groups[2]
+			// Destructive scopes start as "ask me first", and keep the grant's
+			// own choice on re-authorization unless newly requested.
+			row.Destructive, row.AskChecked = true, true
+			row.AskLabel = wordsAskFirstFor + scopeWords(sc)
+			if hasGrant && slices.Contains(grant.Scopes, sc) {
+				row.AskChecked = slices.Contains(grant.ConfirmScopes, sc)
+			}
+			offeredDestructive++
+		case strings.HasSuffix(sc, ":read"):
+			g = groups[0]
+		}
+		g.Rows = append(g.Rows, row)
+	}
+	// The typed confirmation is needed, and so shown, only when the page offers
+	// every destructive scope, which is what parseDecision requires of "both".
+	groups[2].ShowAck = len(s.policy.Destructive) > 0 && offeredDestructive == len(s.policy.Destructive)
+	var out []scopeGroup
+	for _, g := range groups {
+		if len(g.Rows) > 0 {
+			out = append(out, *g)
+		}
+	}
+	return out, wordsAskFirstHint
 }
 
 var errRefused = errors.New("oauthserver: decision refused")

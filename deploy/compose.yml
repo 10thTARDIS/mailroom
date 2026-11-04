@@ -742,7 +742,8 @@ services:
       # before turning it on.
       MAILROOM_ALLOW_PRIVATE_ACCOUNT_HOSTS: ${MAILROOM_ALLOW_PRIVATE_ACCOUNT_HOSTS:-}
       # OAuth for AI tools on /mcp (ADR-050). On whenever a public https URL is
-      # known; these two only narrow or widen it. See deploy/.env.example.
+      # known; these only narrow or widen it. See deploy/.env.example.
+      MAILROOM_OAUTH: ${MAILROOM_OAUTH:-}
       MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS: ${MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS:-}
       MAILROOM_OAUTH_DCR: ${MAILROOM_OAUTH_DCR:-}
       MAILROOM_SYNC_INTERVAL: ${MAILROOM_SYNC_INTERVAL:-5m}
