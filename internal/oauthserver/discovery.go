@@ -33,12 +33,11 @@ func (s *Server) ProtectedResource() http.Handler {
 	})
 }
 
-// AuthorizationServer serves RFC 8414 metadata. There is no
-// registration_endpoint: Dynamic Client Registration arrives in a later
-// increment.
+// AuthorizationServer serves RFC 8414 metadata. registration_endpoint is
+// present only when Dynamic Client Registration is on.
 func (s *Server) AuthorizationServer() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeDoc(w, map[string]any{
+		doc := map[string]any{
 			"issuer":                                         s.issuer,
 			"authorization_endpoint":                         s.issuer + "/oauth/authorize",
 			"token_endpoint":                                 s.issuer + "/oauth/token",
@@ -50,6 +49,10 @@ func (s *Server) AuthorizationServer() http.Handler {
 			"scopes_supported":                               s.policy.Scopes,
 			"client_id_metadata_document_supported":          true,
 			"authorization_response_iss_parameter_supported": true,
-		})
+		}
+		if s.dcr {
+			doc["registration_endpoint"] = s.issuer + "/oauth/register"
+		}
+		writeDoc(w, doc)
 	})
 }

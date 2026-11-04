@@ -46,6 +46,13 @@ How an app is identified is shown at approval and in Settings:
 - An app that publishes a **client metadata document** at its own address is
   shown as "from" that host; Mailroom fetched the document, so the host is
   verified.
+- An app that **registers itself** (Dynamic Client Registration, on by default) is
+  shown with "name given by the app, not verified": anyone can register under
+  any name, so read the name, the return address and the permissions before you
+  approve. Mailroom keeps nothing else such an app sends (no logo, no link), and
+  deletes a registration nobody approved within 24 hours. An operator can turn
+  this off with `MAILROOM_OAUTH_DCR=off`; the app then has to publish a client
+  metadata document or be registered by you.
 - An app **you register yourself** (Settings → API keys, "Apps you register
   yourself") is for a tool that cannot identify itself: give Mailroom a name and
   the addresses the tool returns to, and paste the client ID it shows into the
@@ -55,10 +62,28 @@ Access tokens last an hour and refresh tokens rotate; an app unused for 30 days
 has to be approved again. Return addresses must be `https`, or `http` to
 `localhost`, `127.0.0.1` or `[::1]`.
 
-Not built yet: apps that register themselves automatically (Dynamic Client
-Registration) and asking for more permissions later from inside a connected app
-(step-up). An app that needs either connects with an API key for now. An
-operator can turn the whole OAuth surface off with `MAILROOM_OAUTH=off`; keys
+**Asking for more permissions later.** If a connected app calls a tool its
+approval does not cover, Mailroom answers `403` with `WWW-Authenticate: Bearer
+error="insufficient_scope", scope="…", resource_metadata="…"`, naming every
+permission that tool needs. An app that supports this sends you back to the
+approval screen, which shows what it already has and the new permissions added;
+nothing is added unless you approve it. An app that does not support it sees
+the tool's usual "not available" error. Only a missing permission earns this
+answer: an account restriction, a rate or daily limit, a suspension, or bad
+arguments keep their usual error. An API key is not asked to step up; it has
+the permissions it was created with.
+
+**Registration limits.** Dynamic Client Registration is open to anyone who can
+reach your Mailroom, so it is limited: at most 50 registrations a day and a
+short burst limit for each address, and at most 10,000 registrations nobody has
+approved yet (past that, new ones are refused, never swapped for old ones). An
+IPv6 address counts as its whole /64, and the server as a whole registers at
+most 30 apps a minute.
+The limit is by the address Mailroom sees, so behind a reverse proxy everyone
+shares one allowance and a stranger can use it up for all; if that matters, set
+`MAILROOM_OAUTH_DCR=off`. An app whose unused registration was cleaned up simply registers again.
+
+An operator can turn the whole OAuth surface off with `MAILROOM_OAUTH=off`; keys
 are unaffected, and approved apps work again when it is turned back on.
 
 ### Clients that take a URL and headers

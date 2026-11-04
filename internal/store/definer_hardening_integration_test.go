@@ -159,8 +159,13 @@ func TestEveryDefinerPinsPgTempLast(t *testing.T) {
 	// sweep_oauth, is the fourth definer that deletes across users: it takes a
 	// clock, a grace period and a limit, deletes only expired or long-revoked
 	// tokens, codes, requests and cached documents, and returns a count per kind.
-	if seen != 25 {
-		t.Errorf("schema app has %d SECURITY DEFINER functions, want 25. If a definer was "+
+	// Migration 00088 adds the 26th, oauth_client_register: the only way a Dynamic
+	// Client Registration row is written. The endpoint is unauthenticated, so the
+	// definer mints the id, enforces the cap on registrations no live grant uses
+	// (serialised by an advisory lock), and returns the id and time and nothing
+	// else; sweep_oauth also deletes expired unused registrations.
+	if seen != 26 {
+		t.Errorf("schema app has %d SECURITY DEFINER functions, want 26. If a definer was "+
 			"added deliberately, bump this number in the same commit that argues for the new "+
 			"cross-user surface", seen)
 	}

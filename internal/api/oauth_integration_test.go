@@ -47,7 +47,11 @@ type oaHarness struct {
 
 const oaRedirect = "https://app.example.com/cb"
 
-func newOAHarness(t *testing.T) *oaHarness {
+func newOAHarness(t *testing.T) *oaHarness { return newOAHarnessWith(t, nil) }
+
+// newOAHarnessWith is newOAHarness with the authorization server's Config adjusted
+// by tweak (Dynamic Client Registration on, a test clock, a low cap).
+func newOAHarnessWith(t *testing.T, tweak func(*oauthserver.Config)) *oaHarness {
 	t.Helper()
 	h := &oaHarness{agentHarness: newAgentHarness(t)}
 	h.a, h.b = seedTwo(t, h.super)
@@ -68,12 +72,17 @@ func newOAHarness(t *testing.T) *oaHarness {
 	srv := httptest.NewUnstartedServer(nil)
 	h.issuer = "http://" + srv.Listener.Addr().String()
 	var err error
-	h.os, err = oauthserver.New(oauthserver.Config{Issuer: h.issuer, Store: h.store, Policy: OAuthPolicy(),
+	cfg := oauthserver.Config{Issuer: h.issuer, Store: h.store, Policy: OAuthPolicy(),
 		Approve: ApproveOAuthGrant, Alert: h.api.AlertOAuthRefreshReuse, CIMD: doer,
-		CIMDTimeout: 300 * time.Millisecond, Limiter: auth.NewFailureLimiter(1000, time.Millisecond)})
+		CIMDTimeout: 300 * time.Millisecond, Limiter: auth.NewFailureLimiter(1000, time.Millisecond)}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	h.os, err = oauthserver.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.api.SetMCPResourceMetadata(h.os.MetadataURL())
 	apiH := h.api.Handler()
 	session := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +114,7 @@ func newOAHarness(t *testing.T) *oaHarness {
 	mux.Handle("POST /oauth/consent", session(h.os.Consent()))
 	mux.Handle("POST /oauth/token", h.os.Token())
 	mux.Handle("POST /oauth/revoke", h.os.Revoke())
+	mux.Handle("POST /oauth/register", h.os.Register())
 	mux.Handle("/mcp", MCPChallengeWith(gate.Wrap(apiH, apiSession), auth.DefaultSessionCookieName, h.os.Challenge()))
 	mux.Handle("/jmap", gate.Wrap(apiH, apiSession))
 	mux.Handle("/jmap/session", gate.Wrap(apiH, apiSession))
@@ -344,7 +354,7 @@ func TestOAuthDiscoveryAndChallenge(t *testing.T) {
 		t.Errorf("flags: %v", m)
 	}
 	if _, has := m["registration_endpoint"]; has {
-		t.Error("registration_endpoint advertised before DCR exists")
+		t.Error("registration_endpoint advertised while Dynamic Client Registration is off")
 	}
 	if !strings.Contains(jsonOf(m["scopes_supported"]), "mail:delete") {
 		t.Errorf("AS scopes_supported is not the closed set: %v", m["scopes_supported"])

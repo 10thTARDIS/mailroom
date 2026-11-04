@@ -2690,6 +2690,10 @@ CREATE TABLE app.api_keys (
 -- being authorized again, so the uniqueness is over live grants only.
 CREATE UNIQUE INDEX api_keys_oauth_client ON app.api_keys (user_id, oauth_client_id)
   WHERE kind = 'oauth' AND revoked_at IS NULL;
+-- Definer-only lookup ("does a live grant use this client?"), so it does not
+-- lead with user_id: no application query plan reaches it.
+CREATE INDEX api_keys_by_oauth_client ON app.api_keys (oauth_client_id)
+  WHERE kind = 'oauth' AND revoked_at IS NULL;
 ALTER TABLE app.api_keys ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.api_keys FORCE ROW LEVEL SECURITY;
 CREATE POLICY api_keys_isolation ON app.api_keys
@@ -2837,6 +2841,14 @@ GRANT UPDATE (count) ON app.api_key_suppressed_refusals TO mailroom_app;
 CREATE POLICY api_keys_token_lookup ON app.api_keys
   FOR SELECT TO mailroom_owner
   USING (revoked_at IS NULL AND suspended_at IS NULL);
+-- The registration definers (migration 00088) ask whether a live OAuth grant uses
+-- a registered client. A policy exposes ROWS, so this one is limited to exactly
+-- the rows that question needs (unrevoked grants of registered clients); which
+-- columns leave the database is decided by the definers, which return a count
+-- and a time and nothing of a grant.
+CREATE POLICY api_keys_oauth_client_use ON app.api_keys
+  FOR SELECT TO mailroom_owner
+  USING (kind = 'oauth' AND revoked_at IS NULL AND oauth_client_kind = 'registered');
 
 CREATE OR REPLACE FUNCTION app.api_key_for_token(p_hash bytea)
 RETURNS TABLE (user_id app.ulid, key_id app.ulid)
@@ -2987,9 +2999,9 @@ CREATE POLICY oauth_codes_owner ON app.oauth_codes
   USING (true) WITH CHECK (true);
 GRANT SELECT, INSERT ON app.oauth_codes TO mailroom_app;
 
--- Registered OAuth clients (ADR-050 section 4): a user's MANUAL clients now,
--- and Dynamic Client Registration entries (kind 'registered', no owner) in a
--- later increment. One table so a client_id resolves through one function. A
+-- Registered OAuth clients (ADR-050 section 4): a user's MANUAL clients and
+-- Dynamic Client Registration entries (kind 'registered', no owner). One table
+-- so a client_id resolves through one function. A
 -- manual client belongs to its creator: the app role sees and manages only its
 -- own manual rows (policy below); registered rows have no policy for the app
 -- role at all, so they are reachable only through the definers.
@@ -3139,6 +3151,40 @@ REVOKE ALL ON FUNCTION app.oauth_client_create(text, text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.oauth_client_create(text, text[]) TO mailroom_app;
 ALTER FUNCTION app.oauth_client_create(text, text[]) OWNER TO mailroom_owner;
 
+-- Register one DYNAMIC client (RFC 7591), unauthenticated by nature, so bounded:
+-- past p_max_unused registrations that no live grant uses, none is created (and
+-- none is evicted). The id is minted here, under an advisory lock so two
+-- concurrent registrations cannot both pass the count (migration 00088).
+CREATE OR REPLACE FUNCTION app.oauth_client_register(p_name text, p_redirect_uris text[], p_max_unused int)
+RETURNS TABLE (client_id text, registered_at timestamptz)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = app, pg_temp AS $$
+DECLARE
+  v_unused bigint;
+  v_oldest timestamptz;
+  v_id     text := 'rc_' || replace(gen_random_uuid()::text, '-', '');
+  v_at     timestamptz;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('oauth_client_register', 0));
+  SELECT count(*), min(c.created_at) INTO v_unused, v_oldest
+    FROM app.oauth_clients c
+   WHERE c.kind = 'registered'
+     AND NOT EXISTS (SELECT 1 FROM app.api_keys k
+                      WHERE k.kind = 'oauth' AND k.revoked_at IS NULL AND k.oauth_client_id = c.id);
+  IF v_unused >= p_max_unused THEN
+    -- Refused: no client_id, and the earliest time the sweep could free a place.
+    RETURN QUERY SELECT NULL::text, v_oldest + interval '24 hours';
+    RETURN;
+  END IF;
+  INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris)
+  VALUES (v_id, 'registered', NULL, p_name, p_redirect_uris)
+  RETURNING oauth_clients.created_at INTO v_at;
+  RETURN QUERY SELECT v_id, v_at;
+END
+$$;
+REVOKE ALL ON FUNCTION app.oauth_client_register(text, text[], int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.oauth_client_register(text, text[], int) TO mailroom_app;
+ALTER FUNCTION app.oauth_client_register(text, text[], int) OWNER TO mailroom_owner;
+
 -- Redeem an authorization code at the token endpoint, which has no user. The
 -- row is locked and marked used in one step, so two concurrent redemptions
 -- cannot both succeed. `replay` is true when the code was ALREADY used (the
@@ -3242,6 +3288,7 @@ DECLARE
   v_codes    bigint;
   v_requests bigint;
   v_cimd     bigint;
+  v_clients  bigint;
 BEGIN
   WITH gone AS (
     DELETE FROM app.oauth_tokens t
@@ -3275,8 +3322,22 @@ BEGIN
     RETURNING 1)
   SELECT count(*) INTO v_cimd FROM gone;
 
+  -- A registration (unauthenticated, ADR-050 section 4) that no live grant used
+  -- within 24 hours. One a live grant names is kept for as long as it lives.
+  WITH gone AS (
+    DELETE FROM app.oauth_clients c
+     WHERE c.id IN (SELECT x.id FROM app.oauth_clients x
+                     WHERE x.kind = 'registered'
+                       AND x.created_at < p_now - interval '24 hours'
+                       AND NOT EXISTS (SELECT 1 FROM app.api_keys k
+                                        WHERE k.kind = 'oauth' AND k.revoked_at IS NULL AND k.oauth_client_id = x.id)
+                     LIMIT p_limit FOR UPDATE SKIP LOCKED)
+    RETURNING 1)
+  SELECT count(*) INTO v_clients FROM gone;
+
   RETURN QUERY VALUES ('tokens'::text, v_tokens), ('codes'::text, v_codes),
-                      ('requests'::text, v_requests), ('cimd'::text, v_cimd);
+                      ('requests'::text, v_requests), ('cimd'::text, v_cimd),
+                      ('clients'::text, v_clients);
 END
 $$;
 REVOKE ALL ON FUNCTION app.sweep_oauth(timestamptz, interval, int) FROM PUBLIC;

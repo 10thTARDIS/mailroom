@@ -150,10 +150,12 @@ describe("OAuth comes first, in the document's words (ADR-050)", () => {
   const html = (token: string | null): string =>
     renderToStaticMarkup(createElement(SetupGuide, { origin: "https://mail.example.com", token, scopes: null }));
 
-  it("the document says it, and says what is not built yet", () => {
+  it("the document says it, and describes self-registration and step-up as built", () => {
+    const flat = mcpDoc.replace(/\s+/g, " ");
     expect(mcpDoc.replace(/`/g, "").replace(/\s+/g, " ").includes(sentence)).toBe(true);
-    expect(mcpDoc.replace(/\s+/g, " ").includes("Not built yet: apps that register themselves automatically (Dynamic Client Registration)")).toBe(true);
-    expect(mcpDoc.includes("step-up")).toBe(true);
+    expect(flat.includes("Dynamic Client Registration, on by default")).toBe(true);
+    expect(flat.includes('error="insufficient_scope"')).toBe(true);
+    expect(flat.includes("Not built yet")).toBe(false);
   });
 
   it("the guide opens with it, ahead of the key instructions, and keeps keys as the alternative", () => {

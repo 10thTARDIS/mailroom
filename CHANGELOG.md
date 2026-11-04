@@ -9,6 +9,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Connecting AI tools with OAuth
+
+- **Apps that register themselves.** A tool that cannot publish its identity at a web address can now register with Mailroom on its own, so you can connect it by its address alone. You see it on the approval screen with the name it gave itself, marked "name given by the app, not verified", because anyone can pick any name; read the name, the return address and the permissions before you approve. Mailroom keeps only the name and the return addresses it sends, never a logo or a link, and an app nobody approved within a day is forgotten.
+- **Protected against abuse.** Registration is open to anyone who can reach your Mailroom, so each address may register at most 50 apps a day and only a few at a time, and Mailroom holds at most 10,000 registrations nobody has approved yet; past that it says to try later instead of discarding older ones. Behind a reverse proxy everyone shares the proxy's allowance, so a stranger could use it up for all of you; if that matters, turn registration off.
+- **Asking for more later.** If an approved app tries something its approval does not cover, Mailroom now tells it exactly which permissions that needs, and an app that supports this sends you back to the approval screen with what it has and the new permissions shown together. Nothing is added unless you approve it. Apps that do not support this, and API keys, see the same "not available" message as before; limits, restrictions and suspensions are never mistaken for a missing permission.
+- **A switch for registration.** `MAILROOM_OAUTH_DCR=off` turns self-registration off and removes it from the addresses Mailroom advertises; connecting by address, by a key, or with an app you registered yourself is unaffected.
+
+### Upgrading
+
+- Nothing is needed. OAuth and self-registration stay on by default; set `MAILROOM_OAUTH=off` or `MAILROOM_OAUTH_DCR=off` only if you want either off. The database gains a small migration, applied automatically.
+
 ## [1.100.0-beta.2] — 2026-11-04
 
 **The second beta of OAuth for AI tools adds the screens you use.** The approval screen now explains each permission in plain words and works in dark mode and on a phone. Approved apps appear under Settings → API keys as Connected apps, where you can manage them like keys or end a single device's connection. You can also register an app yourself, and turn OAuth off entirely with one setting.

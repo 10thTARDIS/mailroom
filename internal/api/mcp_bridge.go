@@ -3,15 +3,19 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 
 	"mailroom/internal/auth"
 	"mailroom/internal/mcp"
+	"mailroom/internal/store"
 )
 
 // THE MCP ENDPOINT'S SIDE OF THE API (#49, ADR-044).
@@ -106,19 +110,36 @@ func (b mcpBridge) KeyMayCall(ctx context.Context, uses ...mcp.Use) bool {
 // no key lacks everything. It words the answer to a hidden tool called
 // anyway (#872); it is never consulted to allow a call.
 func (b mcpBridge) KeyLacks(ctx context.Context, uses ...mcp.Use) []string {
+	needed, why := b.usesNeed(ctx, uses...)
+	if why != "" {
+		return []string{why}
+	}
+	p, _ := keyContext(ctx) // non-nil: usesNeed fails closed without a key
+	out := missingScopes(p.key.Scopes, needed)
+	sort.Strings(out)
+	return out
+}
+
+// usesNeed is every scope the uses need, sorted and without repeats, computed
+// from the same tables the gate reads (keyPolicies, emailUpdateFieldScopes),
+// never from request text. why is "" or, when no scope would make the uses
+// possible (a method closed to keys, an account restriction the method cannot
+// keep to, an unclassified field), mcp.LacksRestriction / mcp.LacksUnavailable
+// and needed is nil. Fails closed: a context with no key is unavailable.
+func (b mcpBridge) usesNeed(ctx context.Context, uses ...mcp.Use) (needed []string, why string) {
 	p, isKey := keyContext(ctx)
 	userID, ok := contextUserID(ctx)
 	if !isKey || !ok {
-		return []string{mcp.LacksUnavailable}
+		return nil, mcp.LacksUnavailable
 	}
-	missing := map[string]bool{}
+	set := map[string]bool{}
 	for _, u := range uses {
 		pol, known := keyPolicies[u.Method]
 		if !known || !pol.keyReachable() {
-			return []string{mcp.LacksUnavailable}
+			return nil, mcp.LacksUnavailable
 		}
 		if p.restricted() && !pol.accountRestricted {
-			return []string{mcp.LacksRestriction}
+			return nil, mcp.LacksRestriction
 		}
 		var scopes []string
 		switch {
@@ -127,12 +148,12 @@ func (b mcpBridge) KeyLacks(ctx context.Context, uses ...mcp.Use) []string {
 			// its patch sets; a field the table does not classify is refused,
 			// as emailUpdateScopes refuses it.
 			if u.Method != "Email/set" {
-				return []string{mcp.LacksUnavailable}
+				return nil, mcp.LacksUnavailable
 			}
 			for _, f := range u.EmailUpdate {
 				s, classified := emailUpdateFieldScopes[f]
 				if !classified {
-					return []string{mcp.LacksUnavailable}
+					return nil, mcp.LacksUnavailable
 				}
 				scopes = append(scopes, s)
 			}
@@ -141,7 +162,7 @@ func (b mcpBridge) KeyLacks(ctx context.Context, uses ...mcp.Use) []string {
 			// Email/set update is classified by field (above), never here: its
 			// needs function would parse the patch against the database.
 			if u.Method == "Email/set" && hasUpdate(u.Args) {
-				return []string{mcp.LacksUnavailable}
+				return nil, mcp.LacksUnavailable
 			}
 			args := u.Args
 			if len(args) == 0 {
@@ -149,22 +170,22 @@ func (b mcpBridge) KeyLacks(ctx context.Context, uses ...mcp.Use) []string {
 			}
 			n, mErr := pol.needs(ctx, b.a, userID, p, args)
 			if mErr != nil {
-				return []string{mcp.LacksUnavailable}
+				return nil, mcp.LacksUnavailable
 			}
 			scopes = n.scopes
 		default:
 			scopes = pol.scopes
 		}
-		for _, s := range missingScopes(p.key.Scopes, scopes) {
-			missing[s] = true
+		for _, s := range scopes {
+			set[s] = true
 		}
 	}
-	out := make([]string, 0, len(missing))
-	for s := range missing {
-		out = append(out, s)
+	needed = make([]string, 0, len(set))
+	for s := range set {
+		needed = append(needed, s)
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(needed)
+	return needed, ""
 }
 
 // SendMode is how the key in ctx sends: not at all without mail:send (and
@@ -199,8 +220,115 @@ func (a *API) mcpHandler() http.Handler {
 				http.StatusForbidden)
 			return
 		}
+		if p, _ := keyContext(r.Context()); p != nil && p.key.Kind == store.KeyKindOAuth && a.mcpMetadata != "" {
+			a.serveWithStepUp(inner, w, r, p)
+			return
+		}
 		inner.ServeHTTP(w, r)
 	})
+}
+
+// SetMCPResourceMetadata turns on the OAuth step-up challenge (ADR-050
+// section 8): the protected-resource metadata URL its WWW-Authenticate names.
+// Call it before serving, when the OAuth authorization server is on.
+func (a *API) SetMCPResourceMetadata(url string) { a.mcpMetadata = url }
+
+// bufferedResponse holds a response until the step-up check has seen whether
+// it stands. /mcp answers in JSON mode (one write per exchange), so buffering
+// holds nothing back that a client could have used earlier.
+type bufferedResponse struct {
+	h      http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (b *bufferedResponse) Header() http.Header         { return b.h }
+func (b *bufferedResponse) WriteHeader(status int)      { b.status = status }
+func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
+
+func (b *bufferedResponse) flushTo(w http.ResponseWriter) {
+	for k, v := range b.h {
+		w.Header()[k] = v
+	}
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	w.WriteHeader(b.status)
+	_, _ = w.Write(b.body.Bytes())
+}
+
+// serveWithStepUp serves an OAuth-authenticated /mcp request. A tools/call
+// that the key gate refused SOLELY for a scope the grant lacks is answered 403
+// with the RFC 6750 section 3.1 insufficient_scope challenge, so a client that
+// supports step-up can send the user back to consent (ADR-050 section 8). The
+// call ran through the dispatcher like any other, so its refusal is audited and
+// charged exactly as for a key; only the answer differs.
+//
+// The challenge names EVERY scope the tool's declared uses need (the MCP
+// authorization specification asks for the whole operation, not the missing
+// piece), computed by usesNeed from the same tables KeyMayCall reads, never
+// from the request text; the request supplies only the tool NAME, a lookup key
+// into the catalog. Anything else that stops a call (an account restriction,
+// rate, budget, a hold, a suspension, bad arguments) keeps today's tool error,
+// and so does a request this cannot read.
+func (a *API) serveWithStepUp(inner http.Handler, w http.ResponseWriter, r *http.Request, p *keyPrincipal) {
+	if r.Method != http.MethodPost {
+		inner.ServeHTTP(w, r)
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBytes))
+	if err != nil {
+		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var msg struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(body, &msg) != nil || msg.Method != "tools/call" {
+		inner.ServeHTTP(w, r)
+		return
+	}
+	rec := &bufferedResponse{h: http.Header{}}
+	inner.ServeHTTP(rec, r)
+	if p.scopeRefused.Load() {
+		if scopes := a.stepUpScopes(r.Context(), p, msg.Params.Name); len(scopes) > 0 {
+			w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="`+strings.Join(scopes, " ")+
+				`", resource_metadata="`+a.mcpMetadata+`"`)
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "forbidden: this tool needs more permission than the connection has", http.StatusForbidden)
+			return
+		}
+	}
+	rec.flushTo(w)
+}
+
+// stepUpScopes is the scopes a refused tool call asks the client to request, or
+// nil when no step-up applies: an unknown tool, a tool no scope could open, or
+// a grant that already holds everything the tool needs (so the refusal was not
+// one a new scope would cure).
+func (a *API) stepUpScopes(ctx context.Context, p *keyPrincipal, tool string) []string {
+	for _, t := range mcp.Catalog() {
+		if t.Name != tool {
+			continue
+		}
+		needed, why := mcpBridge{a}.usesNeed(ctx, t.Uses...)
+		if why != "" {
+			return nil
+		}
+		// The union of what the tool declares and what the gate itself found
+		// missing (a scope computed from the call's contents). Both are server
+		// side; no request text is in either.
+		all := slices.Compact(slices.Sorted(slices.Values(append(needed, p.missingScopes()...))))
+		if len(missingScopes(p.key.Scopes, all)) == 0 {
+			return nil
+		}
+		return all
+	}
+	return nil
 }
 
 // MCPChallenge answers an MCP request that carries no credential at all —

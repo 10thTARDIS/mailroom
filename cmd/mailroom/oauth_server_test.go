@@ -4,6 +4,7 @@ package main
 
 import (
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func gateOAuthServer(t *testing.T, cfg *config.Config) *oauthserver.Server {
 		return nil
 	}
 	s, err := oauthserver.New(oauthserver.Config{Issuer: issuer, Store: new(store.Store), Policy: api.OAuthPolicy(),
-		Approve: api.ApproveOAuthGrant})
+		Approve: api.ApproveOAuthGrant, DCR: cfg.OAuthDCR})
 	if err != nil {
 		t.Fatalf("oauthserver.New: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestOAuthSurfaceOffWithoutPublicURL(t *testing.T) {
 	}
 	h, _ := gateHandler(t, off)
 	for _, p := range []probe{get("/.well-known/oauth-authorization-server"), get("/.well-known/oauth-protected-resource/mcp"),
-		get("/.well-known/oauth-protected-resource"), post("/oauth/token"), post("/oauth/revoke"), get("/oauth/authorize?client_id=x"), post("/oauth/consent")} {
+		get("/.well-known/oauth-protected-resource"), post("/oauth/token"), post("/oauth/revoke"), get("/oauth/authorize?client_id=x"), post("/oauth/consent"), post("/oauth/register")} {
 		if rec := do(t, h, p); rec.Code != 404 {
 			t.Errorf("OAuth off: %s %s = %d, want 404", p.method, p.url, rec.Code)
 		}
@@ -91,6 +92,7 @@ func TestOAuthOffSwitch(t *testing.T) {
 	// anonymous probe and the OAuth handlers, so a 404 is the OAuth surface's.
 	on := devAuthTestConfig()
 	on.PublicURL = "https://mail.example.com"
+	on.OAuthDCR = true
 	off := *on
 	off.OAuthDisabled = true
 	if off.OAuthIssuer() != "" || on.OAuthIssuer() == "" {
@@ -120,7 +122,7 @@ func TestOAuthOffSwitch(t *testing.T) {
 	access := strings.Replace(token, auth.APITokenPrefix, auth.OAuthAccessPrefix, 1)
 	probeAll := []probe{get("/.well-known/oauth-authorization-server"), get("/.well-known/oauth-protected-resource/mcp"),
 		get("/.well-known/oauth-protected-resource"), post("/oauth/token"), post("/oauth/revoke"),
-		get("/oauth/authorize?client_id=x"), post("/oauth/consent")}
+		get("/oauth/authorize?client_id=x"), post("/oauth/consent"), post("/oauth/register")}
 	hOff, _ := gateHandler(t, &off)
 	hOn, _ := gateHandler(t, on)
 	for _, p := range probeAll {
@@ -145,5 +147,37 @@ func TestOAuthOffSwitch(t *testing.T) {
 	hOn.ServeHTTP(rec, req)
 	if rec.Code != 401 || !strings.Contains(rec.Header().Get("WWW-Authenticate"), "resource_metadata=") {
 		t.Errorf("on: /mcp refusal = %d %q, want the resource metadata", rec.Code, rec.Header().Get("WWW-Authenticate"))
+	}
+}
+
+// MAILROOM_OAUTH_DCR=off removes the registration endpoint and its metadata
+// entry while the rest of the OAuth surface stays; on, both are present. The
+// default (unset) is on.
+func TestOAuthDCRSwitch(t *testing.T) {
+	cfg := devAuthTestConfig()
+	cfg.PublicURL = "https://mail.example.com"
+	on, off := *cfg, *cfg
+	on.OAuthDCR, off.OAuthDCR = true, false
+	hOn, _ := gateHandler(t, &on)
+	hOff, _ := gateHandler(t, &off)
+
+	if rec := do(t, hOff, post("/oauth/register")); rec.Code != 404 {
+		t.Errorf("DCR off: POST /oauth/register = %d, want 404", rec.Code)
+	}
+	if rec := do(t, hOn, post("/oauth/register")); rec.Code == 404 {
+		t.Errorf("DCR on: POST /oauth/register = 404, the control endpoint is missing")
+	}
+	disc := func(h http.Handler) string {
+		return do(t, h, get("/.well-known/oauth-authorization-server")).Body.String()
+	}
+	if body := disc(hOff); strings.Contains(body, "registration_endpoint") || !strings.Contains(body, "token_endpoint") {
+		t.Errorf("DCR off: metadata = %s", body)
+	}
+	if body := disc(hOn); !strings.Contains(body, `"registration_endpoint":"https://mail.example.com/oauth/register"`) {
+		t.Errorf("DCR on: metadata = %s", body)
+	}
+	// The rest of the surface is unaffected by the switch.
+	if rec := do(t, hOff, post("/oauth/token")); rec.Code != 400 {
+		t.Errorf("DCR off: /oauth/token = %d, want 400", rec.Code)
 	}
 }
