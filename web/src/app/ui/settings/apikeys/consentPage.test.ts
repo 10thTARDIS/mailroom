@@ -26,17 +26,19 @@ import errorPage from "../../../../../../internal/oauthserver/testdata/error.htm
 import full from "../../../../../../internal/oauthserver/testdata/consent-full.html?raw";
 import readonly from "../../../../../../internal/oauthserver/testdata/consent-readonly.html?raw";
 
+// The page is parsed by the DOM's own parser and adopted whole (no innerHTML:
+// security_test.go forbids it everywhere under web/src, and a page is not worth
+// an exception). The document element is replaced, so lang, title and head come
+// with it, which is what the page-level rules need to see.
 function load(html: string): void {
-  const lang = /<html[^>]*\blang="([^"]*)"/.exec(html)?.[1];
-  if (lang) document.documentElement.setAttribute("lang", lang);
-  else document.documentElement.removeAttribute("lang");
-  const inner = html.replace(/^\s*<!doctype html>\s*<html[^>]*>/i, "").replace(/<\/html>\s*$/i, "");
-  document.documentElement.innerHTML = inner;
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  document.documentElement.replaceWith(document.importNode(parsed.documentElement, true));
 }
 
 afterEach(() => {
-  document.documentElement.removeAttribute("lang");
-  document.documentElement.innerHTML = "<head></head><body></body>";
+  const html = document.createElement("html");
+  html.append(document.createElement("head"), document.createElement("body"));
+  document.documentElement.replaceWith(html);
 });
 
 /** The two page-level facts axe cannot settle without layout. */
