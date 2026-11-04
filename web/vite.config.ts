@@ -41,8 +41,10 @@ export default defineConfig({
     // source, and the server's rendered pages in internal/oauthserver/testdata,
     // for the twins that must not drift). Under the jsdom environment vite
     // refuses a file outside the project root unless it is allowed, as
-    // "Denied ID"; the repository root is what these tests need.
-    fs: { allow: [".."] },
+    // "Denied ID". Only those directories are allowed, not the repository
+    // root, so the dev server cannot serve anything else outside web/ (setting
+    // `allow` replaces vite's default, hence "." for web/ itself).
+    fs: { allow: [".", "../docs", "../internal/oauthserver/testdata", "../cmd/mailroom"] },
     proxy: {
       "/jmap": { target, changeOrigin: false },
       "/.well-known/jmap": { target, changeOrigin: false },
