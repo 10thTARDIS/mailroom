@@ -37,6 +37,12 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
+    // ⚠ A TEST READS FILES OUTSIDE web/ (`?raw` imports of docs/mcp.md, Go
+    // source, and the server's rendered pages in internal/oauthserver/testdata,
+    // for the twins that must not drift). Under the jsdom environment vite
+    // refuses a file outside the project root unless it is allowed, as
+    // "Denied ID"; the repository root is what these tests need.
+    fs: { allow: [".."] },
     proxy: {
       "/jmap": { target, changeOrigin: false },
       "/.well-known/jmap": { target, changeOrigin: false },

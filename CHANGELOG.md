@@ -9,6 +9,25 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Connecting AI tools with OAuth
+
+- **A clearer approval screen.** Each permission an app asks for is now described in plain words, the same words the key dialog uses, with the technical name beside it. They are grouped as what the app may read, what it may change, and sending and deleting, and each of sending and deleting has its "ask me first" choice right beside it. The typed confirmation is explained as only needed if you allow both sending and deleting.
+- **Easier to read and to use.** The approval screen follows your light or dark setting, fits a phone screen, shows where the keyboard focus is, labels every control, and announces a mistake as soon as it appears. It still needs no script and still cannot be shown inside another site's page.
+- **Connected apps in Settings.** Under API keys, apps you have approved are listed apart from your keys, each with its name and how it was identified ("from" a checked address, "name given by the app, not verified", or "registered by you"), where its approval returns to, its permissions, limits, when it was created and last used, and whether it is suspended or revoked. An app has no key to show or copy.
+- **Manage an app like a key.** Open a connected app to change its limits, suspend or reactivate it, read its activity, or revoke it. Revoking says that every connection of the app ends immediately.
+- **End one connection.** An app's detail lists its connections (one per sign-in, such as one device) with when each was made, last refreshed and expires, and "End this connection" signs just that one out while the app stays approved.
+- **Register an app yourself.** For a tool that cannot identify itself, give Mailroom a name and the addresses the tool returns to, then paste the client ID it shows into the tool. The addresses are checked as you type, the ID is shown again whenever you need it, and you can delete an app you registered.
+- **OAuth first in the setup guide.** The "Connect an AI tool" guide now starts with "if your app supports OAuth, give it your Mailroom's /mcp address and approve it when your browser opens", and keeps API keys as the alternative.
+- **A switch to turn OAuth off.** `MAILROOM_OAUTH=off` turns the whole OAuth side off, even when Mailroom knows its public address: the OAuth addresses stop answering, `/mcp` asks for a key only, and tokens already given to apps stop working. Connected apps stay listed and work again when you turn it back on. Mailroom says at start-up that it is off and why.
+
+### Not yet
+
+- Apps that register themselves automatically, and apps asking for more permissions later from inside the app.
+
+### Upgrading
+
+- Nothing is needed. OAuth stays on by default; set `MAILROOM_OAUTH=off` only if you want it off.
+
 ## [1.100.0-beta.1] — 2026-11-04
 
 **The first beta of OAuth for AI tools: an AI app that supports OAuth can connect to Mailroom by its address alone, and you approve it in your browser instead of creating and pasting a key.** This beta is the server side. The approval screen is a plain first version, and the Settings screens for connected apps come in the next beta. An approved app gets exactly what an API key with the same settings would get, and nothing more.

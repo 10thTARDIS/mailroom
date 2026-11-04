@@ -39,3 +39,12 @@ declare module "*.go?raw" {
   const source: string;
   export default source;
 }
+
+// And for a PAGE THE SERVER RENDERS (ADR-050): settings/apikeys/consentPage.test.ts
+// runs axe over the OAuth consent and error pages exactly as Go renders them
+// (internal/oauthserver/testdata, which the Go tests keep byte-identical to the
+// handler's output), because those pages are not part of this app.
+declare module "*.html?raw" {
+  const html: string;
+  export default html;
+}

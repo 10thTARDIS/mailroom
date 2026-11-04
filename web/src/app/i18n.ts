@@ -3669,7 +3669,7 @@ const en = {
   "apiKeys.setup.copyConfig": "Copy",
   "apiKeys.setup.examplesHeading": "Worked examples",
   "apiKeys.setup.examplesNote": "These two are examples, not requirements: any MCP client works the same way.",
-  "apiKeys.setup.desktopExample": "A desktop chat client that runs local servers from a JSON config (for example, Claude Desktop): use the bridge block above as the entry under mcpServers, restart the client, and the Mailroom tools appear in its tool list. Clients whose built-in connectors expect OAuth cannot use a key directly; use the bridge.",
+  "apiKeys.setup.desktopExample": "A desktop chat client that runs local servers from a JSON config (for example, Claude Desktop): use the bridge block above as the entry under mcpServers, restart the client, and the Mailroom tools appear in its tool list. Clients whose built-in connectors expect OAuth can connect by URL alone, as described above.",
   "apiKeys.setup.localExample": "A local LLM tool with native remote-MCP support (for example, Hermes): configure a remote server with the URL and the Authorization header. The exact keys differ from tool to tool; the shape is usually:",
   "apiKeys.setup.localLabel": "Remote server configuration (YAML)",
   "apiKeys.setup.localNote": "Check your tool's own documentation for its spelling of url and headers. If it only runs stdio servers, use the bridge.",

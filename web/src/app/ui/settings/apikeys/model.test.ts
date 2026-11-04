@@ -7,10 +7,19 @@
 import { describe, expect, it } from "vitest";
 
 import type { ApiKeysCapability } from "../../../../core/jmap/types";
-import { HOSTILE_SEND, RLO } from "./fixtures.testdata";
+import { APP_MANUAL, APP_UNVERIFIED, APP_VERIFIED, HOSTILE_SEND, KEY, RLO } from "./fixtures.testdata";
 import {
+  appIdentity,
+  appIdentityText,
   approveText,
+  buildClient,
   buildCreate,
+  checkReturnAddress,
+  clientProblemText,
+  isGrant,
+  limitsText,
+  parseReturnAddresses,
+  splitKeysAndApps,
   decisionText,
   eventText,
   keyState,
@@ -313,5 +322,130 @@ describe("pendingView — structured fields only", () => {
       "This request expired before you answered; nothing was done.",
     );
     expect(decisionText({ ok: false, error: { type: "notPending" } }, v).text).toBe("This request was already decided.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Connected apps (ADR-050)
+// ---------------------------------------------------------------------------
+
+describe("grants are told from keys", () => {
+  it("is a grant only when the server says kind oauth; a row without kind is a key", () => {
+    expect(isGrant(APP_VERIFIED)).toBe(true);
+    expect(isGrant(KEY)).toBe(false);
+    expect(isGrant({ kind: "key" })).toBe(false);
+    expect(isGrant({})).toBe(false);
+  });
+
+  it("splits a mixed list into keys and apps, each in the server's order, losing none", () => {
+    const rows = [APP_MANUAL, KEY, APP_VERIFIED, { ...KEY, id: "K2" }, APP_UNVERIFIED];
+    const { keys, apps } = splitKeysAndApps(rows);
+    expect(keys.map((k) => k.id)).toEqual([KEY.id, "K2"]);
+    expect(apps.map((k) => k.id)).toEqual([APP_MANUAL.id, APP_VERIFIED.id, APP_UNVERIFIED.id]);
+    expect(keys.length + apps.length).toBe(rows.length);
+  });
+
+  it("a grant has no key hint, and the fixture says so", () => {
+    expect(APP_VERIFIED.tokenHint).toBeNull();
+    expect(KEY.tokenHint).toBe("mr_abcdefg");
+  });
+});
+
+describe("how an app is identified", () => {
+  it("a metadata-document app is verified, from the host of its client id", () => {
+    expect(appIdentity(APP_VERIFIED.oauthClient!)).toEqual({ kind: "verified", host: "app.example.com" });
+    expect(appIdentityText(APP_VERIFIED.oauthClient!)).toBe("From app.example.com (verified)");
+  });
+
+  it("a registered app's name is the app's own word, so it is never called verified", () => {
+    expect(appIdentity(APP_UNVERIFIED.oauthClient!)).toEqual({ kind: "unverified" });
+    expect(appIdentityText(APP_UNVERIFIED.oauthClient!)).toBe("Name given by the app, not verified");
+  });
+
+  it("an app the person registered says so", () => {
+    expect(appIdentityText(APP_MANUAL.oauthClient!)).toBe("Registered by you");
+  });
+
+  it("a metadata-document app whose client id is not an address is not called verified", () => {
+    expect(appIdentity({ id: "not a url", kind: "cimd" })).toEqual({ kind: "unverified" });
+  });
+
+  it("states the limits in words", () => {
+    expect(limitsText(APP_VERIFIED)).toBe("60 calls a minute, 500 a day");
+  });
+});
+
+describe("return addresses are checked by the server's rule", () => {
+  // The same lists as internal/oauthserver TestRedirectURIRules: if the server
+  // starts accepting or refusing something, one of the two tests must change.
+  it("accepts https, and http to a loopback host on any port", () => {
+    for (const ok of [
+      "https://app.example.com/cb",
+      "http://127.0.0.1/cb",
+      "http://127.0.0.1:8080/cb",
+      "http://[::1]:9/cb",
+      "http://localhost:3000/cb",
+      "https://app.example.com/cb?x=1",
+    ]) {
+      expect({ ok, problem: checkReturnAddress(ok) }).toEqual({ ok, problem: null });
+    }
+  });
+
+  it("refuses everything else, naming why", () => {
+    const cases: [string, string][] = [
+      ["", "invalid"],
+      ["com.example.app:/cb", "scheme"],
+      ["http://app.example.com/cb", "scheme"],
+      ["https://app.example.com/cb#f", "fragment"],
+      ["https://user@app.example.com/cb", "invalid"],
+      ["https://@app.example.com/cb", "invalid"],
+      ["javascript:alert(1)", "scheme"],
+      ["https:///cb", "invalid"],
+      ["https://app.example.com/c\\b", "invalid"],
+      ["https://app.example.com/ cb", "invalid"],
+      ["ftp://app.example.com/cb", "scheme"],
+      ["//app.example.com/cb", "invalid"],
+      ["app.example.com/cb", "invalid"],
+      ["http://localhost.example.com/cb", "scheme"],
+      ["https://app.example.com/" + "a".repeat(2100), "tooLong"],
+    ];
+    for (const [raw, problem] of cases) expect({ raw: raw.slice(0, 60), problem: checkReturnAddress(raw) }).toEqual({ raw: raw.slice(0, 60), problem });
+  });
+
+  it("reads addresses one per line (or comma separated), without blanks or repeats", () => {
+    expect(parseReturnAddresses(" https://a.example.com/cb \n\n http://127.0.0.1/cb,https://a.example.com/cb ")).toEqual([
+      "https://a.example.com/cb",
+      "http://127.0.0.1/cb",
+    ]);
+    expect(parseReturnAddresses("  \n ")).toEqual([]);
+  });
+});
+
+describe("registering an app", () => {
+  it("builds the create from a name and addresses", () => {
+    expect(buildClient("  My Script ", "https://script.example.com/cb\nhttp://127.0.0.1/callback")).toEqual({
+      ok: true,
+      name: "My Script",
+      redirectUris: ["https://script.example.com/cb", "http://127.0.0.1/callback"],
+    });
+  });
+
+  it("names the first thing wrong, with the offending address", () => {
+    expect(buildClient("", "https://a.example.com/cb")).toEqual({ ok: false, problem: "name" });
+    expect(buildClient("x".repeat(101), "https://a.example.com/cb")).toEqual({ ok: false, problem: "name" });
+    expect(buildClient("App", "  ")).toEqual({ ok: false, problem: "empty" });
+    expect(buildClient("App", Array.from({ length: 11 }, (_, i) => `https://a${i}.example.com/cb`).join("\n"))).toEqual({
+      ok: false,
+      problem: "tooMany",
+    });
+    const bad = buildClient("App", "https://a.example.com/cb\nhttp://app.example.com/cb");
+    expect(bad).toEqual({ ok: false, problem: "scheme", address: "http://app.example.com/cb" });
+    if (!bad.ok) {
+      expect(clientProblemText(bad)).toBe(
+        "http://app.example.com/cb must start with https://, or with http:// for localhost, 127.0.0.1 or [::1].",
+      );
+    }
+    const frag = buildClient("App", "https://a.example.com/cb#x");
+    if (!frag.ok) expect(clientProblemText(frag)).toBe("https://a.example.com/cb#x must not contain a #.");
   });
 });
