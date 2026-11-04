@@ -12,8 +12,10 @@
 --      registrations cannot both pass the count.
 --   2. A registration is "used" while a live (unrevoked) OAuth grant names it.
 --      Reading that is a cross-user read of app.api_keys by the definer, so
---      the owner role gains one narrow SELECT policy (OAuth grants, unrevoked)
---      and a client-led partial index. Only the definers run as that role.
+--      the owner role gains one SELECT policy, limited to the rows the question
+--      needs (unrevoked grants of registered clients) and a client-led partial
+--      index. A policy exposes rows; which columns leave the database is decided
+--      by the definers, which return a count and a time.
 --   3. app.sweep_oauth also deletes a registered client older than 24 hours
 --      that no live grant uses, and reports it as 'clients'.
 --
@@ -23,7 +25,7 @@
 -- +goose Up
 CREATE POLICY api_keys_oauth_client_use ON app.api_keys
   FOR SELECT TO mailroom_owner
-  USING (kind = 'oauth' AND revoked_at IS NULL);
+  USING (kind = 'oauth' AND revoked_at IS NULL AND oauth_client_kind = 'registered');
 -- Definer-only lookup ("does a live grant use this client?"), so it does not
 -- lead with user_id: no application query plan reaches it.
 CREATE INDEX api_keys_by_oauth_client ON app.api_keys (oauth_client_id)
@@ -35,16 +37,19 @@ RETURNS TABLE (client_id text, registered_at timestamptz)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = app, pg_temp AS $$
 DECLARE
   v_unused bigint;
+  v_oldest timestamptz;
   v_id     text := 'rc_' || replace(gen_random_uuid()::text, '-', '');
   v_at     timestamptz;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('oauth_client_register', 0));
-  SELECT count(*) INTO v_unused
+  SELECT count(*), min(c.created_at) INTO v_unused, v_oldest
     FROM app.oauth_clients c
    WHERE c.kind = 'registered'
      AND NOT EXISTS (SELECT 1 FROM app.api_keys k
                       WHERE k.kind = 'oauth' AND k.revoked_at IS NULL AND k.oauth_client_id = c.id);
   IF v_unused >= p_max_unused THEN
+    -- Refused: no client_id, and the earliest time the sweep could free a place.
+    RETURN QUERY SELECT NULL::text, v_oldest + interval '24 hours';
     RETURN;
   END IF;
   INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris)

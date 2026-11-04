@@ -141,28 +141,35 @@ const RegisteredClientTTL = 24 * time.Hour
 // RegisterOAuthClient stores a Dynamic Client Registration entry through
 // app.oauth_client_register, with no identity (the endpoint is unauthenticated).
 // The client_id is minted by the database. ok is false, and nothing is stored,
-// when maxUnused unused registrations already exist.
-func (s *Store) RegisterOAuthClient(ctx context.Context, name string, redirectURIs []string, maxUnused int) (c OAuthClient, ok bool, err error) {
+// when maxUnused unused registrations already exist; freeAt is then the earliest
+// time the sweep could free a place (the oldest unused registration's expiry).
+func (s *Store) RegisterOAuthClient(ctx context.Context, name string, redirectURIs []string, maxUnused int) (c OAuthClient, ok bool, freeAt time.Time, err error) {
 	err = s.SystemTx(ctx, func(tx *SystemTx) error {
+		var (
+			id *string
+			at time.Time
+		)
 		qerr := tx.tx.QueryRow(ctx, `SELECT client_id, registered_at FROM app.oauth_client_register($1, $2, $3)`,
-			name, redirectURIs, maxUnused).Scan(&c.ID, &c.CreatedAt)
+			name, redirectURIs, maxUnused).Scan(&id, &at)
 		if qerr != nil {
-			if isNoRows(qerr) {
-				return nil
-			}
 			return fmt.Errorf("store: register OAuth client: %w", qerr)
 		}
+		if id == nil {
+			freeAt = at
+			return nil
+		}
+		c.ID, c.CreatedAt = *id, at
 		ok = true
 		return nil
 	})
 	if err != nil {
-		return OAuthClient{}, false, err
+		return OAuthClient{}, false, time.Time{}, err
 	}
 	if !ok {
-		return OAuthClient{}, false, nil
+		return OAuthClient{}, false, freeAt, nil
 	}
 	c.Kind, c.Name, c.RedirectURIs = OAuthClientRegistered, name, redirectURIs
-	return c, true, nil
+	return c, true, time.Time{}, nil
 }
 
 // MaxOAuthRequestsPerUser bounds a user's live authorization requests; creating

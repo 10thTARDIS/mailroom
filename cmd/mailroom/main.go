@@ -302,7 +302,7 @@ func run() error {
 	// Finished job rows past their retention windows are deleted daily
 	// (migration 00084), with the count per state logged.
 	go runJobSweep(ctx, st, jobSweepInterval, cfg.JobRetention, cfg.DeadJobRetention, logger)
-	go runOAuthSweep(ctx, st, jobSweepInterval, logger)
+	go runOAuthSweep(ctx, st, oauthserver.RegistrationSweepInterval, logger)
 
 	// Readiness is "can we reach the database": SystemTx opens a real
 	// transaction on the pool with no user identity attached (the

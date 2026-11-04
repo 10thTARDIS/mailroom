@@ -115,6 +115,7 @@ type Server struct {
 	limiter   *auth.FailureLimiter
 	dcr       bool
 	maxUnused int
+	regSem    chan struct{}
 	regLimit  *regLimiter
 	// authLimiter is charged on every authorization request: the endpoint is
 	// reachable by anyone and may cause one outbound metadata fetch.
@@ -133,7 +134,7 @@ func New(c Config) (*Server, error) {
 	}
 	s := &Server{issuer: c.Issuer, resource: c.Issuer + MCPResourcePath, st: c.Store, policy: c.Policy,
 		approve: c.Approve, alert: c.Alert, cimd: c.CIMD, limiter: c.Limiter, log: c.Logger,
-		dcr: c.DCR, regLimit: newRegLimiter(), maxUnused: c.MaxUnusedRegistrations}
+		dcr: c.DCR, regLimit: newRegLimiter(), regSem: make(chan struct{}, registrationConcurrency), maxUnused: c.MaxUnusedRegistrations}
 	if s.maxUnused <= 0 {
 		s.maxUnused = store.MaxUnusedRegisteredClients
 	}

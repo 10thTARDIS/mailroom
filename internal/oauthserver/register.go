@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"sync"
@@ -49,24 +50,47 @@ const (
 	registrationRefill = 10 * time.Second
 	// maxRegistrationAddrs bounds the limiter's memory.
 	maxRegistrationAddrs = 4096
+	// The whole process registers at most registrationGlobalBurst apps at once and
+	// then one every registrationGlobalRefill (30 a minute), whoever asks and from
+	// however many addresses, so filling the cap of unused registrations takes
+	// hours, not seconds, and the sweep (every 15 minutes) can keep up.
+	registrationGlobalBurst  = 30
+	registrationGlobalRefill = 2 * time.Second
+	// registrationConcurrency is how many registrations may be inside the store
+	// at once. Each holds a database connection while it waits on the cap's lock,
+	// and the pool is small and shared with every other request, so a flood must
+	// queue here, not there.
+	registrationConcurrency = 2
+	registrationQueueWait   = 500 * time.Millisecond
 )
 
 // regLimiter limits registrations per client ADDRESS: at most
 // RegistrationsPerAddressPerDay in any 24 hours, and a token-bucket burst.
 //
-// The key is the connection's address. Behind a reverse proxy that is the
-// proxy's address, so every client behind one proxy shares one budget and a
-// stranger can exhaust it for all of them. That is the accepted cost of
-// limiting an unauthenticated endpoint at all: the alternative, no limit, lets
-// one address fill the client table. (Trusting a forwarded header here would let
-// a stranger mint addresses at will and so defeat the limit entirely; the global
-// cap on unused registrations is the backstop for many-address abuse.) An
-// operator whose proxy shares an address with real users can switch the
-// endpoint off (MAILROOM_OAUTH_DCR=off) and use client metadata documents.
+// The key is the connection's address, an IPv6 address folded to its /64 (one
+// subscriber commonly holds a whole /64, so keying on the full address would give
+// a stranger 2^64 budgets). Behind a reverse proxy the address is the proxy's, so
+// every client behind one proxy shares one budget and a stranger can exhaust it
+// for all of them. That is the accepted cost of limiting an unauthenticated
+// endpoint at all: the alternative, no limit, lets one address fill the client
+// table. (Trusting a forwarded header here would let a stranger mint addresses at
+// will and so defeat the limit entirely.) An operator whose proxy shares an
+// address with real users can switch the endpoint off (MAILROOM_OAUTH_DCR=off)
+// and use client metadata documents.
+//
+// The table of addresses is bounded and FAILS CLOSED: when it is full and no
+// address is idle (nothing at its daily count, nothing short of a full burst),
+// a NEW address is refused until one frees. A known address's count is never
+// forgotten to make room, because forgetting is exactly what an attacker with
+// many addresses would be buying. On top sits a process-wide rate (global*),
+// which no number of addresses gets around.
 type regLimiter struct {
 	now func() time.Time
 	mu  sync.Mutex
 	m   map[string]*regBucket
+
+	gTokens float64
+	gLast   time.Time
 }
 
 type regBucket struct {
@@ -76,11 +100,31 @@ type regBucket struct {
 }
 
 func newRegLimiter() *regLimiter {
-	return &regLimiter{now: time.Now, m: map[string]*regBucket{}}
+	return &regLimiter{now: time.Now, m: map[string]*regBucket{}, gTokens: registrationGlobalBurst}
 }
 
-func (l *regLimiter) bucket(addr string, now time.Time) *regBucket {
-	b := l.m[addr]
+// limitKey is what an address is limited as: an IPv4 address itself, an IPv6
+// address as its /64 (an IPv4-mapped one as the IPv4 address).
+func limitKey(addr string) string {
+	a, err := netip.ParseAddr(addr)
+	if err != nil {
+		return addr
+	}
+	a = a.Unmap()
+	if a.Is6() {
+		p, err := a.Prefix(64)
+		if err != nil {
+			return addr
+		}
+		return p.String()
+	}
+	return a.String()
+}
+
+// bucket returns the address's bucket, or nil when the address is new and the
+// table is full of addresses that are not idle.
+func (l *regLimiter) bucket(key string, now time.Time) *regBucket {
+	b := l.m[key]
 	if b == nil {
 		if len(l.m) >= maxRegistrationAddrs {
 			for k, v := range l.m {
@@ -90,13 +134,11 @@ func (l *regLimiter) bucket(addr string, now time.Time) *regBucket {
 				}
 			}
 			if len(l.m) >= maxRegistrationAddrs {
-				// Nothing is idle: forget everyone rather than grow without
-				// bound. The global cap still bounds the table.
-				l.m = map[string]*regBucket{}
+				return nil
 			}
 		}
 		b = &regBucket{tokens: registrationBurst, last: now}
-		l.m[addr] = b
+		l.m[key] = b
 	}
 	if el := now.Sub(b.last); el > 0 {
 		b.tokens = min(registrationBurst, b.tokens+el.Seconds()/registrationRefill.Seconds())
@@ -119,12 +161,15 @@ func (b *regBucket) refilled(now time.Time) bool {
 }
 
 // admit charges one attempt to the burst bucket and refuses it, with how long
-// to wait, when the burst is spent or the daily count is.
+// to wait, when the burst is spent, the daily count is, or the table is full.
 func (l *regLimiter) admit(addr string) (ok bool, retry time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	b := l.bucket(addr, now)
+	b := l.bucket(limitKey(addr), now)
+	if b == nil {
+		return false, time.Minute
+	}
 	if len(b.done) >= RegistrationsPerAddressPerDay {
 		return false, b.done[0].Add(24 * time.Hour).Sub(now)
 	}
@@ -135,13 +180,33 @@ func (l *regLimiter) admit(addr string) (ok bool, retry time.Duration) {
 	return true, 0
 }
 
+// admitGlobal charges one registration to the process-wide rate.
+func (l *regLimiter) admitGlobal() (ok bool, retry time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	if l.gLast.IsZero() {
+		l.gLast = now
+	}
+	if el := now.Sub(l.gLast); el > 0 {
+		l.gTokens = min(registrationGlobalBurst, l.gTokens+el.Seconds()/registrationGlobalRefill.Seconds())
+		l.gLast = now
+	}
+	if l.gTokens < 1 {
+		return false, time.Duration((1 - l.gTokens) * float64(registrationGlobalRefill))
+	}
+	l.gTokens--
+	return true, 0
+}
+
 // registered records a registration that was stored.
 func (l *regLimiter) registered(addr string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	b := l.bucket(addr, now)
-	b.done = append(b.done, now)
+	if b := l.bucket(limitKey(addr), now); b != nil {
+		b.done = append(b.done, now)
+	}
 }
 
 // registrationRequest is the RFC 7591 metadata Mailroom reads. Anything else in
@@ -203,15 +268,35 @@ func (s *Server) Register() http.Handler {
 			registrationError(w, http.StatusBadRequest, errCode, errDesc)
 			return
 		}
-		c, stored, err := s.st.RegisterOAuthClient(r.Context(), name, req.RedirectURIs, s.maxUnused)
+		// Few registrations inside the store at once: each holds a pooled database
+		// connection while it waits on the cap's lock.
+		select {
+		case s.regSem <- struct{}{}:
+			defer func() { <-s.regSem }()
+		case <-time.After(registrationQueueWait):
+			w.Header().Set("Retry-After", "1")
+			registrationError(w, http.StatusTooManyRequests, "slow_down", "too many registrations are being processed; try again")
+			return
+		case <-r.Context().Done():
+			return
+		}
+		if ok, retry := s.regLimit.admitGlobal(); !ok {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+			registrationError(w, http.StatusTooManyRequests, "slow_down", "this server is registering apps as fast as it allows; try again shortly")
+			return
+		}
+		c, stored, freeAt, err := s.st.RegisterOAuthClient(r.Context(), name, req.RedirectURIs, s.maxUnused)
 		if err != nil {
 			s.log.ErrorContext(r.Context(), "oauth: register client", "err", err)
 			registrationError(w, http.StatusServiceUnavailable, "server_error", "the server could not complete the request")
 			return
 		}
 		if !stored {
-			w.Header().Set("Retry-After", "3600")
-			registrationError(w, http.StatusTooManyRequests, "temporarily_unavailable",
+			// No place frees before the oldest unused registration is 24 hours old
+			// and the next sweep (every 15 minutes) has run.
+			wait := max(time.Minute, time.Until(freeAt)+RegistrationSweepInterval)
+			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+			registrationError(w, http.StatusServiceUnavailable, "server_error",
 				"too many applications are waiting to be approved; try again later")
 			return
 		}
@@ -276,3 +361,7 @@ func validateRegistration(req registrationRequest) (grants, responses []string, 
 	}
 	return slices.Clone(grants), slices.Clone(responses), name, "", ""
 }
+
+// RegistrationSweepInterval is how often the OAuth sweep runs, and so how soon
+// after an unused registration turns 24 hours old its place is free again.
+const RegistrationSweepInterval = 15 * time.Minute

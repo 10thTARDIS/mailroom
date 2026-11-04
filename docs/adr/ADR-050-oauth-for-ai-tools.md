@@ -184,9 +184,20 @@ Confidential clients and `private_key_jwt` are not supported in this release.
   not offered). Limits: 50 registrations per address per 24 hours and a burst of
   5 refilling one per 10 seconds (every request, valid or not, spends burst; only
   a stored registration counts toward the day), and a global cap of 10000
-  registrations no live grant uses, past which a new one is refused with `429`
-  and nothing is evicted. **The per-address limits key on the connection
-  address.** Behind a reverse proxy that is the proxy's, so everyone behind it
+  registrations no live grant uses, past which a new one is refused with `503`
+  (`Retry-After` is the earliest the sweep could free a place) and nothing is
+  evicted. **The per-address limits key on the connection address, an IPv6
+  address folded to its /64** (one subscriber usually holds a whole /64, so the
+  full address would give a stranger 2^64 budgets; an IPv4-mapped IPv6 address is
+  the IPv4 address). The table of addresses is bounded at 4096 and **fails
+  closed**: when it is full and no address is idle, a new address is refused
+  with `429` until one frees, and a known address's count is never forgotten to
+  make room. On top of that the process registers at most 30 apps a minute
+  (burst 30, one more every 2 seconds) however many addresses ask, so filling the
+  cap takes hours; and at most two registrations run inside the store at once
+  (the rest wait half a second, then get `429`), because each holds a pooled
+  database connection while it waits on the cap's lock. Behind a reverse proxy
+  the address that is the proxy's, so everyone behind it
   shares one allowance and a stranger can exhaust it for all of them. That is
   the accepted cost of limiting an unauthenticated endpoint at all: the
   alternative, no limit, lets one address fill the table, and trusting a
@@ -195,7 +206,8 @@ Confidential clients and `private_key_jwt` are not supported in this release.
   the operator's answer where the shared allowance is a problem. The OAuth sweep
   deletes a registration older than 24 hours that no live (unrevoked) grant
   names; one a grant names is kept for as long as that grant lives, and goes with
-  the sweep after it is revoked. A client deleted this way must register again.
+  the sweep after it is revoked. The OAuth sweep runs every 15 minutes, so the
+  cap recovers soon after a flood ends rather than a day later. A client deleted this way must register again.
 - **Manual registration.** A user can create a client in Settings (a name and its
   redirect URIs) and paste the `client_id` into a client that supports
   pre-registration. It is the fallback for a client that supports neither of the
@@ -311,7 +323,11 @@ refused for a missing scope, and only that mark turns the answer into the 403
 (an account restriction, rate, budget, a hold, a suspension or bad arguments
 never do, and neither does an API key). The `scope` value is every scope that
 tool's declared uses need (held ones included), computed from the same tables
-as `KeyMayCall`, with the request supplying only the tool's name. A tool whose
+as `KeyMayCall`, with the request supplying only the tool's name, UNIONED with
+the scopes the gate itself found missing on that refusal (a scope computed from
+the call's contents, such as `mail:delete` for a move into Trash, which no
+declared use names). A test over the tool catalog keeps any scoped use from
+following a write inside one tool, so the 403 can never hide a completed write. A tool whose
 earlier call fails for another reason (a draft that does not exist, say) is not
 refused for scope and keeps its tool error.
 
@@ -345,6 +361,15 @@ probe your tests, negative-control every safety assertion):
   a mismatched `client_id` and a missing `redirect_uris`.
 - **Scope ceiling:** whatever scopes a client requests, the grant holds only what
   the user approved, and the gate refuses beyond it. A refresh cannot widen it.
+- **Registration is bounded (DCR):** a refused registration stores nothing; the
+  per-address (IPv6 by /64) and process-wide rates, the fail-closed address
+  table, the concurrency bound and the cap on unused registrations (refused, never
+  evicting) each have a test shown to fail without its control; a registration
+  stores only a cleaned name and redirect URIs; unused ones expire after 24 hours
+  and used ones are kept while their grant lives; a registered client is
+  unreachable to the application role except through the definers.
+- **Step-up (§8):** the 403 is for a missing scope only, never for an account
+  restriction, rate, suspension or an API key; its scopes are server-derived.
 - **No new enforcement path:** the existing ADR-042 and ADR-044 suites, run with an
   OAuth token in place of a key, pass unchanged (the same table drives both).
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
@@ -60,9 +61,28 @@ type keyPrincipal struct {
 	// challenge reads, set at the gate itself so the 403 can never be answered
 	// for any other refusal.
 	scopeRefused atomic.Bool
+	// scopeMissing is the scopes the gate found missing on that refusal (a scope
+	// computed from the call's contents, such as mail:delete for a move into
+	// Trash, is not in the tool's declared uses).
+	missingMu    sync.Mutex
+	scopeMissing []string
 }
 
 type keyApproval struct{ pendingID ulid.ULID }
+
+// noteScopeRefusal records a scope refusal and the scopes it found missing.
+func (p *keyPrincipal) noteScopeRefusal(missing []string) {
+	p.missingMu.Lock()
+	p.scopeMissing = append(p.scopeMissing, missing...)
+	p.missingMu.Unlock()
+	p.scopeRefused.Store(true)
+}
+
+func (p *keyPrincipal) missingScopes() []string {
+	p.missingMu.Lock()
+	defer p.missingMu.Unlock()
+	return slices.Clone(p.scopeMissing)
+}
 
 func newPrincipal(k store.APIKey, clientIP string) *keyPrincipal {
 	p := &keyPrincipal{key: k, scopes: map[string]bool{}, confirm: map[string]bool{}, clientIP: clientIP}
@@ -225,7 +245,7 @@ func (a *API) runKeyCall(ctx context.Context, userID ulid.ULID, p *keyPrincipal,
 		needs = pol.staticNeeds(name, args)
 	}
 	if missing := missingScopes(p.key.Scopes, needs.scopes); len(missing) > 0 {
-		p.scopeRefused.Store(true)
+		p.noteScopeRefusal(missing)
 		a.auditRefusal(ctx, userID, p, name, store.KeyOutcomeDenied,
 			map[string]any{"reason": store.RefusalScope, "missing": missing})
 		return nil, forbidden("this key does not have the scope " + strings.Join(missing, ", ") + " that " + name +

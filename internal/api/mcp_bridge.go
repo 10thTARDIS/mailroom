@@ -316,10 +316,17 @@ func (a *API) stepUpScopes(ctx context.Context, p *keyPrincipal, tool string) []
 			continue
 		}
 		needed, why := mcpBridge{a}.usesNeed(ctx, t.Uses...)
-		if why != "" || len(missingScopes(p.key.Scopes, needed)) == 0 {
+		if why != "" {
 			return nil
 		}
-		return needed
+		// The union of what the tool declares and what the gate itself found
+		// missing (a scope computed from the call's contents). Both are server
+		// side; no request text is in either.
+		all := slices.Compact(slices.Sorted(slices.Values(append(needed, p.missingScopes()...))))
+		if len(missingScopes(p.key.Scopes, all)) == 0 {
+			return nil
+		}
+		return all
 	}
 	return nil
 }

@@ -102,8 +102,10 @@ func oauthRoutes(s *oauthserver.Server) []route {
 	}
 }
 
-// runOAuthSweep deletes expired OAuth tokens, codes, requests and cached client
-// documents once now and then every interval (migration 00087): a ticker, like
+// runOAuthSweep deletes expired OAuth tokens, codes, requests, cached client
+// documents and unused client registrations once now and then every interval
+// (migrations 00087, 00088; every 15 minutes, so the registration cap recovers
+// soon after a flood ends): a ticker, like
 // the job and session sweeps, because a missed run costs nothing.
 func runOAuthSweep(ctx context.Context, st *store.Store, interval time.Duration, log *slog.Logger) {
 	sweepOAuthOnce(ctx, st, time.Now(), log)
@@ -133,5 +135,14 @@ func sweepOAuthOnce(ctx context.Context, st *store.Store, now time.Time, log *sl
 		attrs = append(attrs, k, counts[k])
 	}
 	attrs = append(attrs, "grace", store.OAuthSweepGrace.String())
+	deleted := int64(0)
+	for _, k := range store.OAuthSweepKinds {
+		deleted += counts[k]
+	}
+	// Every 15 minutes: say so at Info only when something went.
+	if deleted == 0 {
+		log.Debug("oauth sweep", attrs...)
+		return
+	}
 	log.Info("oauth sweep", attrs...)
 }

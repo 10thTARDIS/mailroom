@@ -2841,11 +2841,14 @@ GRANT UPDATE (count) ON app.api_key_suppressed_refusals TO mailroom_app;
 CREATE POLICY api_keys_token_lookup ON app.api_keys
   FOR SELECT TO mailroom_owner
   USING (revoked_at IS NULL AND suspended_at IS NULL);
--- The definers of ADR-050 ask whether a live OAuth grant uses a registered
--- client (migration 00088); nothing else of a grant is readable through this.
+-- The registration definers (migration 00088) ask whether a live OAuth grant uses
+-- a registered client. A policy exposes ROWS, so this one is limited to exactly
+-- the rows that question needs (unrevoked grants of registered clients); which
+-- columns leave the database is decided by the definers, which return a count
+-- and a time and nothing of a grant.
 CREATE POLICY api_keys_oauth_client_use ON app.api_keys
   FOR SELECT TO mailroom_owner
-  USING (kind = 'oauth' AND revoked_at IS NULL);
+  USING (kind = 'oauth' AND revoked_at IS NULL AND oauth_client_kind = 'registered');
 
 CREATE OR REPLACE FUNCTION app.api_key_for_token(p_hash bytea)
 RETURNS TABLE (user_id app.ulid, key_id app.ulid)
@@ -3157,16 +3160,19 @@ RETURNS TABLE (client_id text, registered_at timestamptz)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = app, pg_temp AS $$
 DECLARE
   v_unused bigint;
+  v_oldest timestamptz;
   v_id     text := 'rc_' || replace(gen_random_uuid()::text, '-', '');
   v_at     timestamptz;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('oauth_client_register', 0));
-  SELECT count(*) INTO v_unused
+  SELECT count(*), min(c.created_at) INTO v_unused, v_oldest
     FROM app.oauth_clients c
    WHERE c.kind = 'registered'
      AND NOT EXISTS (SELECT 1 FROM app.api_keys k
                       WHERE k.kind = 'oauth' AND k.revoked_at IS NULL AND k.oauth_client_id = c.id);
   IF v_unused >= p_max_unused THEN
+    -- Refused: no client_id, and the earliest time the sweep could free a place.
+    RETURN QUERY SELECT NULL::text, v_oldest + interval '24 hours';
     RETURN;
   END IF;
   INSERT INTO app.oauth_clients (id, kind, user_id, name, redirect_uris)

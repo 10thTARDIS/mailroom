@@ -433,7 +433,7 @@ func TestRegisteredClientsAreReachableOnlyThroughTheDefiners(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, ok, err := s.RegisterOAuthClient(ctx, "Some App", []string{"https://app.example.com/cb"}, 2)
+	c, ok, _, err := s.RegisterOAuthClient(ctx, "Some App", []string{"https://app.example.com/cb"}, 2)
 	if err != nil || !ok || !regexp.MustCompile(`^rc_[0-9a-f]{32}$`).MatchString(c.ID) || c.Kind != OAuthClientRegistered {
 		t.Fatalf("register: %+v ok=%v err=%v", c, ok, err)
 	}
@@ -500,11 +500,11 @@ func TestRegisteredClientsAreReachableOnlyThroughTheDefiners(t *testing.T) {
 
 	// The cap: with maxUnused 2, one more is allowed, then refused, and the first
 	// still stands. A client a live grant uses stops counting.
-	if _, ok, err := s.RegisterOAuthClient(ctx, "Second", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
+	if _, ok, _, err := s.RegisterOAuthClient(ctx, "Second", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
 		t.Fatalf("second: ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || ok {
-		t.Fatalf("third past the cap: ok=%v err=%v", ok, err)
+	if _, ok, freeAt, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || ok || time.Until(freeAt) < 23*time.Hour {
+		t.Fatalf("third past the cap: ok=%v freeAt=%v err=%v", ok, freeAt, err)
 	}
 	if _, found, _ := s.ResolveOAuthClient(ctx, c.ID); !found {
 		t.Error("the cap evicted the first registration")
@@ -522,7 +522,7 @@ func TestRegisteredClientsAreReachableOnlyThroughTheDefiners(t *testing.T) {
 		}
 	}
 	oaGrantFor(c.ID)
-	if _, ok, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
+	if _, ok, _, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
 		t.Errorf("after one was used: ok=%v err=%v", ok, err)
 	}
 

@@ -76,10 +76,12 @@ the permissions it was created with.
 **Registration limits.** Dynamic Client Registration is open to anyone who can
 reach your Mailroom, so it is limited: at most 50 registrations a day and a
 short burst limit for each address, and at most 10,000 registrations nobody has
-approved yet (past that, new ones are refused, never swapped for old ones).
+approved yet (past that, new ones are refused, never swapped for old ones). An
+IPv6 address counts as its whole /64, and the server as a whole registers at
+most 30 apps a minute.
 The limit is by the address Mailroom sees, so behind a reverse proxy everyone
 shares one allowance and a stranger can use it up for all; if that matters, set
-`MAILROOM_OAUTH_DCR=off`.
+`MAILROOM_OAUTH_DCR=off`. An app whose unused registration was cleaned up simply registers again.
 
 An operator can turn the whole OAuth surface off with `MAILROOM_OAUTH=off`; keys
 are unaffected, and approved apps work again when it is turned back on.

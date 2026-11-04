@@ -7,9 +7,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +20,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"mailroom/internal/auth"
+	"mailroom/internal/mcp"
 	"mailroom/internal/oauthserver"
 	"mailroom/internal/store"
 )
@@ -461,7 +466,7 @@ func TestDCRGlobalCapRefusesAndDoesNotEvict(t *testing.T) {
 	}
 	clock.Advance(registrationRefillForTest)
 	st, out, hd := h.register(t, goodRegistration(nil))
-	if st != http.StatusTooManyRequests || out["error"] != "temporarily_unavailable" || hd.Get("Retry-After") == "" {
+	if secs, _ := strconv.Atoi(hd.Get("Retry-After")); st != http.StatusServiceUnavailable || out["error"] != "server_error" || secs < 23*3600 {
 		t.Fatalf("registration past the cap: %d %v", st, out)
 	}
 	if n := h.registeredCount(t); n != 3 {
@@ -592,4 +597,180 @@ func TestDCRRegisteredClientsAreNotReachableThroughOAuthClientMethods(t *testing
 	if got, _ := json.Marshal(call(t, h.api.oauthClientGet, h.a.UserID, map[string]any{})); !strings.Contains(string(got), manual) {
 		t.Errorf("control: the owner does not list a manual client: %s", got)
 	}
+}
+
+// registerFrom posts a registration from a given loopback source address, so a
+// test can be "many addresses" against one server.
+func (h *oaHarness) registerFrom(t *testing.T, ip string, doc map[string]any) (int, map[string]any, http.Header) {
+	t.Helper()
+	cl := &http.Client{Transport: &http.Transport{DialContext: (&net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(ip)}}).DialContext}}
+	defer cl.CloseIdleConnections()
+	b, _ := json.Marshal(doc)
+	req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/oauth/register", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cl.Do(req)
+	if err != nil {
+		t.Fatalf("register from %s: %v", ip, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out, resp.Header
+}
+
+// However many addresses ask, the process registers at most 30 a minute.
+func TestDCRProcessWideRateHoldsAcrossAddresses(t *testing.T) {
+	h, clock := newDCRHarness(t, nil)
+	ok, refused := 0, 0
+	for i := 0; i < 31; i++ {
+		st, out, _ := h.registerFrom(t, "127.0.0."+strconv.Itoa(10+i), goodRegistration(nil))
+		switch {
+		case st == http.StatusCreated:
+			ok++
+		case st == http.StatusTooManyRequests && out["error"] == "slow_down":
+			refused++
+		default:
+			t.Fatalf("address %d: %d %v", i, st, out)
+		}
+	}
+	if ok != 30 || refused != 1 || h.registeredCount(t) != 30 {
+		t.Errorf("31 addresses in one instant: %d registered, %d refused, %d rows; want 30, 1, 30", ok, refused, h.registeredCount(t))
+	}
+	clock.Advance(3 * time.Second)
+	if st, out, _ := h.registerFrom(t, "127.0.0.60", goodRegistration(nil)); st != http.StatusCreated {
+		t.Errorf("after the rate refilled: %d %v", st, out)
+	}
+}
+
+// A flood of concurrent registrations queues at the server, not in the
+// database: at most two are inside the store at once (each would hold one of the
+// shared pool's connections while it waits on the cap's lock).
+func TestDCRConcurrentRegistrationsDoNotHoldThePool(t *testing.T) {
+	h, _ := newDCRHarness(t, nil)
+	ctx := context.Background()
+	lock, err := h.super.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	unlock := func() {
+		if locked {
+			_, _ = lock.Exec(ctx, `SELECT pg_advisory_unlock(hashtextextended('oauth_client_register', 0))`)
+			lock.Release()
+			locked = false
+		}
+	}
+	defer unlock()
+	if _, err := lock.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended('oauth_client_register', 0))`); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct{ status int }
+	results := make(chan result, 5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			b, _ := json.Marshal(goodRegistration(nil))
+			req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/oauth/register", strings.NewReader(string(b)))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				results <- result{-1}
+				return
+			}
+			_ = resp.Body.Close()
+			results <- result{resp.StatusCode}
+		}()
+	}
+	// While the lock is held: exactly the three over the limit come back (429), and
+	// no more than two sessions wait on the lock.
+	refused := 0
+	for i := 0; i < 3; i++ {
+		select {
+		case r := <-results:
+			if r.status != http.StatusTooManyRequests {
+				t.Errorf("a registration beyond the concurrency limit answered %d, want 429", r.status)
+			}
+			refused++
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of the 3 surplus registrations were refused while the lock was held", refused)
+		}
+	}
+	var waiting int
+	_ = h.super.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND wait_event = 'advisory'`).Scan(&waiting)
+	if waiting != 2 {
+		t.Errorf("%d sessions wait on the registration lock, want exactly 2 (the control: the lock is held, and only two got in)", waiting)
+	}
+	unlock()
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-results:
+			if r.status != http.StatusCreated {
+				t.Errorf("a queued registration answered %d after the lock was released, want 201", r.status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the two queued registrations never finished")
+		}
+	}
+}
+
+// The gate's own finding is part of the challenge: a scope computed from the
+// call's contents (an update into Trash needs mail:delete), which the tool's
+// declared uses do not name.
+func TestOAuthStepUpIncludesWhatTheGateFoundMissing(t *testing.T) {
+	h := newOAHarness(t)
+	ctx := context.Background()
+	tok, keyID := h.newKey(t, h.a.UserID, map[string]any{"name": "grant-like", "scopes": []string{"mail:read"}})
+	var key store.APIKey
+	if err := h.store.UserTx(ctx, h.a.UserID, func(tx *store.UserTx) error {
+		var e error
+		key, _, e = tx.GetAPIKey(ctx, ulid.MustParse(keyID))
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := newPrincipal(key, "")
+	// A context as the bearer gate builds it: the user and the key.
+	var uctx context.Context
+	gate := &auth.BearerGate{Resolve: h.store.ResolveAPIKeyToken, Limiter: auth.NewFailureLimiter(100, time.Second)}
+	breq := httptest.NewRequest(http.MethodGet, "/", nil)
+	breq.Header.Set("Authorization", "Bearer "+tok)
+	gate.Wrap(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { uctx = r.Context() }), http.NotFoundHandler()).
+		ServeHTTP(httptest.NewRecorder(), breq)
+	if uctx == nil {
+		t.Fatal("the bearer gate did not admit the key")
+	}
+	rctx := withPrincipal(uctx, p)
+	args, _ := json.Marshal(map[string]any{"update": map[string]any{
+		h.a.MessageID.String(): map[string]any{"mailboxIds/" + h.a.TrashID.String(): true}}})
+	ran := false
+	_, mErr := h.api.runKeyCall(rctx, h.a.UserID, p, "Email/set", args, func(context.Context, ulid.ULID, json.RawMessage) (json.RawMessage, *MethodError) {
+		ran = true
+		return nil, nil
+	})
+	if mErr == nil || ran || !p.scopeRefused.Load() {
+		t.Fatalf("the gate did not refuse the trash patch for scope: %v ran=%v", mErr, ran)
+	}
+	if got := strings.Join(p.missingScopes(), " "); !strings.Contains(got, "mail:delete") {
+		t.Fatalf("the gate recorded %q, want mail:delete among it", got)
+	}
+	// move_to_mailbox declares mail:move and mail:read; the challenge adds mail:delete.
+	declared, _ := mcpBridge{h.api}.usesNeed(rctx, mcpUsesOf(t, "move_to_mailbox")...)
+	if strings.Contains(strings.Join(declared, " "), "mail:delete") {
+		t.Fatalf("the control is void: move_to_mailbox already declares mail:delete (%v)", declared)
+	}
+	got := h.api.stepUpScopes(rctx, p, "move_to_mailbox")
+	if want := "mail:delete mail:move mail:read"; strings.Join(got, " ") != want {
+		t.Errorf("step-up scopes = %v, want %q (declared %v plus the gate's finding)", got, want, declared)
+	}
+}
+
+func mcpUsesOf(t *testing.T, tool string) []mcp.Use {
+	t.Helper()
+	for _, c := range mcp.Catalog() {
+		if c.Name == tool {
+			return c.Uses
+		}
+	}
+	t.Fatalf("no tool %s", tool)
+	return nil
 }
