@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.100.0-beta.2] — 2026-11-04
+
+**The second beta of OAuth for AI tools adds the screens you use.** The approval screen now explains each permission in plain words and works in dark mode and on a phone. Approved apps appear under Settings → API keys as Connected apps, where you can manage them like keys or end a single device's connection. You can also register an app yourself, and turn OAuth off entirely with one setting.
+
 ### Connecting AI tools with OAuth
 
 - **A clearer approval screen.** Each permission an app asks for is now described in plain words, the same words the key dialog uses, with the technical name beside it. They are grouped as what the app may read, what it may change, and sending and deleting, and each of sending and deleting has its "ask me first" choice right beside it. The typed confirmation is explained as only needed if you allow both sending and deleting.
