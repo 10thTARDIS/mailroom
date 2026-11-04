@@ -318,6 +318,10 @@ type API struct {
 	methods            map[string]methodFn
 	// version is the server version the MCP endpoint reports (WithVersion).
 	version string
+	// mcpMetadata is the protected-resource metadata URL of /mcp, set when the
+	// OAuth authorization server is on (SetMCPResourceMetadata). Empty means
+	// OAuth tokens are not accepted, and the step-up challenge never applies.
+	mcpMetadata string
 	// composer authors outgoing mail (drafts + submissions). It is optional:
 	// an instance with no blob store still serves every read method, it just
 	// cannot compose. Email/set create and EmailSubmission/set say so plainly

@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -416,5 +417,125 @@ func TestOAuthCrossUserStore(t *testing.T) {
 	})
 	if _, _, ok, _ := s.ResolveOAuthAccessToken(ctx, oaSum("mra_a")); !ok {
 		t.Error("A's token was revoked by B")
+	}
+}
+
+// Dynamic Client Registration entries (migration 00088, ADR-050 section 4) are
+// written only by app.oauth_client_register, are bounded by its cap, and are
+// invisible to every application-role path: no user and no identity-less
+// transaction can read, change, delete or insert one except through the definers.
+func TestRegisteredClientsAreReachableOnlyThroughTheDefiners(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, b := seedTwoUsers(t, h.super)
+	s := h.appStore()
+	if _, err := h.super.Exec(ctx, `DELETE FROM app.oauth_clients WHERE kind='registered'`); err != nil {
+		t.Fatal(err)
+	}
+
+	c, ok, err := s.RegisterOAuthClient(ctx, "Some App", []string{"https://app.example.com/cb"}, 2)
+	if err != nil || !ok || !regexp.MustCompile(`^rc_[0-9a-f]{32}$`).MatchString(c.ID) || c.Kind != OAuthClientRegistered {
+		t.Fatalf("register: %+v ok=%v err=%v", c, ok, err)
+	}
+	if got, found, err := s.ResolveOAuthClient(ctx, c.ID); err != nil || !found || got.Name != "Some App" || got.OwnerID != nil {
+		t.Fatalf("resolve: %+v found=%v err=%v", got, found, err)
+	}
+
+	// The application role sees no registered row, as either user or as nobody,
+	// and can neither change, delete nor insert one. (Each statement would
+	// affect the row if the policy let it; the row is checked afterwards.)
+	for name, user := range map[string]string{"A": a.ID, "B": b.ID} {
+		err := s.UserTx(ctx, mustULID(t, user), func(tx *UserTx) error {
+			var n int
+			if err := tx.tx.QueryRow(ctx, `SELECT count(*) FROM app.oauth_clients WHERE kind='registered'`).Scan(&n); err != nil {
+				return err
+			}
+			if n != 0 {
+				t.Errorf("user %s sees %d registered clients", name, n)
+			}
+			tag, err := tx.tx.Exec(ctx, `DELETE FROM app.oauth_clients WHERE kind='registered'`)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 0 {
+				t.Errorf("user %s deleted %d registered clients", name, tag.RowsAffected())
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("user %s: %v", name, err)
+		}
+		// UPDATE and INSERT are not granted to the application role at all.
+		for _, q := range []string{
+			`UPDATE app.oauth_clients SET name='hijacked' WHERE kind='registered'`,
+			`INSERT INTO app.oauth_clients (id, kind, name, redirect_uris) VALUES ('rc_` + strings.Repeat("0", 32) +
+				`', 'registered', 'x', ARRAY['https://x.example.com/cb'])`,
+		} {
+			err := s.UserTx(ctx, mustULID(t, user), func(tx *UserTx) error {
+				_, err := tx.tx.Exec(ctx, q)
+				return err
+			})
+			if err == nil || !strings.Contains(err.Error(), "permission denied") {
+				t.Errorf("user %s: %.40q: err = %v, want permission denied", name, q, err)
+			}
+		}
+	}
+	err = s.SystemTx(ctx, func(tx *SystemTx) error {
+		var n int
+		if err := tx.tx.QueryRow(ctx, `SELECT count(*) FROM app.oauth_clients`).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			t.Errorf("an identity-less transaction reads %d rows of app.oauth_clients", n)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	if err := h.super.QueryRow(ctx, `SELECT name FROM app.oauth_clients WHERE id=$1`, c.ID).Scan(&name); err != nil || name != "Some App" {
+		t.Errorf("the registered row after the attempts: %q %v", name, err)
+	}
+
+	// The cap: with maxUnused 2, one more is allowed, then refused, and the first
+	// still stands. A client a live grant uses stops counting.
+	if _, ok, err := s.RegisterOAuthClient(ctx, "Second", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
+		t.Fatalf("second: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || ok {
+		t.Fatalf("third past the cap: ok=%v err=%v", ok, err)
+	}
+	if _, found, _ := s.ResolveOAuthClient(ctx, c.ID); !found {
+		t.Error("the cap evicted the first registration")
+	}
+	oaGrantFor := func(client string) {
+		t.Helper()
+		err := s.UserTx(ctx, mustULID(t, a.ID), func(tx *UserTx) error {
+			_, err := tx.CreateClientGrant(ctx, NewClientGrant{Name: "grant " + client, ClientID: client,
+				ClientName: "Some App", ClientKind: OAuthClientRegistered, RedirectHost: "app.example.com",
+				Scopes: []string{"mail:read"}, RatePerMin: 60, DailyBudget: 500, SuspendOnAnomaly: true})
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	oaGrantFor(c.ID)
+	if _, ok, err := s.RegisterOAuthClient(ctx, "Third", []string{"https://app.example.com/cb"}, 2); err != nil || !ok {
+		t.Errorf("after one was used: ok=%v err=%v", ok, err)
+	}
+
+	// The sweep: 24 hours, and only unused ones.
+	counts, err := s.SweepOAuth(ctx, time.Now().Add(23*time.Hour), OAuthSweepGrace)
+	if err != nil || counts["clients"] != 0 {
+		t.Fatalf("sweep inside the day: %v %v", counts, err)
+	}
+	counts, err = s.SweepOAuth(ctx, time.Now().Add(25*time.Hour), OAuthSweepGrace)
+	if err != nil || counts["clients"] != 2 {
+		t.Fatalf("sweep after the day: %v %v (want the two unused deleted)", counts, err)
+	}
+	if _, found, _ := s.ResolveOAuthClient(ctx, c.ID); !found {
+		t.Error("the sweep deleted a client a live grant uses")
 	}
 }

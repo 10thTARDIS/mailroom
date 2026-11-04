@@ -68,7 +68,7 @@ func oauthAccessResolver(st *store.Store) auth.ResolveAPIKey {
 // gate tests always cover it.
 func oauthRoutes(s *oauthserver.Server) []route {
 	nf := oauthserver.NotFound()
-	disc, prm, authz, consent, token, revoke := nf, nf, nf, nf, nf, nf
+	disc, prm, authz, consent, token, revoke, register := nf, nf, nf, nf, nf, nf, nf
 	if s != nil {
 		disc, prm, authz = s.AuthorizationServer(), s.ProtectedResource(), s.Authorize()
 		// The decision carries its own CSRF guard (a cross-site POST is refused
@@ -76,6 +76,8 @@ func oauthRoutes(s *oauthserver.Server) []route {
 		// caller's own) is the second layer.
 		consent = s.Consent()
 		token, revoke = s.Token(), s.Revoke()
+		// Register is itself a 404 when MAILROOM_OAUTH_DCR is off.
+		register = s.Register()
 	}
 	return []route{
 		{pattern: "GET /.well-known/oauth-authorization-server", gate: gatePublic, handler: disc,
@@ -94,6 +96,9 @@ func oauthRoutes(s *oauthserver.Server) []route {
 		// answering JSON errors rather than redirects.
 		{pattern: "POST /oauth/token", gate: gatePublic, handler: token, probes: []probe{post("/oauth/token")}},
 		{pattern: "POST /oauth/revoke", gate: gatePublic, handler: revoke, probes: []probe{post("/oauth/revoke")}},
+		// Dynamic Client Registration (RFC 7591): unauthenticated by nature and so
+		// bounded in the handler (register.go). 404 when the surface or DCR is off.
+		{pattern: "POST /oauth/register", gate: gatePublic, handler: register, probes: []probe{post("/oauth/register")}},
 	}
 }
 

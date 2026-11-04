@@ -263,8 +263,9 @@ const (
 	// and existing OAuth access tokens are refused. The grants stay in the
 	// database and work again when it is turned back on.
 	EnvOAuth = "MAILROOM_OAUTH"
-	// EnvOAuthDCR switches Dynamic Client Registration (ADR-050 section 4; the
-	// endpoint itself arrives in a later increment). On by default.
+	// EnvOAuthDCR switches Dynamic Client Registration (ADR-050 section 4):
+	// POST /oauth/register and the registration_endpoint metadata entry. On by
+	// default.
 	EnvOAuthDCR = "MAILROOM_OAUTH_DCR"
 
 	// Operator: a subject get-or-created at boot. Under OIDC this is now just an

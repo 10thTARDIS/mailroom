@@ -1117,6 +1117,11 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 	if err != nil {
 		return nil, nil, err
 	}
+	if oauthSrv != nil {
+		// An OAuth token whose tool call is refused for a missing scope is answered
+		// with the step-up challenge naming this metadata (ADR-050 section 8).
+		svc.SetMCPResourceMetadata(oauthSrv.MetadataURL())
+	}
 	h, err := mountApp(ctx, st, cfg, operatorID, logger, svc.Handler(), webHandler(cfg.WebRoot, logger),
 		oauthCallbackHandler(oa.connector), nil, revoker, oauthSrv)
 	if err != nil {

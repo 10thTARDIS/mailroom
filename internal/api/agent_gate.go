@@ -55,6 +55,11 @@ type keyPrincipal struct {
 	// Later requests never get this far — the bearer gate refuses a suspended
 	// key with its uniform 401 (ADR-042 §2).
 	suspended atomic.Bool
+	// scopeRefused is set when a call of THIS request was refused for a scope
+	// the key lacks (ADR-050 section 8): the one fact the OAuth step-up
+	// challenge reads, set at the gate itself so the 403 can never be answered
+	// for any other refusal.
+	scopeRefused atomic.Bool
 }
 
 type keyApproval struct{ pendingID ulid.ULID }
@@ -220,6 +225,7 @@ func (a *API) runKeyCall(ctx context.Context, userID ulid.ULID, p *keyPrincipal,
 		needs = pol.staticNeeds(name, args)
 	}
 	if missing := missingScopes(p.key.Scopes, needs.scopes); len(missing) > 0 {
+		p.scopeRefused.Store(true)
 		a.auditRefusal(ctx, userID, p, name, store.KeyOutcomeDenied,
 			map[string]any{"reason": store.RefusalScope, "missing": missing})
 		return nil, forbidden("this key does not have the scope " + strings.Join(missing, ", ") + " that " + name +

@@ -1,6 +1,8 @@
 # ADR-050: OAuth for AI tools — Mailroom as the authorization server for `/mcp`, and a consent that is an API key
 
-**Status:** Accepted (v1.100; #34). The operator's decisions (2026-11-03):
+**Status:** Accepted (v1.100; #34). Increment 3 (Dynamic Client
+Registration and step-up) is built; its interpretations are recorded in §4 and
+§8. The operator's decisions (2026-11-03):
 Dynamic Client Registration allowed, labelled unverified and switchable off
 (§4); OAuth tokens accepted only on `/mcp` (§3); a connection lasts until it is
 unused for 30 days, with no fixed end (§3). Follows the MCP authorization specification,
@@ -166,6 +168,34 @@ Confidential clients and `private_key_jwt` are not supported in this release.
   client name a registration declares is **self-asserted** and the consent screen
   says so (§5). Enabled by default, `MAILROOM_OAUTH_DCR=off` turns it off, and
   the metadata omits `registration_endpoint` when it is off.
+
+  *As built (increment 3).* Public clients only: `token_endpoint_auth_method`
+  absent or `none`; `grant_types` within {`authorization_code`,
+  `refresh_token`}, `response_types` within {`code`}; 1 to 10 redirect URIs,
+  each passing the §4 rules (`invalid_redirect_uri`); `client_name` required,
+  at most 100 characters after the same cleaning learned contact names get
+  (control, directional and invisible format characters removed). Every other
+  field (`client_uri`, `logo_uri`, `tos_uri`, `policy_uri`, `contacts`, ...) is
+  ignored and never stored or shown: a self-asserted logo or link on the consent
+  page would be a phishing aid. The body is capped at 16 KiB and each URI at
+  2048 bytes. The answer is `201` with a `client_id` (`rc_` and 32 hex digits,
+  minted by the database), `client_id_issued_at` and the accepted metadata; there
+  is no client secret and no registration access token (RFC 7592 management is
+  not offered). Limits: 50 registrations per address per 24 hours and a burst of
+  5 refilling one per 10 seconds (every request, valid or not, spends burst; only
+  a stored registration counts toward the day), and a global cap of 10000
+  registrations no live grant uses, past which a new one is refused with `429`
+  and nothing is evicted. **The per-address limits key on the connection
+  address.** Behind a reverse proxy that is the proxy's, so everyone behind it
+  shares one allowance and a stranger can exhaust it for all of them. That is
+  the accepted cost of limiting an unauthenticated endpoint at all: the
+  alternative, no limit, lets one address fill the table, and trusting a
+  forwarded header would let a stranger mint addresses and defeat the limit. The
+  global cap is the backstop for many addresses, and `MAILROOM_OAUTH_DCR=off` is
+  the operator's answer where the shared allowance is a problem. The OAuth sweep
+  deletes a registration older than 24 hours that no live (unrevoked) grant
+  names; one a grant names is kept for as long as that grant lives, and goes with
+  the sweep after it is revoked. A client deleted this way must register again.
 - **Manual registration.** A user can create a client in Settings (a name and its
   redirect URIs) and paste the `client_id` into a client that supports
   pre-registration. It is the fallback for a client that supports neither of the
@@ -274,6 +304,16 @@ in one challenge, as the spec asks. A client that supports step-up sends the use
 back to consent, which shows the grant with the new scopes added. A client that
 does not support it sees the tool error it sees today. API keys keep today's
 behaviour exactly: a key cannot be re-consented.
+
+*As built (increment 3).* The call runs through the dispatcher like any other, so
+its refusal is audited and charged as for a key; the gate marks a call it
+refused for a missing scope, and only that mark turns the answer into the 403
+(an account restriction, rate, budget, a hold, a suspension or bad arguments
+never do, and neither does an API key). The `scope` value is every scope that
+tool's declared uses need (held ones included), computed from the same tables
+as `KeyMayCall`, with the request supplying only the tool's name. A tool whose
+earlier call fails for another reason (a draft that does not exist, say) is not
+refused for scope and keeps its tool error.
 
 ### 9. Threat model and negative controls
 

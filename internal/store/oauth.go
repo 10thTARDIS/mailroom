@@ -128,6 +128,43 @@ func (s *Store) ResolveOAuthClient(ctx context.Context, id string) (c OAuthClien
 	return c, found, nil
 }
 
+// MaxUnusedRegisteredClients is the most Dynamic Client Registration entries no
+// live grant uses that the table holds (ADR-050 section 4). Past it a new
+// registration is refused; nothing is evicted.
+const MaxUnusedRegisteredClients = 10000
+
+// RegisteredClientTTL is how long a registration nobody consented through is
+// kept. The sweep (app.sweep_oauth) applies it in SQL; this names it for docs
+// and tests.
+const RegisteredClientTTL = 24 * time.Hour
+
+// RegisterOAuthClient stores a Dynamic Client Registration entry through
+// app.oauth_client_register, with no identity (the endpoint is unauthenticated).
+// The client_id is minted by the database. ok is false, and nothing is stored,
+// when maxUnused unused registrations already exist.
+func (s *Store) RegisterOAuthClient(ctx context.Context, name string, redirectURIs []string, maxUnused int) (c OAuthClient, ok bool, err error) {
+	err = s.SystemTx(ctx, func(tx *SystemTx) error {
+		qerr := tx.tx.QueryRow(ctx, `SELECT client_id, registered_at FROM app.oauth_client_register($1, $2, $3)`,
+			name, redirectURIs, maxUnused).Scan(&c.ID, &c.CreatedAt)
+		if qerr != nil {
+			if isNoRows(qerr) {
+				return nil
+			}
+			return fmt.Errorf("store: register OAuth client: %w", qerr)
+		}
+		ok = true
+		return nil
+	})
+	if err != nil {
+		return OAuthClient{}, false, err
+	}
+	if !ok {
+		return OAuthClient{}, false, nil
+	}
+	c.Kind, c.Name, c.RedirectURIs = OAuthClientRegistered, name, redirectURIs
+	return c, true, nil
+}
+
 // MaxOAuthRequestsPerUser bounds a user's live authorization requests; creating
 // one past it evicts that user's oldest.
 const MaxOAuthRequestsPerUser = 20
@@ -730,7 +767,7 @@ func (s *Store) RevokeOAuthToken(ctx context.Context, hash [32]byte) (rev OAuthR
 // ---- sweep -----------------------------------------------------------------
 
 // OAuthSweepKinds is every key SweepOAuth reports, in order.
-var OAuthSweepKinds = []string{"cimd", "codes", "requests", "tokens"}
+var OAuthSweepKinds = []string{"cimd", "clients", "codes", "requests", "tokens"}
 
 // DefaultOAuthSweepBatch bounds one call's deletes per kind.
 const DefaultOAuthSweepBatch = 5000

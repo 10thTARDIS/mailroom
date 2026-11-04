@@ -89,24 +89,33 @@ type Config struct {
 	// CIMDTimeout bounds one metadata fetch; zero means 5 seconds.
 	CIMDTimeout             time.Duration
 	AllowPrivateClientHosts bool
-	// DCR is MAILROOM_OAUTH_DCR. Parsed now; the endpoint arrives later, so the
-	// metadata never advertises a registration endpoint in this release.
-	DCR     bool
+	// DCR is MAILROOM_OAUTH_DCR: Dynamic Client Registration (register.go). When
+	// false the registration endpoint answers 404 and the metadata omits
+	// registration_endpoint.
+	DCR bool
+	// MaxUnusedRegistrations caps registrations no live grant uses; zero means
+	// store.MaxUnusedRegisteredClients. A test seam.
+	MaxUnusedRegistrations int
+	// Now is the registration limiter's clock; nil means time.Now. A test seam.
+	Now     func() time.Time
 	Limiter *auth.FailureLimiter
 	Logger  *slog.Logger
 }
 
 // Server is the authorization server.
 type Server struct {
-	issuer   string
-	resource string
-	st       *store.Store
-	policy   Policy
-	approve  ApproveFunc
-	alert    func(ulid.ULID, store.APIKey)
-	cimd     Doer
-	cimdTTO  time.Duration
-	limiter  *auth.FailureLimiter
+	issuer    string
+	resource  string
+	st        *store.Store
+	policy    Policy
+	approve   ApproveFunc
+	alert     func(ulid.ULID, store.APIKey)
+	cimd      Doer
+	cimdTTO   time.Duration
+	limiter   *auth.FailureLimiter
+	dcr       bool
+	maxUnused int
+	regLimit  *regLimiter
 	// authLimiter is charged on every authorization request: the endpoint is
 	// reachable by anyone and may cause one outbound metadata fetch.
 	authLimiter *auth.FailureLimiter
@@ -123,7 +132,14 @@ func New(c Config) (*Server, error) {
 		return nil, errors.New("oauthserver: a store and a grant writer are required")
 	}
 	s := &Server{issuer: c.Issuer, resource: c.Issuer + MCPResourcePath, st: c.Store, policy: c.Policy,
-		approve: c.Approve, alert: c.Alert, cimd: c.CIMD, limiter: c.Limiter, log: c.Logger}
+		approve: c.Approve, alert: c.Alert, cimd: c.CIMD, limiter: c.Limiter, log: c.Logger,
+		dcr: c.DCR, regLimit: newRegLimiter(), maxUnused: c.MaxUnusedRegistrations}
+	if s.maxUnused <= 0 {
+		s.maxUnused = store.MaxUnusedRegisteredClients
+	}
+	if c.Now != nil {
+		s.regLimit.now = c.Now
+	}
 	s.cimdTTO = c.CIMDTimeout
 	if s.cimdTTO <= 0 {
 		s.cimdTTO = cimdTimeout
