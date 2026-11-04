@@ -126,3 +126,26 @@ func TestMiddleware_RedirectKeepsAuthorizeQuery(t *testing.T) {
 		t.Errorf("state on another path was carried: %q", got)
 	}
 }
+
+// An authorize request too long to survive in the login-state cookie gets
+// Mailroom's own page, not a redirect that would lose it.
+func TestMiddleware_RedirectRefusesOverlongAuthorize(t *testing.T) {
+	a := testAuthenticator(t, true)
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("next handler should not run") })
+	serve := func(target string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		a.Middleware(next, WithUnauthenticatedRedirect("/auth/login")).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, target, nil))
+		return rr
+	}
+	long := serve("/oauth/authorize?state=" + strings.Repeat("a", 3000))
+	if long.Code != http.StatusBadRequest || long.Header().Get("Location") != "" || !strings.Contains(long.Body.String(), "too long") {
+		t.Errorf("overlong authorize: %d %q", long.Code, long.Header().Get("Location"))
+	}
+	if ok := serve("/oauth/authorize?state=" + strings.Repeat("a", 1500)); ok.Code != http.StatusFound {
+		t.Errorf("a 1.5 KiB authorize was refused: %d", ok.Code)
+	}
+	// Other paths are not capped by this rule.
+	if other := serve("/inbox?x=" + strings.Repeat("a", 3000)); other.Code != http.StatusFound {
+		t.Errorf("other path: %d", other.Code)
+	}
+}

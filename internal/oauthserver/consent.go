@@ -174,6 +174,21 @@ func (s *Server) offered(requested []string) (known, unknown []string) {
 	return known, unknown
 }
 
+// ceiling is every scope the consent page offers, and so the most a decision may
+// grant: the request's scopes that are in the closed set, plus (on
+// re-authorization) the scopes the grant already holds. consentFor renders it
+// and parseDecision enforces it, from this one function so they cannot drift.
+func (s *Server) ceiling(requested, grantScopes []string) []string {
+	known, _ := s.offered(requested)
+	var out []string
+	for _, sc := range s.policy.Scopes {
+		if slices.Contains(known, sc) || slices.Contains(grantScopes, sc) {
+			out = append(out, sc)
+		}
+	}
+	return out
+}
+
 func (s *Server) buildConsent(ctx context.Context, tx *store.UserTx, req store.NewOAuthRequest, rawID, errMsg string) (consentView, error) {
 	return s.consentFor(ctx, tx, req.ClientID, req.ClientName, req.ClientKind, req.RedirectHost, req.AllLoopback, req.Scopes, rawID, errMsg)
 }
@@ -200,12 +215,7 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 	scopes := known
 	if hasGrant {
 		v.Reauth = true
-		scopes = nil
-		for _, sc := range s.policy.Scopes {
-			if slices.Contains(known, sc) || slices.Contains(grant.Scopes, sc) {
-				scopes = append(scopes, sc)
-			}
-		}
+		scopes = s.ceiling(requested, grant.Scopes)
 		v.Rate, v.Budget, v.Suspend = grant.RatePerMin, grant.DailyBudget, grant.SuspendOnAnomaly
 		v.Restricted = grant.AccountIDs != nil
 	}
@@ -294,7 +304,13 @@ func (s *Server) Consent() http.Handler {
 				redirect = "deny"
 				return nil
 			}
-			in, msg := s.parseDecision(r, req)
+			var grantScopes []string
+			if g, ok, err := tx.LockOAuthGrantForClient(r.Context(), req.ClientID); err != nil {
+				return err
+			} else if ok {
+				grantScopes = g.Scopes
+			}
+			in, msg := s.parseDecision(r, req, s.ceiling(req.Scopes, grantScopes))
 			if msg != "" {
 				refusal = msg
 				return errRefused
@@ -364,13 +380,12 @@ func (s *Server) Consent() http.Handler {
 // parseDecision turns the posted form into a grant approval, enforcing the
 // ceiling: a grant can hold only scopes the page offered (the request's, in the
 // closed set), however the form was crafted.
-func (s *Server) parseDecision(r *http.Request, req store.OAuthRequest) (GrantApproval, string) {
-	known, _ := s.offered(req.Scopes)
+func (s *Server) parseDecision(r *http.Request, req store.OAuthRequest, offered []string) (GrantApproval, string) {
 	f := r.PostForm
 	in := GrantApproval{ClientID: req.ClientID, ClientName: req.ClientName, ClientKind: req.ClientKind,
 		RedirectHost: req.RedirectHost}
 	for _, sc := range f["scope"] {
-		if !slices.Contains(known, sc) {
+		if !slices.Contains(offered, sc) {
 			return in, "That scope was not part of the request: " + sc + "."
 		}
 		if !slices.Contains(in.Scopes, sc) {

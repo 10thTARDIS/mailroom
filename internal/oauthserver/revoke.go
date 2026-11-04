@@ -5,7 +5,6 @@ package oauthserver
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"mailroom/internal/store"
 )
@@ -32,13 +31,12 @@ func (s *Server) Revoke() http.Handler {
 			return
 		}
 		if !found {
+			// Charge it, but answer 200 regardless: 200 versus 429 must not
+			// tell a caller whether the token existed (RFC 7009 2.2).
 			addr := clientIP(r)
-			if blocked, retry := s.limiter.Blocked(addr); blocked {
-				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
-				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "slow_down"})
-				return
+			if blocked, _ := s.limiter.Blocked(addr); !blocked {
+				s.limiter.Fail(addr)
 			}
-			s.limiter.Fail(addr)
 		} else if rev.Revoked > 0 {
 			s.auditRevocation(r.Context(), rev)
 		}

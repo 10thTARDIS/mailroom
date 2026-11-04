@@ -3,6 +3,7 @@
 package oauthserver
 
 import (
+	"net/url"
 	"testing"
 	"time"
 )
@@ -110,5 +111,32 @@ func TestPKCEHelpers(t *testing.T) {
 	}
 	if validVerifier("short") || !validVerifier("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") {
 		t.Error("validVerifier")
+	}
+}
+
+// With the private-hosts opt-in the metadata client admits private addresses
+// and still refuses link-local and metadata addresses in every spelling.
+func TestCIMDPrivateOptInKeepsLinkLocalRefused(t *testing.T) {
+	strict, open := NewCIMDClient(false), NewCIMDClient(true)
+	check := func(c interface{ CheckURL(*url.URL) error }, raw string) error {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.CheckURL(u)
+	}
+	for _, ok := range []string{"https://10.1.2.3/c.json", "https://192.168.1.5/c.json", "https://127.0.0.1/c.json", "https://[fc00::1]/c.json"} {
+		if check(strict, ok) == nil {
+			t.Errorf("default policy admitted %s", ok)
+		}
+		if err := check(open, ok); err != nil {
+			t.Errorf("opt-in refused %s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"https://169.254.169.254/c.json", "https://[::ffff:169.254.169.254]/c.json",
+		"https://169.254.1.1/c.json", "https://[fe80::1]/c.json", "https://100.100.100.200/c.json", "https://224.0.0.1/c.json"} {
+		if err := check(open, bad); err == nil {
+			t.Errorf("opt-in admitted %s", bad)
+		}
 	}
 }

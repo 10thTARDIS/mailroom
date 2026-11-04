@@ -224,6 +224,11 @@ func (s *Server) refreshGrant(r *http.Request) (map[string]any, *oauthError) {
 	if token == "" {
 		return nil, badRequest("refresh_token is required")
 	}
+	// A public client names itself on every refresh (OAuth 2.1 4.3), and it must
+	// be the grant's client.
+	if clientID == "" {
+		return nil, badRequest("client_id is required")
+	}
 	if res := f.Get("resource"); res != "" && !s.resourceMatches(res) {
 		return nil, &oauthError{http.StatusBadRequest, "invalid_target", "the resource must be " + s.resource}
 	}
@@ -254,23 +259,22 @@ func (s *Server) refreshGrant(r *http.Request) (map[string]any, *oauthError) {
 		if err != nil {
 			return err
 		}
-		if !ok || !k.Active() || k.Kind != store.KeyKindOAuth || (clientID != "" && k.OAuthClientID != clientID) {
+		if !ok || !k.Active() || k.Kind != store.KeyKindOAuth || k.OAuthClientID != clientID {
 			gerr = badGrant("the grant is no longer active")
 			return nil
 		}
-		// The scope may be narrowed, never widened: it can only name scopes the
-		// grant holds now. (The gate reads the grant's own scopes; narrowing here
-		// narrows what the response says it covers.)
-		scopes := k.Scopes
-		if sc := strings.Fields(f.Get("scope")); len(sc) > 0 {
-			for _, x := range sc {
-				if !slices.Contains(k.Scopes, x) {
-					gerr = &oauthError{http.StatusBadRequest, "invalid_scope", "a refresh cannot widen the scope"}
-					return nil
-				}
+		// The scope may never be widened: naming a scope the grant does not hold
+		// is refused. A narrower request is ignored, and the response says so:
+		// the gate enforces the grant's own current scopes whatever a token was
+		// asked for, so the response reports exactly those (RFC 6749 5.1 lets
+		// the server issue a different scope as long as it says which).
+		for _, x := range strings.Fields(f.Get("scope")) {
+			if !slices.Contains(k.Scopes, x) {
+				gerr = &oauthError{http.StatusBadRequest, "invalid_scope", "a refresh cannot widen the scope"}
+				return nil
 			}
-			scopes = sc
 		}
+		scopes := k.Scopes
 		out, err = s.issue(ctx, tx, k, rt.FamilyID, rt.Resource, scopes)
 		return err
 	})

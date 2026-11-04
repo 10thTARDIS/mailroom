@@ -20,6 +20,19 @@ type MiddlewareOption func(*middlewareOptions)
 // the sign-in round trip (see WithUnauthenticatedRedirect).
 const OAuthAuthorizePath = "/oauth/authorize"
 
+// maxAuthorizeReturnLen bounds the authorize URL carried through sign-in. It
+// rides in the signed login-state cookie as return_to: that cookie holds about
+// 270 bytes of state, nonce, verifier and expiry as JSON, grows by 4/3 under
+// base64 and gains a signature, and a browser drops a cookie over 4096 bytes.
+// ((270+2048)*4/3)+~100 is about 3.2 KiB, leaving room for the cookie's name and
+// attributes. The login redirect also carries it percent-encoded (up to 3x), so
+// 2048 keeps that URL under 6.5 KiB, inside the usual 8 KiB request-line limit.
+// A longer request is refused with a page rather than lost in a dropped cookie.
+const maxAuthorizeReturnLen = 2048
+
+const authorizeTooLongPage = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Mailroom</title></head>` +
+	`<body><h1>This request is too long to continue</h1><p>Start again from the app you were connecting.</p></body></html>`
+
 // WithUnauthenticatedRedirect makes Middleware redirect unauthenticated
 // requests to loginPath (with a "return_to" query parameter carrying the
 // original request path) instead of the default 401 response. Use this for
@@ -38,6 +51,15 @@ func WithUnauthenticatedRedirect(loginPath string) MiddlewareOption {
 			// client's own opaque value and it carries no code, so the request
 			// must come back from sign-in intact; a `code` is still dropped.
 			if r.URL.Path == OAuthAuthorizePath {
+				if len(rt) > maxAuthorizeReturnLen {
+					h := w.Header()
+					h.Set("Content-Type", "text/html; charset=utf-8")
+					h.Set("Cache-Control", "no-store")
+					h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(authorizeTooLongPage))
+					return
+				}
 				if q.Has("code") {
 					rt = r.URL.EscapedPath()
 				}

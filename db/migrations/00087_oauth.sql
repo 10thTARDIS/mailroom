@@ -276,9 +276,10 @@ REVOKE ALL ON FUNCTION app.oauth_cimd_get(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.oauth_cimd_get(text) TO mailroom_app;
 ALTER FUNCTION app.oauth_cimd_get(text) OWNER TO mailroom_owner;
 
--- Cache a fetched document. An anonymous visitor can make the server fetch a URL
--- of their choosing, so the cache is bounded: past 5000 live rows a NEW client_id
--- is simply not cached (the caller still has the document it just fetched).
+-- Cache a fetched document. Any signed-in user can make the server fetch a URL of
+-- their choosing (the authorize route is session-gated; an anonymous visitor
+-- cannot), so the cache is bounded: past 5000 live rows a NEW client_id is simply
+-- not cached (the caller still has the document it just fetched).
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION app.oauth_cimd_put(p_client_id text, p_document jsonb, p_expires timestamptz)
 RETURNS boolean

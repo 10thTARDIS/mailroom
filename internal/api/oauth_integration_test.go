@@ -655,9 +655,6 @@ func TestOAuthCodes(t *testing.T) {
 		t.Errorf("the family survived a code replay: %d", s)
 	}
 	keyID, _, _, _ := h.grantFor(t, h.a.UserID, cid)
-	if n := h.countReason(t, keyID, "code_replay"); n != 0 {
-		_ = n
-	}
 	var n int
 	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.api_key_events WHERE key_id=$1 AND anomaly='code_replay'`, keyID).Scan(&n)
 	if n != 1 {
@@ -876,10 +873,84 @@ func TestOAuthScopeCeiling(t *testing.T) {
 func (h *oaHarness) connectAgain(t *testing.T, tok oaTokens) (int, map[string]any) {
 	st, out, _ := h.token(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok.refresh},
 		"client_id": {tok.clientID}, "scope": {"mail:read"}})
-	if st != 200 || out["scope"] != "mail:read" {
-		t.Errorf("narrowing refresh: %d %v", st, out)
+	// A narrower request is ignored and the response says what is enforced: the
+	// grant's own scopes.
+	if st != 200 || out["scope"] != "mail:read search:read" {
+		t.Errorf("narrower refresh request: %d %v", st, out)
 	}
 	return st, out
+}
+
+// Refresh requires the grant's client_id; revoke never says whether a token existed.
+func TestOAuthRefreshClientAndRevokeOracle(t *testing.T) {
+	h := newOAHarness(t)
+	tok := h.connect(t, h.a.UserID)
+	st, out, _ := h.token(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok.refresh}})
+	if st != 400 || out["error"] != "invalid_request" {
+		t.Errorf("refresh without client_id: %d %v", st, out)
+	}
+	tok = h.connect(t, h.a.UserID)
+	if st, out := h.refresh(t, tok.refresh, h.cimdURL()+"2"); st != 400 {
+		t.Errorf("refresh with another client_id: %d %v", st, out)
+	}
+	// Exhaust the failure limiter, then revoke a known and an unknown token: both 200.
+	h.os.UseLimiter(auth.NewFailureLimiter(1, time.Hour))
+	revoke := func(token string) int {
+		req, _ := http.NewRequest(http.MethodPost, h.srv.URL+"/oauth/revoke", strings.NewReader(url.Values{"token": {token}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, _ := h.do(t, req)
+		return resp.StatusCode
+	}
+	for i := 0; i < 5; i++ {
+		if c := revoke("mrr_" + strings.Repeat("z", 52)); c != 200 {
+			t.Fatalf("unknown token, attempt %d: %d, want 200 even when the limiter is spent", i, c)
+		}
+	}
+	fresh := h.connect(t, h.a.UserID)
+	if c := revoke(fresh.refresh); c != 200 {
+		t.Errorf("known token with the limiter spent: %d, want 200", c)
+	}
+	if s, _ := h.bearer(t, http.MethodPost, "/mcp", fresh.access); s != 401 {
+		t.Errorf("the known token was not revoked: %d", s)
+	}
+}
+
+// Re-authorization: the page offers the request's scopes plus the grant's, and a
+// decision may grant exactly that, no more.
+func TestOAuthReauthorizationScopeCeiling(t *testing.T) {
+	h := newOAHarness(t)
+	cid := h.cimdURL()
+	_, challenge := pkce()
+	approve := func(requested string, scopes []string) (int, string) {
+		_, body := h.authorize(t, h.a.UserID, h.authorizeURL(cid, challenge, url.Values{"scope": {requested}}))
+		form := defaultDecision(requestID(t, body), "approve")
+		form["scope"] = scopes
+		resp, b := h.decide(t, h.a.UserID, form, nil)
+		return resp.StatusCode, b
+	}
+	if st, _ := approve("mail:read", []string{"mail:read"}); st != http.StatusSeeOther {
+		t.Fatalf("first approval: %d", st)
+	}
+	// The second request asks only for search:read; the page shows both, checked.
+	_, body := h.authorize(t, h.a.UserID, h.authorizeURL(cid, challenge, url.Values{"scope": {"search:read"}}))
+	for _, sc := range []string{`value="mail:read" checked`, `value="search:read" checked`} {
+		if !strings.Contains(body, sc) {
+			t.Errorf("re-authorization page lacks %q", sc)
+		}
+	}
+	if st, _ := approve("search:read", []string{"mail:read", "search:read"}); st != http.StatusSeeOther {
+		t.Fatalf("approving the page as shown: %d", st)
+	}
+	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Join(scopes, ",") != "mail:read,search:read" {
+		t.Errorf("grant holds %v, want both", scopes)
+	}
+	// A scope in neither set is still refused.
+	if st, _ := approve("search:read", []string{"mail:read", "search:read", "mail:delete"}); st == http.StatusSeeOther {
+		t.Error("a scope in neither the request nor the grant was approved")
+	}
+	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Contains(strings.Join(scopes, ","), "mail:delete") {
+		t.Errorf("grant holds %v", scopes)
+	}
 }
 
 // A grant is subject to the SAME gate as a key: the tools an OAuth client sees
