@@ -144,3 +144,27 @@ describe("plain HTTP on a private network (#863)", () => {
     expect(html("http://localhost:8090")).not.toContain("plain HTTP");
   });
 });
+
+describe("OAuth comes first, in the document's words (ADR-050)", () => {
+  const sentence = "If your app supports OAuth, give it your Mailroom's /mcp address and approve it when your browser opens.";
+  const html = (token: string | null): string =>
+    renderToStaticMarkup(createElement(SetupGuide, { origin: "https://mail.example.com", token, scopes: null }));
+
+  it("the document says it, and says what is not built yet", () => {
+    expect(mcpDoc.replace(/`/g, "").replace(/\s+/g, " ").includes(sentence)).toBe(true);
+    expect(mcpDoc.replace(/\s+/g, " ").includes("Not built yet: apps that register themselves automatically (Dynamic Client Registration)")).toBe(true);
+    expect(mcpDoc.includes("step-up")).toBe(true);
+  });
+
+  it("the guide opens with it, ahead of the key instructions, and keeps keys as the alternative", () => {
+    const h = html(null).replace(/&#x27;/g, "'");
+    expect(h).toContain(sentence);
+    expect(h.indexOf(sentence)).toBeLessThan(h.indexOf("with an API key"));
+    expect(h.indexOf(sentence)).toBeLessThan(h.indexOf("Authorization: Bearer"));
+    expect(h).toContain("With an API key");
+  });
+
+  it("a freshly made key's guide does not lead with OAuth (the key is what that dialog is for)", () => {
+    expect(html("mr_" + "a".repeat(52))).not.toContain("If your app supports OAuth");
+  });
+});

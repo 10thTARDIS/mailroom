@@ -27,6 +27,7 @@ import type {
   ApiKey,
   ApiKeyEvent,
   ApiKeySettings,
+  OAuthClient,
   ApiKeysCapability,
   SignedInDevice,
   PendingAction,
@@ -1252,6 +1253,66 @@ export class JmapClient {
       if (ok) return { ok: true };
       const refusals = v[refused] as Record<string, SetError> | null | undefined;
       return { ok: false, error: refusals?.[id] ?? { type: "serverFail" } };
+    } catch (err) {
+      return { ok: false, error: { type: "transport", description: String(err) } };
+    }
+  }
+
+  // -- Apps the user registers (ADR-050 section 4) and connections ----------
+  //
+  // The same capability and the same session-only rule as the keys above. An
+  // app's client id is NOT a secret, so unlike a key's token it may be kept.
+
+  /** OAuthClient/get: the apps registered by hand, or null when it cannot be asked. Never throws. */
+  async oauthClientsGet(): Promise<OAuthClient[] | null> {
+    try {
+      const r = await this.apiKeysCall("OAuthClient/get", {});
+      if (!r || r.error || !r.value) return null;
+      return ((r.value as unknown as GetResult<OAuthClient>).list ?? []) as OAuthClient[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** OAuthClient/set create. Never throws. */
+  async oauthClientCreate(
+    name: string,
+    redirectUris: readonly string[],
+  ): Promise<{ ok: true; client: OAuthClient } | { ok: false; error: SetError }> {
+    try {
+      const r = await this.apiKeysCall("OAuthClient/set", { create: { c: { name, redirectUris: [...redirectUris] } } });
+      if (!r) return { ok: false, error: { type: "unavailable" } };
+      if (r.error) return { ok: false, error: { type: r.error.type, description: r.error.description ?? "" } };
+      const v = r.value as unknown as {
+        created?: Record<string, OAuthClient | null> | null;
+        notCreated?: Record<string, SetError> | null;
+      };
+      const created = v.created?.["c"];
+      if (created && typeof created.id === "string") return { ok: true, client: created };
+      return { ok: false, error: v.notCreated?.["c"] ?? { type: "serverFail" } };
+    } catch (err) {
+      return { ok: false, error: { type: "transport", description: String(err) } };
+    }
+  }
+
+  /** OAuthClient/set destroy. Never throws. */
+  async oauthClientDelete(id: string): Promise<{ ok: true } | { ok: false; error: SetError }> {
+    return this.oauthDestroy("OAuthClient/set", id);
+  }
+
+  /** OAuthFamily/set destroy: ends one connection of an app, leaving the app. Never throws. */
+  async oauthFamilyEnd(id: Id): Promise<{ ok: true } | { ok: false; error: SetError }> {
+    return this.oauthDestroy("OAuthFamily/set", id);
+  }
+
+  private async oauthDestroy(method: string, id: string): Promise<{ ok: true } | { ok: false; error: SetError }> {
+    try {
+      const r = await this.apiKeysCall(method, { destroy: [id] });
+      if (!r) return { ok: false, error: { type: "unavailable" } };
+      if (r.error) return { ok: false, error: { type: r.error.type, description: r.error.description ?? "" } };
+      const v = r.value as unknown as { destroyed?: string[] | null; notDestroyed?: Record<string, SetError> | null };
+      if (Array.isArray(v.destroyed) && v.destroyed.includes(id)) return { ok: true };
+      return { ok: false, error: v.notDestroyed?.[id] ?? { type: "serverFail" } };
     } catch (err) {
       return { ok: false, error: { type: "transport", description: String(err) } };
     }

@@ -257,6 +257,12 @@ const (
 	// section 4). Off by default; modelled on EnvAllowPrivateAccountHosts, and
 	// narrower: link-local addresses (the instance-metadata range) stay refused.
 	EnvOAuthAllowPrivateClientHosts = "MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS"
+	// EnvOAuth is the off switch for the whole OAuth surface (ADR-050): "on"
+	// (the default) or "off". Off behaves exactly as when no public URL is
+	// known: every OAuth route answers 404, /mcp's refusal is the plain one,
+	// and existing OAuth access tokens are refused. The grants stay in the
+	// database and work again when it is turned back on.
+	EnvOAuth = "MAILROOM_OAUTH"
 	// EnvOAuthDCR switches Dynamic Client Registration (ADR-050 section 4; the
 	// endpoint itself arrives in a later increment). On by default.
 	EnvOAuthDCR = "MAILROOM_OAUTH_DCR"
@@ -587,6 +593,9 @@ type Config struct {
 	OAuthAllowPrivateClientHosts bool
 	// OAuthDCR: see EnvOAuthDCR. Default true.
 	OAuthDCR bool
+	// OAuthDisabled: MAILROOM_OAUTH=off. The zero value is "on", so a Config
+	// built by hand keeps the surface.
+	OAuthDisabled bool
 
 	// SessionKey is the HMAC key that signs session/login-state cookies
 	// (auth.Config.SigningKey). Required with OIDC, and at least
@@ -881,7 +890,12 @@ func (c *Config) OIDCConfigured() bool {
 // off when neither is set, and when the origin is not https (OAuth 2.1 wants
 // HTTPS endpoints) unless its host is loopback, a developer's machine. The
 // caller logs why when it is off but a public URL was given (OAuthIssuerError).
+// MAILROOM_OAUTH=off makes it "" too, so every place that asks whether the
+// surface is on gets the same answer from this one function.
 func (c *Config) OAuthIssuer() string {
+	if c.OAuthDisabled {
+		return ""
+	}
 	origin, _ := c.oauthIssuer()
 	return origin
 }
@@ -889,6 +903,9 @@ func (c *Config) OAuthIssuer() string {
 // OAuthIssuerError says why OAuthIssuer is empty although a URL was given, or ""
 // when it is simply not configured or is fine.
 func (c *Config) OAuthIssuerError() string {
+	if c.OAuthDisabled {
+		return ""
+	}
 	_, why := c.oauthIssuer()
 	return why
 }
@@ -953,6 +970,7 @@ func Load() (*Config, error) {
 
 		OAuthAllowPrivateClientHosts: envBool(EnvOAuthAllowPrivateClientHosts),
 		OAuthDCR:                     envBoolDefault(EnvOAuthDCR, true),
+		OAuthDisabled:                !envBoolDefault(EnvOAuth, true),
 		AccountsFile:                 strings.TrimSpace(os.Getenv(EnvAccountsFile)),
 		SyncInterval:                 DefaultSyncInterval,
 		SyncMaxBackoff:               DefaultSyncMaxBackoff,
@@ -1552,6 +1570,7 @@ var boolToggles = []string{
 	EnvAllowPrivateAccountHosts,
 	EnvOAuthAllowPrivateClientHosts,
 	EnvOAuthDCR,
+	EnvOAuth,
 	EnvIMAPIdle,
 	EnvIMAPPool,
 	EnvImageProxy,

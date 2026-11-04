@@ -17,7 +17,8 @@ import (
 )
 
 // The OAuth authorization server for /mcp (ADR-050): wiring. It is on exactly
-// when cfg.OAuthIssuer() is non-empty (a public https URL is known); otherwise
+// when cfg.OAuthIssuer() is non-empty (a public https URL is known and
+// MAILROOM_OAUTH is not off); otherwise
 // every route below answers 404 and /mcp behaves exactly as it did, keys only.
 
 // buildOAuthServer returns nil when the OAuth surface is off.
@@ -25,6 +26,11 @@ func buildOAuthServer(st *store.Store, cfg *config.Config, svc *api.API, logger 
 	issuer := cfg.OAuthIssuer()
 	if st == nil {
 		return nil, nil // no database: nothing to issue tokens from
+	}
+	if cfg.OAuthDisabled {
+		logger.Info("OAuth for AI tools is off: "+config.EnvOAuth+" is set to off; /mcp accepts API keys only, "+
+			"and connected apps work again when it is turned back on", "env", config.EnvOAuth)
+		return nil, nil
 	}
 	if issuer == "" {
 		if why := cfg.OAuthIssuerError(); why != "" {

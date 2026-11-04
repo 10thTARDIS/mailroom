@@ -916,3 +916,43 @@ func TestLoadRefusesAMalformedAuthservBound(t *testing.T) {
 		t.Fatalf("Load = %v, want an error naming %s", err, EnvAuthservIDs)
 	}
 }
+
+// MAILROOM_OAUTH is "on" unless it says off, and an empty value (what Compose
+// passes when the operator left it unset) is on: the switch must default to the
+// surface being available, and off must reach the issuer every caller asks.
+func TestLoadOAuthSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		disabled bool
+	}{{"", false}, {"on", false}, {"ON", false}, {"1", false}, {"off", true}, {"Off", true}, {"0", true}, {"false", true}} {
+		clearAuthEnv(t)
+		t.Setenv(EnvDatabaseURL, "postgres://mailroom_app@localhost/mailroom")
+		t.Setenv(EnvDevAuthSubject, "dev-operator")
+		t.Setenv(EnvDevAuthAck, DevAuthAckPhrase)
+		t.Setenv(EnvPublicURL, "https://mail.example.com")
+		t.Setenv(EnvOAuth, tc.value)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("%q: %v", tc.value, err)
+		}
+		if cfg.OAuthDisabled != tc.disabled {
+			t.Errorf("%q: OAuthDisabled = %v, want %v", tc.value, cfg.OAuthDisabled, tc.disabled)
+		}
+		wantIssuer := "https://mail.example.com"
+		if tc.disabled {
+			wantIssuer = ""
+		}
+		if got := cfg.OAuthIssuer(); got != wantIssuer {
+			t.Errorf("%q: OAuthIssuer = %q, want %q", tc.value, got, wantIssuer)
+		}
+	}
+	// A spelling it does not know is a startup error, never a silent "on".
+	clearAuthEnv(t)
+	t.Setenv(EnvDatabaseURL, "postgres://mailroom_app@localhost/mailroom")
+	t.Setenv(EnvDevAuthSubject, "dev-operator")
+	t.Setenv(EnvDevAuthAck, DevAuthAckPhrase)
+	t.Setenv(EnvOAuth, "disabled")
+	if _, err := Load(); err == nil {
+		t.Error("MAILROOM_OAUTH=disabled loaded without error")
+	}
+}

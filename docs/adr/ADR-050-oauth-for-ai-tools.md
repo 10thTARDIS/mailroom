@@ -62,6 +62,12 @@ resource `https://mail.example.com/mcp`. Under dev-auth, `MAILROOM_PUBLIC_URL` i
 required for OAuth, as it already is for mail-provider OAuth. If it is unset, the
 OAuth surface is off and `/mcp` behaves exactly as today (keys only).
 
+`MAILROOM_OAUTH=off` (default `on`) turns the surface off the same way even when
+the issuer resolves: every OAuth route answers 404, discovery documents are gone,
+`/mcp`'s refusal is the plain challenge, and OAuth access tokens are refused with
+the bearer gate's uniform 401. Grants and tokens stay in the database and work
+again when it is turned back on. The startup log says which state and why.
+
 ### 2. Discovery
 
 - `GET /.well-known/oauth-protected-resource/mcp` (and the root form

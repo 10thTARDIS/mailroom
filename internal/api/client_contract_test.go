@@ -112,7 +112,7 @@ func TestWebClientDeclaresCapabilitiesForEveryMethodItCalls(t *testing.T) {
 	for urn := range using {
 		oof[urn] = true
 	}
-	// ApiKey/* and PendingAction/* (#49) ride a wider set the same way
+	// ApiKey/*, PendingAction/*, OAuthClient/* and OAuthFamily/* (#49, ADR-050) ride a wider set the same way
 	// (MAILROOM_USING + CAP_APIKEYS), for the keys' reason: the helpers check
 	// hasCapability first, so a server that predates v1.95 is never sent the URN.
 	apikeys := map[string]bool{capAPIKeys: true}
@@ -147,7 +147,8 @@ func TestWebClientDeclaresCapabilitiesForEveryMethodItCalls(t *testing.T) {
 		if strings.HasPrefix(name, "OutOfOffice/") {
 			declared = oof
 		}
-		if strings.HasPrefix(name, "ApiKey/") || strings.HasPrefix(name, "PendingAction/") {
+		if strings.HasPrefix(name, "ApiKey/") || strings.HasPrefix(name, "PendingAction/") ||
+			strings.HasPrefix(name, "OAuthClient/") || strings.HasPrefix(name, "OAuthFamily/") {
 			declared = apikeys
 		}
 		if strings.HasPrefix(name, "SignedInDevice/") {

@@ -15,7 +15,7 @@ import type { Root } from "react-dom/client";
 import type { ApiKey, ApiKeyEvent } from "../../../../core/jmap/types";
 import type { ApiKeysApi } from "../apikeys/api";
 import { axeViolations } from "../apikeys/axe.testdata";
-import { KEY } from "../apikeys/fixtures.testdata";
+import { KEY, NO_APPS } from "../apikeys/fixtures.testdata";
 import { ApiKeysBody, apiKeysFacts } from "./ApiKeysRow";
 
 const SUSPENDED: ApiKey = {
@@ -48,6 +48,7 @@ const openKey = vi.fn();
 const update = vi.fn(async (..._a: unknown[]) => ({ ok: true as const }));
 const revoke = vi.fn(async (..._a: unknown[]) => ({ ok: true as const }));
 const api: ApiKeysApi = {
+  ...NO_APPS,
   capability: () => ({ massDeleteThreshold: 50, massDeleteWindowSeconds: 600 }),
   list: async () => [KEY, SUSPENDED, REVOKED],
   create: async () => ({ ok: false, error: { type: "x" } }),
@@ -127,7 +128,13 @@ describe("the list", () => {
 
   it("puts approvals first, then keys, then Create, then the setup guide", () => {
     const headings = [...host.querySelectorAll("h4")].map((h) => h.textContent);
-    expect(headings).toEqual(["Waiting for your approval", "Your keys", "Connect an AI tool"]);
+    expect(headings).toEqual([
+      "Waiting for your approval",
+      "Your keys",
+      "Connected apps",
+      "Apps you register yourself",
+      "Connect an AI tool",
+    ]);
     expect(text()).toContain("https://mail.example.com/mcp");
     expect(text()).toContain("Authorization: Bearer mr_your_key_here");
   });

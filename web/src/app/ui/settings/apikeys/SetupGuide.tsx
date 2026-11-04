@@ -5,6 +5,10 @@
 // filled in — the one moment a person has the key and the instructions in the
 // same place.
 //
+// OAUTH FIRST (ADR-050): where the guide is not showing a fresh key, it opens
+// with the option that needs no key at all, "give your app the /mcp address and
+// approve it when your browser opens", and keeps keys as the alternative.
+//
 // GENERIC FIRST: the URL (this page's origin plus /mcp), the header, and the
 // sentence that any MCP client with Streamable HTTP and headers works. Then the
 // generic stdio bridge, then two worked examples, labelled as examples. The
@@ -116,6 +120,17 @@ export function SetupGuide({
   const key = token ?? t("apiKeys.setup.placeholder");
   return (
     <div className="setup-guide">
+      {token === null ? (
+        <>
+          <H>{t("apiKeys.setup.oauthHeading")}</H>
+          <p>{t("apiKeys.setup.oauth")}</p>
+          <p>
+            <code className="setup-inline">{endpoint}</code>
+          </p>
+          <p className="field-hint">{t("apiKeys.setup.oauthNote")}</p>
+          <H>{t("apiKeys.setup.keyHeading")}</H>
+        </>
+      ) : null}
       <p>{t("apiKeys.setup.intro")}</p>
       <dl className="setup-generic">
         <dt>{t("apiKeys.setup.url")}</dt>

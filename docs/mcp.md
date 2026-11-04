@@ -6,17 +6,60 @@ allow it) send and delete mail on your behalf. It uses the standard transport an
 standard authentication, with no client-specific extensions (ADR-044).
 
 - **Endpoint:** `https://mail.example.com/mcp`, the MCP *Streamable HTTP* transport.
-- **Authentication:** an API key in a standard header,
+- **Authentication:** either OAuth (the client opens your browser and you
+  approve it; see below) or an API key in a standard header,
   `Authorization: Bearer mr_…`. Create the key in Mailroom (Settings → API keys,
   or `ApiKey/set`; see ADR-042) and give it only the scopes the agent needs.
+  Either way the app gets exactly the permissions, limits and approvals you
+  chose, and you can revoke it in Settings.
 - **Stateless:** each request stands alone. The server issues no
   `Mcp-Session-Id` and answers `GET` and `DELETE` with `405`, so it works behind
   any reverse proxy with no session affinity.
 
-The endpoint accepts **API keys only**. A browser session is refused (`403`), and
-a request with no credential gets `401` with `WWW-Authenticate: Bearer`.
+The endpoint accepts **API keys and OAuth access tokens**. A browser session is
+refused (`403`), and a request with no credential gets `401` with a
+`WWW-Authenticate: Bearer` challenge (naming the resource metadata when OAuth is
+on, which is what lets an OAuth client find where to sign in). An OAuth access
+token is accepted on `/mcp` only, never on `/jmap`.
 
 ## Connecting a client
+
+### Clients that support OAuth
+
+If your app supports OAuth, give it your Mailroom's `/mcp` address and approve
+it when your browser opens. The address is `https://mail.example.com/mcp`, and
+there is no key to create or paste. Mailroom shows what the app asked for in plain
+words, grouped as what it may read, what it may change, and sending and
+deleting, each of which can be left unticked; you also choose the accounts and
+the limits, and sending and deleting can wait for your approval ("ask me
+first"). Allowing both sending and deleting needs a typed confirmation, exactly
+as for a key.
+
+The approved app is listed under **Connected apps** in Settings → API keys, with
+how it was identified, where its approval returns to, its permissions and
+limits, and when it was last used. From there you can edit its limits, suspend
+and reactivate it, see its activity, end one of its connections (one sign-in,
+such as one device) or revoke it, which ends every connection at once.
+
+How an app is identified is shown at approval and in Settings:
+
+- An app that publishes a **client metadata document** at its own address is
+  shown as "from" that host; Mailroom fetched the document, so the host is
+  verified.
+- An app **you register yourself** (Settings → API keys, "Apps you register
+  yourself") is for a tool that cannot identify itself: give Mailroom a name and
+  the addresses the tool returns to, and paste the client ID it shows into the
+  tool. The client ID is not a secret.
+
+Access tokens last an hour and refresh tokens rotate; an app unused for 30 days
+has to be approved again. Return addresses must be `https`, or `http` to
+`localhost`, `127.0.0.1` or `[::1]`.
+
+Not built yet: apps that register themselves automatically (Dynamic Client
+Registration) and asking for more permissions later from inside a connected app
+(step-up). An app that needs either connects with an API key for now. An
+operator can turn the whole OAuth surface off with `MAILROOM_OAUTH=off`; keys
+are unaffected, and approved apps work again when it is turned back on.
 
 ### Clients that take a URL and headers
 
@@ -87,8 +130,8 @@ These two are **examples, not requirements**: any MCP client works the same way.
 example, Claude Desktop's `claude_desktop_config.json`): use the `mcp-remote`
 block above as the entry under `mcpServers`, restart the client, and the
 Mailroom tools appear in its tool list. Clients whose built-in "connectors"
-expect OAuth cannot use a key directly; the bridge is the supported route until
-Mailroom implements MCP authorization (planned for v1.96).
+expect OAuth can connect by URL alone (see above); the bridge remains the route
+for a client that supports neither OAuth nor headers.
 
 **A local LLM tool with native remote-MCP support** (for example, Hermes):
 configure a remote server with the URL and the `Authorization` header from the

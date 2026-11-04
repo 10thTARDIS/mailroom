@@ -22,7 +22,7 @@ import type { Root } from "react-dom/client";
 import type { PendingAction } from "../../../../core/jmap/types";
 import type { ApiKeysApi, Decision } from "./api";
 import { axeViolations } from "./axe.testdata";
-import { HELD_DELETE, HOSTILE_SEND, RLO } from "./fixtures.testdata";
+import { HELD_DELETE, HOSTILE_SEND, NO_APPS, RLO } from "./fixtures.testdata";
 import { PendingList, RECIPIENTS_SHOWN } from "./PendingList";
 
 let host: HTMLDivElement;
@@ -41,6 +41,7 @@ const subjects = vi.fn(async (ids: readonly string[], accountId: string) => {
 });
 const onDecided = vi.fn();
 const api: ApiKeysApi = {
+  ...NO_APPS,
   capability: () => ({}),
   list: async () => [],
   create: async () => ({ ok: false, error: { type: "x" } }),
