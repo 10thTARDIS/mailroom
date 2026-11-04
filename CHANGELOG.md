@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.100.0-beta.3] — 2026-11-04
+
+**The third beta completes OAuth for AI tools.** Apps that cannot publish their identity can now register with Mailroom on their own, so almost any OAuth-capable AI app connects by your address alone. And an approved app that needs a permission it does not have can send you back to the approval screen to add it, instead of simply failing. This is the last beta before the live test with real apps.
+
 ### Connecting AI tools with OAuth
 
 - **Apps that register themselves.** A tool that cannot publish its identity at a web address can now register with Mailroom on its own, so you can connect it by its address alone. You see it on the approval screen with the name it gave itself, marked "name given by the app, not verified", because anyone can pick any name; read the name, the return address and the permissions before you approve. Mailroom keeps only the name and the return addresses it sends, never a logo or a link, and an app nobody approved within a day is forgotten.
