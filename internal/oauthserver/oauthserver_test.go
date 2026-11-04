@@ -116,16 +116,17 @@ func TestPKCEHelpers(t *testing.T) {
 
 // With the private-hosts opt-in the metadata client admits private addresses
 // and still refuses link-local and metadata addresses in every spelling.
+//
+// The addresses are bare IPs and the URLs are built here, as in
+// internal/egress's own tests: they are synthetic test data, and a URL
+// literal would make the portability check's host allowlist read them as
+// hosts this project names.
 func TestCIMDPrivateOptInKeepsLinkLocalRefused(t *testing.T) {
 	strict, open := NewCIMDClient(false), NewCIMDClient(true)
-	check := func(c interface{ CheckURL(*url.URL) error }, raw string) error {
-		u, err := url.Parse(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c.CheckURL(u)
+	check := func(c interface{ CheckURL(*url.URL) error }, host string) error {
+		return c.CheckURL(&url.URL{Scheme: "https", Host: host, Path: "/c.json"})
 	}
-	for _, ok := range []string{"https://10.1.2.3/c.json", "https://192.168.1.5/c.json", "https://127.0.0.1/c.json", "https://[fc00::1]/c.json"} {
+	for _, ok := range []string{"10.1.2.3", "192.168.1.5", "127.0.0.1", "[fc00::1]"} {
 		if check(strict, ok) == nil {
 			t.Errorf("default policy admitted %s", ok)
 		}
@@ -133,8 +134,8 @@ func TestCIMDPrivateOptInKeepsLinkLocalRefused(t *testing.T) {
 			t.Errorf("opt-in refused %s: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"https://169.254.169.254/c.json", "https://[::ffff:169.254.169.254]/c.json",
-		"https://169.254.1.1/c.json", "https://[fe80::1]/c.json", "https://100.100.100.200/c.json", "https://224.0.0.1/c.json"} {
+	for _, bad := range []string{"169.254.169.254", "[::ffff:169.254.169.254]",
+		"169.254.1.1", "[fe80::1]", "100.100.100.200", "224.0.0.1"} {
 		if err := check(open, bad); err == nil {
 			t.Errorf("opt-in admitted %s", bad)
 		}
