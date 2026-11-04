@@ -732,6 +732,9 @@ func New(st *store.Store, opts ...Option) *API {
 		"ApiKey/get":                   a.apiKeyGet,
 		"ApiKey/set":                   a.apiKeySet,
 		"ApiKey/getEvents":             a.apiKeyGetEvents,
+		"OAuthClient/get":              a.oauthClientGet,
+		"OAuthClient/set":              a.oauthClientSet,
+		"OAuthFamily/set":              a.oauthFamilySet,
 		"PendingAction/get":            a.pendingGet,
 		"PendingAction/set":            a.pendingSet,
 	}

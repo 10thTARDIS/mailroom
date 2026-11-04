@@ -78,6 +78,45 @@ func WellFormedAPIToken(s string) bool {
 	return true
 }
 
+// OAuth tokens (ADR-050). The same 256 random bits in the same lowercase base32
+// as an API key, with a distinct prefix so a scanner can tell what leaked and
+// the gate can tell which table to ask: "mra_" is an ACCESS token (a bearer
+// credential, accepted only on the MCP endpoint), "mrr_" a REFRESH token (never
+// a bearer credential; it is accepted only at the token endpoint).
+const (
+	OAuthAccessPrefix  = "mra_"
+	OAuthRefreshPrefix = "mrr_"
+)
+
+// NewOAuthToken mints an access or refresh token, by prefix. It returns the
+// token (handed to the client once and never stored) and its SHA-256.
+func NewOAuthToken(prefix string) (token string, hash [32]byte, err error) {
+	if prefix != OAuthAccessPrefix && prefix != OAuthRefreshPrefix {
+		return "", [32]byte{}, fmt.Errorf("auth: unknown OAuth token prefix %q", prefix)
+	}
+	buf := make([]byte, apiTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", [32]byte{}, fmt.Errorf("auth: read random bytes: %w", err)
+	}
+	token = prefix + strings.ToLower(tokenEncoding.EncodeToString(buf))
+	return token, HashAPIToken(token), nil
+}
+
+// WellFormedOAuthToken reports whether s has the shape NewOAuthToken produces
+// for prefix.
+func WellFormedOAuthToken(s, prefix string) bool {
+	body, ok := strings.CutPrefix(s, prefix)
+	if !ok || len(body) != apiTokenBodyLen {
+		return false
+	}
+	for _, c := range body {
+		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
+}
+
 // ResolveAPIKey maps the hash of a presented token to its user and key. ok is
 // false for anything that must be refused (unknown, revoked, suspended, a user
 // who cannot sign in). Like ResolveUser it is injected: the store implements it.
@@ -209,6 +248,20 @@ func (l *FailureLimiter) Fail(addr string) {
 //     this server does not grant.
 type BearerGate struct {
 	Resolve ResolveAPIKey
+	// ResolveOAuth resolves an OAuth ACCESS token ("mra_", ADR-050). Nil means
+	// the OAuth surface is off: such a token is then just an unknown credential.
+	// An access token is accepted ONLY on OAuthPath, the resource it was issued
+	// for (RFC 8707): on any other route it is the same uniform 401, after the
+	// same single database lookup, whatever its validity.
+	ResolveOAuth ResolveAPIKey
+	// OAuthPath is the one path an access token is valid on ("/mcp").
+	OAuthPath string
+	// ChallengePath and Challenge: a refusal on ChallengePath carries Challenge
+	// as its WWW-Authenticate value (the MCP resource-metadata challenge,
+	// ADR-050 section 2) instead of the plain `Bearer realm="mailroom"`. Still
+	// one answer per route, whatever the cause.
+	ChallengePath string
+	Challenge     string
 	// SessionCookie is the session cookie's name; its presence alongside a
 	// bearer token is refused. Empty means only the default name is checked.
 	SessionCookie string
@@ -248,17 +301,29 @@ func (g *BearerGate) Wrap(next, sessionGated http.Handler) http.Handler {
 		_, cookieErr := r.Cookie(cookie)
 		both := cookieErr == nil
 
-		// The lookup runs for EVERY presented credential, well-formed or not:
-		// a request refused on shape before the database would answer faster
-		// than one refused after it, and that difference is a signal.
-		userID, keyID, ok, err := g.Resolve(r.Context(), HashAPIToken(token))
+		// An OAuth access token is told by its prefix and resolved through its
+		// own table; anything else is looked up as an API key. Exactly ONE
+		// lookup runs for EVERY presented credential, well-formed or not: a
+		// request refused on shape before the database would answer faster than
+		// one refused after it, and that difference is a signal.
+		resolve, shapeOK, audienceOK := g.Resolve, WellFormedAPIToken(token), true
+		if g.ResolveOAuth != nil && strings.HasPrefix(token, OAuthAccessPrefix) {
+			resolve, shapeOK = g.ResolveOAuth, WellFormedOAuthToken(token, OAuthAccessPrefix)
+			audienceOK = r.URL.Path == g.OAuthPath
+		}
+		// A refresh token is never a bearer credential, whatever any table
+		// says about its hash.
+		if strings.HasPrefix(token, OAuthRefreshPrefix) {
+			shapeOK = false
+		}
+		userID, keyID, ok, err := resolve(r.Context(), HashAPIToken(token))
 		if err != nil {
 			// Never the token: only that a lookup failed, and from where.
 			log.ErrorContext(r.Context(), "API key lookup failed", "client", addr, "err", err)
 			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		if !ok || both || !WellFormedAPIToken(token) {
+		if !ok || both || !shapeOK || !audienceOK {
 			// THE LIMITER IS CONSULTED ONLY ON THE FAILURE PATH (#49 review).
 			// Checked first, it would refuse a VALID key from an address that
 			// strangers had flooded — and behind a reverse proxy every request
@@ -271,12 +336,22 @@ func (g *BearerGate) Wrap(next, sessionGated http.Handler) http.Handler {
 			}
 			limiter.Fail(addr)
 			log.InfoContext(r.Context(), "API key authentication refused", "client", addr)
-			unauthorizedBearer(w)
+			g.refuse(w, r)
 			return
 		}
 		ctx := context.WithValue(contextWithUserID(r.Context(), userID), apiKeyIDContextKey, keyID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// refuse writes the one refusal for r's route.
+func (g *BearerGate) refuse(w http.ResponseWriter, r *http.Request) {
+	if g.Challenge != "" && r.URL.Path == g.ChallengePath {
+		w.Header().Set("WWW-Authenticate", g.Challenge)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	unauthorizedBearer(w)
 }
 
 // unauthorizedBearer is the one refusal. It names the scheme (RFC 6750 §3) and

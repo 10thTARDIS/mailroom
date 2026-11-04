@@ -47,7 +47,8 @@ func keyObject(k store.APIKey, usage *store.APIKeyUsage) map[string]any {
 	obj := map[string]any{
 		"id":               k.ID.String(),
 		"name":             k.Name,
-		"tokenHint":        auth.APITokenPrefix + k.TokenHint,
+		"tokenHint":        tokenHintOf(k),
+		"kind":             k.Kind,
 		"scopes":           k.Scopes,
 		"accountIds":       accounts,
 		"labelIds":         nil,
@@ -61,11 +62,24 @@ func keyObject(k store.APIKey, usage *store.APIKeyUsage) map[string]any {
 		"suspendedAt":      jmapDatePtr(k.SuspendedAt),
 		"suspendedReason":  nullIfEmpty(k.SuspendedReason),
 	}
+	if k.Kind == store.KeyKindOAuth {
+		obj["oauthClient"] = map[string]any{"id": k.OAuthClientID, "name": k.OAuthClientName,
+			"kind": k.OAuthClientKind, "redirectHost": k.OAuthRedirectHost}
+	}
 	if usage != nil {
 		obj["usedLastMinute"] = usage.CostLastMinute
 		obj["usedLast24h"] = usage.CostLast24h
 	}
 	return obj
+}
+
+// tokenHintOf is the hint a key list shows; a grant to an OAuth client has no
+// token of its own, so none.
+func tokenHintOf(k store.APIKey) any {
+	if k.Kind == store.KeyKindOAuth {
+		return nil
+	}
+	return auth.APITokenPrefix + k.TokenHint
 }
 
 func ulidStringsAPI(ids []ulid.ULID) []string {
@@ -112,6 +126,15 @@ func (a *API) apiKeyGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawM
 		if err != nil {
 			return &MethodError{Type: errServerFail, Description: err.Error()}
 		}
+		families, err := tx.ListOAuthFamilies(ctx, 200)
+		if err != nil {
+			return &MethodError{Type: errServerFail, Description: err.Error()}
+		}
+		byKey := map[ulid.ULID][]map[string]any{}
+		for _, f := range families {
+			byKey[f.APIKeyID] = append(byKey[f.APIKeyID], map[string]any{"id": f.ID.String(),
+				"createdAt": jmapDate(f.CreatedAt), "lastUsedAt": jmapDate(f.LastUsedAt), "expiresAt": jmapDate(f.ExpiresAt)})
+		}
 		for _, k := range keys {
 			if want != nil && !want[k.ID.String()] {
 				continue
@@ -120,7 +143,15 @@ func (a *API) apiKeyGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawM
 			if err != nil {
 				return &MethodError{Type: errServerFail, Description: err.Error()}
 			}
-			list = append(list, keyObject(k, &u))
+			obj := keyObject(k, &u)
+			if k.Kind == store.KeyKindOAuth {
+				fs := byKey[k.ID]
+				if fs == nil {
+					fs = []map[string]any{}
+				}
+				obj["families"] = fs
+			}
+			list = append(list, obj)
 			seen[k.ID.String()] = true
 		}
 		return nil

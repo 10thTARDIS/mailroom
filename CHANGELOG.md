@@ -9,6 +9,18 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Connecting AI tools with OAuth (beta, the server side)
+
+- **An AI tool that supports OAuth can now be approved in your browser instead of being given a key.** When Mailroom knows its public https address, `/mcp` also accepts tokens it issues itself. The tool finds Mailroom from the `/mcp` address alone; you see which app is asking, where you will be sent back to, and exactly what it may do, and you choose the permissions, accounts, limits and whether sending and deleting wait for your approval, just as for a key.
+- **An approved app is a connected app with the same controls as a key.** It appears with your keys; you can suspend, change or revoke it, or end one connection of it, and the next request it makes is refused. A refresh token used twice ends that connection and alerts you; the app stays and can ask again.
+- **Safer by construction.** These tokens work on `/mcp` only, never on the mail API. Approval needs a signed-in browser session, a request can be approved once, and apps are checked from a metadata address your server fetches with the same protections as other outbound requests.
+- **Apps you register yourself.** For a tool that cannot identify itself, create a client in the API (a name and its return addresses) and paste its client id into the tool.
+- **Not yet:** the Settings screens for connected apps, the full approval screen, dynamic registration and asking for more permissions later.
+
+### Upgrading
+
+- Nothing is needed. To turn the OAuth surface off, leave the public address unset. `MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS` lets Mailroom fetch app metadata from a private network address.
+
 ## [1.99.2] — 2026-11-03
 
 **Area lists and folder counts get faster.** Counting the conversations in an area, and recounting each folder's messages and unread mail, spent most of their time sorting message ids by your server's language rules, which they never needed. They now compare ids byte by byte. Every count comes out exactly as before, and conversation-grouped lists, including the desk's sections, get the same speed-up. There are no upgrade steps.

@@ -56,9 +56,17 @@ type Policy struct {
 	// and forwarding a real one would be the whole feature failing quietly.
 	UserAgent string
 	// Exempt, when non-nil, is consulted for an address the table refuses; true
-	// admits it. It is nil for every production caller. Only a build-tagged file
-	// can supply one (see internal/api/proxy_e2e_private.go), so the shipped
-	// binary has no way to widen the guard.
+	// admits it. It is nil for every caller except these:
+	//   - internal/oauthserver's metadata-document client, when the operator sets
+	//     MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS. It admits RFC 1918, loopback
+	//     (127/8, ::1) and unique-local (fc00::/7) addresses and NOTHING else:
+	//     link-local (including the 169.254.169.254 metadata service, also as
+	//     ::ffff:169.254.169.254), CGNAT, multicast and the rest of the table
+	//     stay refused (oauthserver's TestCIMDPrivateOptInKeepsLinkLocalRefused).
+	//   - build-tagged test files (see internal/api/proxy_e2e_private.go), which
+	//     are not in the shipped binary.
+	// The account-host setting MAILROOM_ALLOW_PRIVATE_ACCOUNT_HOSTS does NOT use
+	// this field: it lifts the guard through Dialer.AllowPrivate.
 	Exempt func(netip.Addr) bool
 }
 

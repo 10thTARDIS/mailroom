@@ -80,6 +80,7 @@ import (
 	"mailroom/internal/metrics"
 	"mailroom/internal/ml"
 	"mailroom/internal/oauthmail"
+	"mailroom/internal/oauthserver"
 	"mailroom/internal/onboarding"
 	"mailroom/internal/outofoffice"
 	"mailroom/internal/pgpkeys"
@@ -301,6 +302,7 @@ func run() error {
 	// Finished job rows past their retention windows are deleted daily
 	// (migration 00084), with the count per state logged.
 	go runJobSweep(ctx, st, jobSweepInterval, cfg.JobRetention, cfg.DeadJobRetention, logger)
+	go runOAuthSweep(ctx, st, jobSweepInterval, logger)
 
 	// Readiness is "can we reach the database": SystemTx opens a real
 	// transaction on the pool with no user identity attached (the
@@ -741,7 +743,7 @@ type route struct {
 // JMAP surface, and the catch-all web route that swallows every path no earlier
 // pattern claimed — which is what makes "no route falls through to the SPA
 // unauthenticated" a property of the mux rather than a hope.
-func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service) []route {
+func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service, oauthSrv *oauthserver.Server) []route {
 	rs := make([]route, 0, len(open)+len(api.JMAPPaths())+4)
 	rs = append(rs, open...)
 
@@ -820,6 +822,8 @@ func routes(jmap, web, oauthCB http.Handler, open []route, keys *keypub.Service)
 			},
 		)
 	}
+
+	rs = append(rs, oauthRoutes(oauthSrv)...)
 
 	// Straight from internal/api rather than restated here: a route the API
 	// serves but this list forgets is a 404 that looks exactly like a missing
@@ -1109,8 +1113,12 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 		svc.SetScanner(scanner)
 	}
 
+	oauthSrv, err := buildOAuthServer(st, cfg, svc, logger)
+	if err != nil {
+		return nil, nil, err
+	}
 	h, err := mountApp(ctx, st, cfg, operatorID, logger, svc.Handler(), webHandler(cfg.WebRoot, logger),
-		oauthCallbackHandler(oa.connector), nil, revoker)
+		oauthCallbackHandler(oa.connector), nil, revoker, oauthSrv)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1121,7 +1129,7 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 
 // mountApp builds the app mux: the auth path's open routes, then every route in
 // the inventory, each wrapped according to the side of the gate it declared.
-func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operatorID ulid.ULID, logger *slog.Logger, jmap, web, oauthCB http.Handler, keypubLookup keypub.Lookup, revoker *providerRevoker) (http.Handler, error) {
+func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operatorID ulid.ULID, logger *slog.Logger, jmap, web, oauthCB http.Handler, keypubLookup keypub.Lookup, revoker *providerRevoker, oauthSrv *oauthserver.Server) (http.Handler, error) {
 	var (
 		open    []route
 		wrapAPI func(http.Handler) http.Handler
@@ -1154,6 +1162,18 @@ func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operator
 		SessionCookie: auth.DefaultSessionCookieName,
 		Limiter:       auth.NewFailureLimiter(auth.DefaultBearerFailureBurst, auth.DefaultBearerFailureRefill),
 		Log:           logger,
+	}
+	mcpChallenge := ""
+	if oauthSrv != nil {
+		// OAuth access tokens (ADR-050): accepted on /mcp only, and the 401
+		// there names the resource metadata. One failure budget per address
+		// across the bearer gate and the token endpoint.
+		bearerGate.ResolveOAuth = oauthAccessResolver(st)
+		bearerGate.OAuthPath = api.MCPPath
+		bearerGate.ChallengePath = api.MCPPath
+		bearerGate.Challenge = oauthSrv.Challenge()
+		mcpChallenge = oauthSrv.Challenge()
+		oauthSrv.UseLimiter(bearerGate.Limiter)
 	}
 	// CSRF defence in depth (#860) for the session path only: the guard sits
 	// INSIDE the session gate (an anonymous request still gets its 401) and
@@ -1210,7 +1230,7 @@ func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operator
 	csp := appCSPFor(cfg.OIDCRedirectURL)
 
 	mux := http.NewServeMux()
-	for _, rt := range routes(jmap, web, oauthCB, open, keyPub) {
+	for _, rt := range routes(jmap, web, oauthCB, open, keyPub, oauthSrv) {
 		h := rt.handler
 		switch rt.gate {
 		case gateOpen:
@@ -1229,7 +1249,7 @@ func mountApp(ctx context.Context, st *store.Store, cfg *config.Config, operator
 				// neither an Authorization header nor a session cookie. Under
 				// dev-auth every request already IS the operator's session, so
 				// a keyless one reaches /mcp's keys-only 403 instead.
-				h = api.MCPChallenge(h, auth.DefaultSessionCookieName)
+				h = api.MCPChallengeWith(h, auth.DefaultSessionCookieName, mcpChallenge)
 			}
 		case gatePublic:
 			// Hardening headers, no auth. The handler is reached by strangers on

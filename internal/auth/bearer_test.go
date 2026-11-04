@@ -258,3 +258,67 @@ func TestBearerGateNeverLogsTheToken(t *testing.T) {
 		}
 	}
 }
+
+// OAuth access tokens (ADR-050): resolved through their own table, accepted on
+// one path only, with one lookup per presented credential whatever its shape.
+func TestBearerGateOAuthAudience(t *testing.T) {
+	access, _, err := NewOAuthToken(OAuthAccessPrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresh, _, _ := NewOAuthToken(OAuthRefreshPrefix)
+	if !WellFormedOAuthToken(access, OAuthAccessPrefix) || WellFormedOAuthToken(access, OAuthRefreshPrefix) || WellFormedAPIToken(access) {
+		t.Fatal("token shapes overlap")
+	}
+	user, key := ulid.Make(), ulid.Make()
+	lookups := map[string]int{}
+	live := HashAPIToken(access)
+	res := func(label string) ResolveAPIKey {
+		return func(_ context.Context, h [32]byte) (ulid.ULID, ulid.ULID, bool, error) {
+			lookups[label]++
+			return user, key, h == live || h == HashAPIToken(refresh), nil
+		}
+	}
+	g := &BearerGate{Resolve: res("key"), ResolveOAuth: res("oauth"), OAuthPath: "/mcp", ChallengePath: "/mcp",
+		Challenge: `Bearer realm="mailroom", resource_metadata="https://mail.example.com/x"`,
+		Limiter:   NewFailureLimiter(1000, time.Millisecond)}
+	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(599) }))
+	do := func(path, tok string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, path, nil)
+		r.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := do("/mcp", access); w.Code != 204 {
+		t.Fatalf("access token on /mcp: %d", w.Code)
+	}
+	for _, p := range []string{"/jmap", "/jmap/session", "/mcp/x", "/"} {
+		if w := do(p, access); w.Code != 401 || w.Header().Get("WWW-Authenticate") != `Bearer realm="mailroom"` {
+			t.Errorf("access token on %s: %d %q", p, w.Code, w.Header().Get("WWW-Authenticate"))
+		}
+	}
+	for _, p := range []string{"/mcp", "/jmap"} {
+		if w := do(p, refresh); w.Code != 401 {
+			t.Errorf("refresh token as bearer on %s: %d", p, w.Code)
+		}
+	}
+	if w := do("/mcp", "mra_"+strings.Repeat("a", 52)); w.Code != 401 || w.Header().Get("WWW-Authenticate") != g.Challenge {
+		t.Errorf("unknown access token on /mcp: %d %q", w.Code, w.Header().Get("WWW-Authenticate"))
+	}
+	// ONE lookup per presented token, of every shape, in the table its prefix names.
+	before := lookups["key"] + lookups["oauth"]
+	for _, tok := range []string{"junk", "mr_" + strings.Repeat("a", 52), "mra_short", refresh} {
+		do("/jmap", tok)
+	}
+	if got := lookups["key"] + lookups["oauth"] - before; got != 4 {
+		t.Errorf("4 credentials caused %d lookups, want 4", got)
+	}
+	// With the OAuth surface off, an mra_ token is just an unknown key.
+	g.ResolveOAuth = nil
+	lookups = map[string]int{}
+	if w := do("/mcp", access); w.Code != 401 || lookups["key"] != 1 {
+		t.Errorf("OAuth off: %d, key lookups %d", w.Code, lookups["key"])
+	}
+}

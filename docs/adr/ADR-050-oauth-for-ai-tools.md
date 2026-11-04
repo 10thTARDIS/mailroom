@@ -226,8 +226,11 @@ CORS-free.
   must be `/mcp`. It issues an access token and a refresh token in a new family.
   Presenting a code a second time is refused **and revokes the family it already
   produced** (OAuth 2.1 §4.1.3).
-- `refresh_token`: rotation and reuse detection as in §3. The scope may be
-  narrowed, never widened. Widening is a new consent (§8).
+- `refresh_token`: rotation and reuse detection as in §3. `client_id` is required
+  and must be the grant's client. A request naming a scope the grant does not hold
+  is `invalid_scope` (widening is a new consent, §8); a narrower request is
+  ignored, and the response's `scope` is always the grant's current scopes,
+  because the gate enforces those whatever a token was asked for.
 - Errors per RFC 6749 §5.2 (`invalid_grant`, `invalid_client`,
   `invalid_request`, `unsupported_grant_type`, `invalid_target`). Responses carry
   `Cache-Control: no-store`.
@@ -242,7 +245,7 @@ token and always answers 200.
 - Settings → API keys lists OAuth grants beside keys as **Connected apps**: the
   client and how it is identified, the redirect host, scopes, limits,
   created and last used, and the token families (one per device that connected)
-  with when each was last used.
+  with when each was last refreshed. Use of each request is recorded on the grant.
 - Every key action applies: edit settings, suspend and reactivate, **revoke**.
   Revoking the grant (or a single family) takes effect on the next request,
   because every access token is checked against the grant's state on every
