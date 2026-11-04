@@ -9,17 +9,34 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-### Connecting AI tools with OAuth (beta, the server side)
+## [1.100.0-beta.1] — 2026-11-04
 
-- **An AI tool that supports OAuth can now be approved in your browser instead of being given a key.** When Mailroom knows its public https address, `/mcp` also accepts tokens it issues itself. The tool finds Mailroom from the `/mcp` address alone; you see which app is asking, where you will be sent back to, and exactly what it may do, and you choose the permissions, accounts, limits and whether sending and deleting wait for your approval, just as for a key.
-- **An approved app is a connected app with the same controls as a key.** It appears with your keys; you can suspend, change or revoke it, or end one connection of it, and the next request it makes is refused. A refresh token used twice ends that connection and alerts you; the app stays and can ask again.
-- **Safer by construction.** These tokens work on `/mcp` only, never on the mail API. Approval needs a signed-in browser session, a request can be approved once, and apps are checked from a metadata address your server fetches with the same protections as other outbound requests.
-- **Apps you register yourself.** For a tool that cannot identify itself, create a client in the API (a name and its return addresses) and paste its client id into the tool.
-- **Not yet:** the Settings screens for connected apps, the full approval screen, dynamic registration and asking for more permissions later.
+**The first beta of OAuth for AI tools: an AI app that supports OAuth can connect to Mailroom by its address alone, and you approve it in your browser instead of creating and pasting a key.** This beta is the server side. The approval screen is a plain first version, and the Settings screens for connected apps come in the next beta. An approved app gets exactly what an API key with the same settings would get, and nothing more.
+
+### Connecting AI tools with OAuth
+
+- **Approve an app in your browser.** Point an OAuth-capable AI app at your Mailroom's `/mcp` address. It finds where to ask for approval, and Mailroom shows you which app is asking, the address it will send you back to, and what it wants. You choose its permissions, which accounts it may use, its limits, and whether sending and deleting wait for your OK, the same choices as for a key.
+- **You can tell who is asking.** An app that publishes its identity at a web address is shown as "from" that address, which Mailroom has checked. When the approval goes back to an app on this computer, you get a warning to approve only an app you started yourself.
+- **Revoking is immediate.** An approved app appears with your API keys. You can suspend it, change it, revoke it, or end a single device's connection, and the next request it makes is refused.
+- **Stolen tokens are caught.** If an app's renewal token is ever used twice, a sign it was copied, that connection is ended and you get an alert. The app can ask for approval again.
+- **Apps you register yourself.** For a tool that cannot identify itself, you can create a client through the API (a name and its return addresses) and paste its client id into the tool. A Settings screen for this comes later.
+
+### Safety
+
+- OAuth tokens work only on `/mcp`, never on the mail API. API keys are unchanged and keep working everywhere they did.
+- Approving needs a signed-in browser session, the approval can't be forged from another site or shown inside another site's page, and each request can be approved only once.
+- When Mailroom fetches an app's details from its web address, it refuses private network, loopback and cloud-metadata addresses, as it does for every outbound request.
+
+### Not yet
+
+- The full approval screen and a Connected apps list in Settings (next beta).
+- Apps that register themselves automatically, and apps asking for more permissions later (the beta after that).
+- A switch to turn OAuth off.
 
 ### Upgrading
 
-- Nothing is needed. To turn the OAuth surface off, leave the public address unset. `MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS` lets Mailroom fetch app metadata from a private network address.
+- Nothing is needed. OAuth is available whenever Mailroom knows its public https address: `MAILROOM_PUBLIC_URL`, or else the address in `MAILROOM_OIDC_REDIRECT_URL`. Without one it stays off and `/mcp` works with keys only, as before.
+- `MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS=1` lets Mailroom fetch an app's details from a private network address, for apps you host on your own network. Cloud-metadata and link-local addresses stay refused.
 
 ## [1.99.2] — 2026-11-03
 
