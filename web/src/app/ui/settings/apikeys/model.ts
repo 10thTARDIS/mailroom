@@ -26,6 +26,7 @@ import type {
   ApiKeySettings,
   ApiKeysCapability,
   Id,
+  OAuthClientInfo,
   PendingAction,
   SuppressedRefusal,
 } from "../../../../core/jmap/types";
@@ -149,6 +150,150 @@ export function scopeSummary(scopes: readonly string[]): string {
     }
   }
   return orderScopes(scopes).map(scopeLabel).join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// Connected apps (ADR-050): grants to OAuth apps, listed beside keys
+// ---------------------------------------------------------------------------
+
+/** A grant to an OAuth app is an `ApiKey` row of `kind: "oauth"`. A server that
+ * predates OAuth sends no `kind`: that is a key. */
+export function isGrant(k: Pick<ApiKey, "kind">): boolean {
+  return k.kind === "oauth";
+}
+
+/** The rows split into keys and connected apps, each in the server's order. */
+export function splitKeysAndApps(rows: readonly ApiKey[]): { keys: ApiKey[]; apps: ApiKey[] } {
+  return { keys: rows.filter((k) => !isGrant(k)), apps: rows.filter(isGrant) };
+}
+
+export type AppIdentity = { kind: "verified"; host: string } | { kind: "unverified" } | { kind: "manual" };
+
+/**
+ * How an app is identified. Only an app that identifies itself by a metadata
+ * document at its own address (`cimd`) is "from <host>": the server fetched that
+ * address, so the host is verified. A registered app's name is whatever it said.
+ * A client id that is not a web address cannot be "from" anywhere, so it is not
+ * called verified.
+ */
+export function appIdentity(c: Pick<OAuthClientInfo, "id" | "kind">): AppIdentity {
+  if (c.kind === "manual") return { kind: "manual" };
+  if (c.kind === "cimd") {
+    try {
+      const host = new URL(c.id).hostname;
+      if (host !== "") return { kind: "verified", host };
+    } catch {
+      // Not an address: fall through to unverified.
+    }
+  }
+  return { kind: "unverified" };
+}
+
+export function appIdentityText(c: Pick<OAuthClientInfo, "id" | "kind">): string {
+  const id = appIdentity(c);
+  if (id.kind === "verified") return t("apiKeys.apps.identity.verified", { host: id.host });
+  if (id.kind === "manual") return t("apiKeys.apps.identity.manual");
+  return t("apiKeys.apps.identity.unverified");
+}
+
+/** "60 calls a minute, 500 a day". */
+export function limitsText(k: Pick<ApiKey, "ratePerMinute" | "dailyBudget">): string {
+  return t("apiKeys.apps.limits", { rate: k.ratePerMinute, budget: k.dailyBudget });
+}
+
+// ---------------------------------------------------------------------------
+// Apps the user registers: return addresses
+// ---------------------------------------------------------------------------
+
+export const MAX_RETURN_ADDRESSES = 10;
+const MAX_RETURN_ADDRESS_LENGTH = 2048;
+
+export type ReturnAddressProblem = "tooLong" | "scheme" | "fragment" | "invalid";
+
+/**
+ * Whether one return address is acceptable, by the server's own rule
+ * (oauthserver.ValidateRedirectURI): https, or http to a loopback host
+ * (localhost, 127.0.0.1, ::1), with a host, no user part, no fragment, no space,
+ * control character or backslash. The server decides again; this is what lets
+ * the form say so before anything is sent. null: acceptable.
+ */
+export function checkReturnAddress(raw: string): ReturnAddressProblem | null {
+  if (raw.length > MAX_RETURN_ADDRESS_LENGTH) return "tooLong";
+  // eslint-disable-next-line no-control-regex
+  if (raw === "" || /[\u0000-\u0020\u007f\\]/.test(raw)) return "invalid";
+  if (raw.includes("#")) return "fragment";
+  // The authority must follow "://" directly: the URL parser would otherwise
+  // read "https:///x" as host "x", where the server sees no host.
+  const m = /^([A-Za-z][A-Za-z0-9+.-]*):(\/\/([^/?#]*))?/.exec(raw);
+  if (!m) return "invalid";
+  const scheme = (m[1] ?? "").toLowerCase();
+  if (scheme !== "https" && scheme !== "http") return "scheme";
+  if ((m[3] ?? "") === "" || (m[3] ?? "").includes("@")) return "invalid";
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "invalid";
+  }
+  if (u.username !== "" || u.password !== "") return "invalid";
+  if (u.protocol === "https:") return null;
+  if (u.protocol === "http:") {
+    const h = u.hostname.toLowerCase();
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]" ? null : "scheme";
+  }
+  return "scheme";
+}
+
+/** The addresses typed one per line (commas and spaces also separate), without
+ * blanks or repeats. */
+export function parseReturnAddresses(text: string): string[] {
+  const out: string[] = [];
+  for (const part of text.split(/[\s,]+/)) {
+    if (part !== "" && !out.includes(part)) out.push(part);
+  }
+  return out;
+}
+
+export type ClientProblem =
+  | { problem: "name" }
+  | { problem: "empty" }
+  | { problem: "tooMany" }
+  | { problem: ReturnAddressProblem; address: string };
+
+/** The OAuthClient/set create for a form, or the first thing wrong with it. */
+export function buildClient(
+  name: string,
+  addresses: string,
+): { ok: true; name: string; redirectUris: string[] } | ({ ok: false } & ClientProblem) {
+  const n = name.trim();
+  if (n === "" || [...n].length > 100) return { ok: false, problem: "name" };
+  const uris = parseReturnAddresses(addresses);
+  if (uris.length === 0) return { ok: false, problem: "empty" };
+  if (uris.length > MAX_RETURN_ADDRESSES) return { ok: false, problem: "tooMany" };
+  for (const address of uris) {
+    const bad = checkReturnAddress(address);
+    if (bad) return { ok: false, problem: bad, address };
+  }
+  return { ok: true, name: n, redirectUris: uris };
+}
+
+export function clientProblemText(p: ClientProblem): string {
+  switch (p.problem) {
+    case "name":
+      return t("apiKeys.clients.problem.name");
+    case "empty":
+      return t("apiKeys.clients.problem.empty");
+    case "tooMany":
+      return t("apiKeys.clients.problem.tooMany");
+    case "scheme":
+      return t("apiKeys.clients.problem.scheme", { address: p.address });
+    case "fragment":
+      return t("apiKeys.clients.problem.fragment", { address: p.address });
+    case "tooLong":
+      return t("apiKeys.clients.problem.tooLong", { address: p.address.slice(0, 40) + "…" });
+    default:
+      return t("apiKeys.clients.problem.invalid", { address: p.address });
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -14,11 +14,18 @@
 //   * ACTIVITY, below (Activity.tsx).
 //
 // A revoked key is shown read-only, with its activity: the audit stays.
+//
+// A GRANT TO AN OAUTH APP (ADR-050, `kind: "oauth"`) is the same screen: the
+// same editing, suspend, reactivate, revoke and activity, because it is the same
+// object. What differs is only what a grant is: it has no token (so no hint and
+// no setup guide), it says which app it is and how that app was identified, and
+// it lists the app's connections, each of which can be ended without removing
+// the app.
 
 import { useEffect, useId, useState } from "react";
 import type { JSX } from "react";
 
-import type { ApiKey, Id } from "../../../../core/jmap/types";
+import type { ApiKey, Id, OAuthFamily } from "../../../../core/jmap/types";
 import { t } from "../../../i18n";
 import { keyDateLong } from "../../../../core/userKeys";
 import { clockText } from "../../desk/format";
@@ -28,9 +35,12 @@ import type { ActivityReading } from "./Activity";
 import type { ApiKeysApi } from "./api";
 import {
   confirmableScopes,
+  appIdentityText,
   eventText,
+  isGrant,
   keyRefusalText,
   keyState,
+  limitsText,
   orderScopes,
   restrictionText,
   scopeLabel,
@@ -38,6 +48,7 @@ import {
   usageText,
 } from "./model";
 import { SetupGuide } from "./SetupGuide";
+import { Untrusted } from "./Untrusted";
 
 export const ACTIVITY_LIMIT = 50;
 
@@ -63,6 +74,7 @@ export function KeyDetail({
 }): JSX.Element {
   const cap = api.capability();
   const state = keyState(keyItem);
+  const grant = isGrant(keyItem);
   const [activity, setActivity] = useState<ActivityReading>({ kind: "asking" });
   const [generation, setGeneration] = useState(0);
   const [dialog, setDialog] = useState<"revoke" | "suspend" | "reactivate" | null>(null);
@@ -106,10 +118,10 @@ export function KeyDetail({
     <div className="apikey-detail">
       <p>
         <button type="button" className="link-button" onClick={onBack}>
-          {t("apiKeys.detail.back")}
+          {grant ? t("apiKeys.apps.back") : t("apiKeys.detail.back")}
         </button>
       </p>
-      <h4 className="apikey-detail-name">{keyItem.name}</h4>
+      <h4 className="apikey-detail-name">{grant ? <Untrusted text={keyItem.name} /> : keyItem.name}</h4>
       <p className="setting-done" role="status">
         {done}
       </p>
@@ -125,10 +137,25 @@ export function KeyDetail({
                   reason: state.reason ?? t("apiKeys.state.noReason"),
                 })}
         </dd>
-        <dt>{t("apiKeys.detail.hint")}</dt>
-        <dd>
-          <code>{keyItem.tokenHint}…</code>
-        </dd>
+        {grant && keyItem.oauthClient ? (
+          <>
+            <dt>{t("apiKeys.apps.detail.app")}</dt>
+            <dd>{appIdentityText(keyItem.oauthClient)}</dd>
+            <dt>{t("apiKeys.apps.detail.returns")}</dt>
+            <dd>
+              <Untrusted text={keyItem.oauthClient.redirectHost} />
+            </dd>
+            <dt>{t("apiKeys.apps.detail.token")}</dt>
+            <dd>{t("apiKeys.apps.detail.noToken")}</dd>
+          </>
+        ) : keyItem.tokenHint ? (
+          <>
+            <dt>{t("apiKeys.detail.hint")}</dt>
+            <dd>
+              <code>{keyItem.tokenHint}…</code>
+            </dd>
+          </>
+        ) : null}
         <dt>{t("apiKeys.detail.access")}</dt>
         <dd>
           {scopeSummary(keyItem.scopes)}
@@ -142,6 +169,12 @@ export function KeyDetail({
         </dd>
         <dt>{t("apiKeys.detail.accounts")}</dt>
         <dd>{restrictionText(keyItem.accountIds, accountNames)}</dd>
+        {grant ? (
+          <>
+            <dt>{t("apiKeys.apps.detail.limits")}</dt>
+            <dd>{limitsText(keyItem)}</dd>
+          </>
+        ) : null}
         <dt>{t("apiKeys.detail.created")}</dt>
         <dd>{when(keyItem.createdAt)}</dd>
         <dt>{t("apiKeys.detail.lastUsed")}</dt>
@@ -181,10 +214,18 @@ export function KeyDetail({
         </div>
       ) : null}
 
+      {grant && state.kind !== "revoked" ? (
+        <Connections
+          families={keyItem.families ?? []}
+          busy={busy}
+          onEnd={(f) => run(t("apiKeys.apps.families.ended"), () => api.endConnection(f.id))}
+        />
+      ) : null}
+
       <h4>{t("apiKeys.activity.heading")}</h4>
       <Activity reading={activity} cap={cap} limit={ACTIVITY_LIMIT} />
 
-      {state.kind !== "revoked" ? (
+      {state.kind !== "revoked" && !grant ? (
         <>
           <h4>{t("apiKeys.setup.heading")}</h4>
           <SetupGuide origin={origin} token={null} scopes={keyItem.scopes} restricted={keyItem.accountIds !== null} />
@@ -194,8 +235,12 @@ export function KeyDetail({
       {dialog === "revoke" ? (
         <KeyConfirmDialog
           title={t("apiKeys.revoke.title", { name: keyItem.name })}
-          paragraphs={[t("apiKeys.revoke.what"), t("apiKeys.revoke.permanent")]}
-          confirmLabel={t("apiKeys.revoke.submit")}
+          paragraphs={
+            grant
+              ? [t("apiKeys.apps.revoke.what"), t("apiKeys.apps.revoke.permanent")]
+              : [t("apiKeys.revoke.what"), t("apiKeys.revoke.permanent")]
+          }
+          confirmLabel={grant ? t("apiKeys.apps.revoke.submit") : t("apiKeys.revoke.submit")}
           busyLabel={t("apiKeys.revoke.busy")}
           busy={busy}
           error={error}
@@ -206,7 +251,7 @@ export function KeyDetail({
       {dialog === "suspend" ? (
         <KeyConfirmDialog
           title={t("apiKeys.suspend.title", { name: keyItem.name })}
-          paragraphs={[t("apiKeys.suspend.what")]}
+          paragraphs={[grant ? t("apiKeys.apps.suspend.what") : t("apiKeys.suspend.what")]}
           confirmLabel={t("apiKeys.suspend.submit")}
           busyLabel={t("apiKeys.suspend.busy")}
           busy={busy}
@@ -233,7 +278,7 @@ export function KeyDetail({
                   }),
                 ]
               : []),
-            t("apiKeys.reactivate.what"),
+            grant ? t("apiKeys.apps.reactivate.what") : t("apiKeys.reactivate.what"),
           ].filter((p) => p !== "")}
           confirmLabel={t("apiKeys.reactivate.submit")}
           busyLabel={t("apiKeys.reactivate.busy")}
@@ -244,6 +289,49 @@ export function KeyDetail({
         />
       ) : null}
     </div>
+  );
+}
+
+/** An app's connections: one per token family, each endable on its own. */
+function Connections({
+  families,
+  busy,
+  onEnd,
+}: {
+  families: readonly OAuthFamily[];
+  busy: boolean;
+  onEnd: (f: OAuthFamily) => Promise<boolean>;
+}): JSX.Element {
+  return (
+    <>
+      <h4>{t("apiKeys.apps.families.heading")}</h4>
+      <p className="field-hint">{t("apiKeys.apps.families.intro")}</p>
+      {families.length === 0 ? <p className="field-hint">{t("apiKeys.apps.families.none")}</p> : null}
+      <ul className="own-key-list apikey-families">
+        {families.map((f) => (
+          <li key={f.id} className="own-key apikey-family">
+            <p className="own-key-facts">
+              <span>{t("apiKeys.apps.families.created")} {when(f.createdAt)}</span>
+              {" · "}
+              <span>{t("apiKeys.apps.families.refreshed")} {when(f.lastUsedAt)}</span>
+              {" · "}
+              <span>{t("apiKeys.apps.families.expires")} {when(f.expiresAt)}</span>
+            </p>
+            <div className="own-key-actions">
+              <button
+                type="button"
+                className="button button-danger"
+                disabled={busy}
+                aria-label={t("apiKeys.apps.families.endFor", { when: when(f.createdAt) })}
+                onClick={() => void onEnd(f)}
+              >
+                {t("apiKeys.apps.families.end")}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

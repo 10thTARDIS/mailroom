@@ -17,6 +17,7 @@ import type {
   ApiKeysCapability,
   Id,
   MethodErrorArgs,
+  OAuthClient,
   PendingAction,
   SetError,
   SuppressedRefusal,
@@ -34,6 +35,12 @@ export interface ApiKeysApi {
   create(settings: ApiKeySettings): Promise<{ ok: true; key: ApiKey; token: string } | { ok: false; error: SetError }>;
   update(id: Id, patch: ApiKeySettings): Promise<{ ok: true } | { ok: false; error: SetError }>;
   revoke(id: Id): Promise<{ ok: true } | { ok: false; error: SetError }>;
+  /** The apps registered by hand (null: could not ask). */
+  clients(): Promise<OAuthClient[] | null>;
+  createClient(name: string, redirectUris: readonly string[]): Promise<{ ok: true; client: OAuthClient } | { ok: false; error: SetError }>;
+  deleteClient(id: string): Promise<{ ok: true } | { ok: false; error: SetError }>;
+  /** Ends one connection (token family) of an app; the app stays. */
+  endConnection(familyId: Id): Promise<{ ok: true } | { ok: false; error: SetError }>;
   events(keyId: Id): Promise<{ list: ApiKeyEvent[]; suppressedRefusals: SuppressedRefusal[] } | null>;
   pending(): Promise<PendingAction[] | null>;
   decide(id: Id, state: "approved" | "denied"): Promise<Decision>;
@@ -54,6 +61,10 @@ export function useApiKeysApi(): ApiKeysApi {
       create: (settings) => client.apiKeyCreate(settings),
       update: (id, patch) => client.apiKeyUpdate(id, patch),
       revoke: (id) => client.apiKeyRevoke(id),
+      clients: () => client.oauthClientsGet(),
+      createClient: (name, uris) => client.oauthClientCreate(name, uris),
+      deleteClient: (id) => client.oauthClientDelete(id),
+      endConnection: (familyId) => client.oauthFamilyEnd(familyId),
       events: (keyId) => client.apiKeyEvents(keyId),
       pending: () => client.pendingActionsGet(),
       decide: (id, state) => client.pendingActionDecide(id, state),

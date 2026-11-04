@@ -13,6 +13,10 @@
 //                       then Create, then "Connect an AI tool"
 //   a key's detail    → `#/settings/api-keys/<id>` (apikeys/KeyDetail.tsx)
 //
+// OAuth APPS (ADR-050) are the same rows with `kind: "oauth"`. They are listed
+// apart, as "Connected apps" and visibly not keys (they have no token), and open
+// the same detail. Below them, the apps the person registers by hand.
+//
 // Keys are not JMAP-synced objects (ADR-042 §1): the list is read when the row
 // opens and again after every change made here.
 
@@ -26,9 +30,11 @@ import type { StateFact } from "../SettingsRow";
 import type { ApiKeysApi } from "../apikeys/api";
 import { CreateKeyDialog } from "../apikeys/CreateKeyDialog";
 import { KeyDetail } from "../apikeys/KeyDetail";
-import { keyState, restrictionText, scopeSummary, usageText } from "../apikeys/model";
+import { appIdentityText, keyState, limitsText, restrictionText, scopeSummary, splitKeysAndApps, usageText } from "../apikeys/model";
+import { ManualClients } from "../apikeys/ManualClients";
 import { PendingList } from "../apikeys/PendingList";
 import { SetupGuide } from "../apikeys/SetupGuide";
+import { Untrusted } from "../apikeys/Untrusted";
 
 export type ApiKeysReading = { kind: "unavailable" } | { kind: "asking" } | { kind: "loaded"; keys: ApiKey[] };
 
@@ -126,8 +132,11 @@ export function ApiKeysBody({
     );
   }
 
-  const live = reading.keys.filter((k) => !k.revokedAt);
-  const revoked = reading.keys.filter((k) => k.revokedAt);
+  const { keys, apps } = splitKeysAndApps(reading.keys);
+  const live = keys.filter((k) => !k.revokedAt);
+  const revoked = keys.filter((k) => k.revokedAt);
+  const liveApps = apps.filter((k) => !k.revokedAt);
+  const revokedApps = apps.filter((k) => k.revokedAt);
 
   return (
     <div className="apikeys-page">
@@ -164,6 +173,27 @@ export function ApiKeysBody({
         </details>
       ) : null}
 
+      <h4>{t("apiKeys.apps.heading")}</h4>
+      <p className="field-hint">{t("apiKeys.apps.intro")}</p>
+      {liveApps.length === 0 ? <p className="field-hint">{t("apiKeys.apps.none")}</p> : null}
+      <ul className="own-key-list apikey-list apikey-app-list">
+        {liveApps.map((k) => (
+          <AppItem key={k.id} k={k} names={names} onOpen={() => openKey(k.id)} />
+        ))}
+      </ul>
+      {revokedApps.length > 0 ? (
+        <details className="apikey-revoked">
+          <summary>{tCount("apiKeys.apps.revoked", revokedApps.length)}</summary>
+          <ul className="own-key-list apikey-list apikey-app-list">
+            {revokedApps.map((k) => (
+              <AppItem key={k.id} k={k} names={names} onOpen={() => openKey(k.id)} />
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      <ManualClients api={api} />
+
       <h4>{t("apiKeys.setup.heading")}</h4>
       <SetupGuide origin={origin} token={null} scopes={null} />
 
@@ -183,13 +213,61 @@ export function ApiKeysBody({
   );
 }
 
+/** A connected app: not a key, so no hint and no token, and it says who the app is. */
+function AppItem({ k, names, onOpen }: { k: ApiKey; names: ReadonlyMap<Id, string>; onOpen: () => void }): JSX.Element {
+  const state = keyState(k);
+  const usage = usageText(k);
+  return (
+    <li className="own-key apikey-item apikey-app">
+      <p className="own-key-heading">
+        <Untrusted text={k.name} /> <span className="apikey-app-badge">{t("apiKeys.apps.badge")}</span>
+      </p>
+      {k.oauthClient ? (
+        <p className="own-key-facts">
+          <span>{appIdentityText(k.oauthClient)}</span>
+          {" · "}
+          <span>
+            {t("apiKeys.apps.returns")} <Untrusted text={k.oauthClient.redirectHost} />
+          </span>
+        </p>
+      ) : null}
+      <p className="own-key-facts">
+        <span>{scopeSummary(k.scopes)}</span>
+        {" · "}
+        <span>{restrictionText(k.accountIds, names)}</span>
+        {" · "}
+        <span>{limitsText(k)}</span>
+        {" · "}
+        <span className={state.kind === "active" ? undefined : "is-warn"}>
+          {state.kind === "active"
+            ? t("apiKeys.state.active")
+            : state.kind === "revoked"
+              ? t("apiKeys.state.revokedShort", { when: keyDateLong(state.at) })
+              : t("apiKeys.state.suspendedShort", { reason: state.reason ?? t("apiKeys.state.noReason") })}
+        </span>
+      </p>
+      <p className="own-key-facts field-hint">
+        {t("apiKeys.apps.created", { when: keyDateLong(k.createdAt) })}
+        {" · "}
+        {k.lastUsedAt ? t("apiKeys.lastUsed", { when: keyDateLong(k.lastUsedAt) }) : t("apiKeys.neverUsed")}
+        {usage ? ` · ${usage}` : null}
+      </p>
+      <div className="own-key-actions">
+        <button type="button" className="button" onClick={onOpen} aria-label={t("apiKeys.list.openFor", { name: k.name })}>
+          {t("apiKeys.list.open")}
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function KeyItem({ k, names, onOpen }: { k: ApiKey; names: ReadonlyMap<Id, string>; onOpen: () => void }): JSX.Element {
   const state = keyState(k);
   const usage = usageText(k);
   return (
     <li className="own-key apikey-item">
       <p className="own-key-heading">
-        {k.name} <code className="apikey-hint">{k.tokenHint}…</code>
+        {k.name} {k.tokenHint ? <code className="apikey-hint">{k.tokenHint}…</code> : null}
       </p>
       <p className="own-key-facts">
         <span>{scopeSummary(k.scopes)}</span>

@@ -261,12 +261,51 @@ export interface ApiKeysCapability {
   readUnitObjects?: number;
 }
 
-/** One API key as ApiKey/get returns it. Never carries the token. */
+/** How an OAuth app is identified (ADR-050 section 4): `cimd` by a metadata
+ * document at its own address (verified by fetching it), `registered` by Dynamic
+ * Client Registration (a name the app chose), `manual` by the user in Settings. */
+export type OAuthClientKind = "cimd" | "registered" | "manual";
+
+/** The app behind a grant (`ApiKey/get` on a `kind: "oauth"` row). */
+export interface OAuthClientInfo {
+  /** The client id: a URL for `cimd`, an opaque id otherwise. */
+  id: string;
+  name: string;
+  kind: OAuthClientKind;
+  /** The host the approval is sent back to. */
+  redirectHost: string;
+}
+
+/** One connection of an app (a token family): one device that connected. */
+export interface OAuthFamily {
+  id: Id;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+}
+
+/** An app the user registered in Settings (`OAuthClient/get`). The id is not a secret. */
+export interface OAuthClient {
+  id: string;
+  name: string;
+  redirectUris: string[];
+  createdAt: string;
+}
+
+/** One API key as ApiKey/get returns it. Never carries the token. A grant to an
+ * OAuth app is the same object with `kind: "oauth"`: it has no token and no
+ * hint, and carries the app and its connections. */
 export interface ApiKey {
   id: Id;
   name: string;
-  /** `mr_` plus the first characters: enough to tell keys apart. */
-  tokenHint: string;
+  /** `mr_` plus the first characters: enough to tell keys apart. null for a
+   * grant to an OAuth app, which has no token of its own. */
+  tokenHint: string | null;
+  /** Absent on a server that predates OAuth: a key. */
+  kind?: "key" | "oauth";
+  oauthClient?: OAuthClientInfo;
+  /** On a grant: its connections, newest first. */
+  families?: OAuthFamily[];
   scopes: string[];
   /** null: every account. */
   accountIds: Id[] | null;

@@ -20,7 +20,7 @@ import type { ApiKey, ApiKeySettings, ApiKeysCapability } from "../../../../core
 import type { ApiKeysApi } from "./api";
 import { axeViolations } from "./axe.testdata";
 import { CreateKeyDialog } from "./CreateKeyDialog";
-import { KEY } from "./fixtures.testdata";
+import { KEY, NO_APPS } from "./fixtures.testdata";
 
 const TOKEN = "mr_" + "q7".repeat(26);
 const CAP: ApiKeysCapability = {
@@ -39,6 +39,7 @@ const onCreated = vi.fn();
 const onClose = vi.fn();
 const pageKeyDown = vi.fn();
 const api: ApiKeysApi = {
+  ...NO_APPS,
   capability: () => CAP,
   list: async () => [],
   create: (s) => create(s),
