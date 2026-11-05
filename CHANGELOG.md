@@ -9,6 +9,44 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.100.0] — 2026-11-05
+
+**AI apps can now connect to Mailroom with OAuth: give an app your Mailroom's `/mcp` address, approve it once in your browser, and manage it alongside your API keys.** Until now an AI tool needed an API key created in Settings and pasted into it, or a local bridge for apps that only speak OAuth. Now any app that supports OAuth for MCP connects by address alone. You approve it on Mailroom's own screen, with the same choices as a key: what it may do, which accounts, its limits, and whether sending and deleting wait for your OK. An approved app can never do more than a key with the same settings, revoking it takes effect immediately, and API keys keep working exactly as before. This release gathers the four 1.100.0 betas.
+
+### Connecting AI tools with OAuth
+
+- **Connect by address.** Point an OAuth-capable AI app at `https://your-mailroom/mcp`. It finds out where to ask for approval and opens Mailroom in your browser. You sign in as usual if you are not already.
+- **A clear approval screen.** It shows which app is asking and the address it will send you back to. An app that publishes its identity at a web address is shown as "from" that address, which Mailroom has checked. An app that registered itself is shown with "name given by the app, not verified". When the approval goes back to an app on the same computer, you are warned to approve only an app you started.
+- **You choose what it may do, in plain words.** Permissions are grouped as reading, changing, and sending and deleting, each in the same words as the API key form. Sending and deleting start as "ask me first", and allowing both needs a typed confirmation. You also choose which accounts it may use, its per-minute and daily limits, and whether it is suspended automatically if it behaves unusually.
+- **Allow more than the app asked for.** The permissions the app asked for start ticked. Every other permission is listed unticked under "Also allow", so an app that asks only for reading can still be given drafting or sending, if you tick it.
+- **Apps that need more can ask.** If an approved app tries something its approval does not cover, Mailroom tells it which permissions that needs. An app that supports this sends you back to the approval screen with the new ones added, and nothing is added unless you approve.
+- **Apps that register themselves.** Apps without a published identity can register with Mailroom on their own. A registration gives no access by itself; it only lets the app ask you. Unapproved registrations are forgotten after a day.
+- **Apps you register yourself.** For a tool that can do neither, create a client under Settings → API keys (a name and its return addresses) and paste its client ID into the tool.
+- **Connected apps in Settings.** Approved apps are listed under Settings → API keys, apart from your keys. Each shows how it was identified, its return address, permissions, limits and activity. You can change its settings, suspend or reactivate it, or revoke it. Each sign-in is listed as a connection (typically one per device), and "End this connection" signs out just that one.
+- **Revoking is immediate.** Every request an app makes is checked against its approval, so a revoked or suspended app, or an ended connection, is refused on its very next request.
+- **The setup guide leads with OAuth.** "Connect an AI tool" in Settings and the MCP documentation now start with the OAuth option, with API keys as the alternative.
+
+### Safety
+
+- OAuth tokens work only on `/mcp`, never on the mail API. They expire after an hour and are renewed in the background.
+- If a renewal token is ever used twice, a sign that it was copied, that connection is ended and you are alerted. The app can ask for approval again.
+- Approving needs a signed-in browser session. The approval screen cannot be forged from another site or shown inside another site's page, and each request can be approved only once.
+- When Mailroom fetches an app's published identity, it refuses private network, loopback and cloud-metadata addresses, as for every other outbound request.
+- Self-registration is limited per network address (50 a day, a few at a time) and across the whole server, and Mailroom holds at most 10,000 unapproved registrations. Past that limit, new registrations are refused until the old ones expire; nothing is discarded to make room. Everything behind one reverse proxy shares that proxy's allowance, so if strangers using it up would matter to you, turn self-registration off.
+- An app's self-declared logo and link are never stored or shown.
+
+### Settings
+
+- `MAILROOM_OAUTH=off` turns OAuth off entirely. The OAuth addresses stop answering, `/mcp` asks for a key only, and tokens already given to apps stop working. Connected apps stay listed and work again when you turn it back on.
+- `MAILROOM_OAUTH_DCR=off` turns off only self-registration.
+- `MAILROOM_OAUTH_ALLOW_PRIVATE_CLIENT_HOSTS=1` lets Mailroom fetch an app's published identity from a private network address, for apps you host yourself. Cloud-metadata and link-local addresses stay refused.
+
+### Upgrading
+
+- Nothing is required. OAuth turns on automatically when Mailroom knows its public https address: `MAILROOM_PUBLIC_URL`, or else the address in `MAILROOM_OIDC_REDIRECT_URL`. Set `MAILROOM_OAUTH=off` if you do not want it.
+- Two database migrations run automatically on start-up. They add tables, and change no existing data.
+- An app's return address must be https, or plain http to the same computer. An app served over plain http at a network address (for example a self-hosted chat front end at `http://chat.example:8080`) must be put behind https before it can connect.
+
 ## [1.100.0-beta.4] — 2026-11-05
 
 **The approval screen now lets you give an AI app more than it asked for.** Testing with a real app showed that some apps ask only for reading and searching and have no way to ask for more, so they could never draft or send. Now every permission is on the screen, and you tick the extra ones you want.
