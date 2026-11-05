@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Connecting AI tools with OAuth
+
+- **You can allow more than an app asked for.** Some AI apps ask only for the basic permissions (reading and searching mail) and cannot ask for more later, so they could never be given anything else. The approval screen now lists every permission, with the ones the app asked for already ticked and the rest unticked under "Also allow". Tick any you want the app to have; sending and deleting still start as "ask me first" and still need the typed confirmation when you allow both. An app that is approved as shown gets exactly what it asked for, and it is told what it actually received.
+
 ## [1.100.0-beta.3] — 2026-11-04
 
 **The third beta completes OAuth for AI tools.** Apps that cannot publish their identity can now register with Mailroom on their own, so almost any OAuth-capable AI app connects by your address alone. And an approved app that needs a permission it does not have can send you back to the approval screen to add it, instead of simply failing. This is the last beta before the live test with real apps.

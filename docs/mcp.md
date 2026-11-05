@@ -30,7 +30,9 @@ If your app supports OAuth, give it your Mailroom's `/mcp` address and approve
 it when your browser opens. The address is `https://mail.example.com/mcp`, and
 there is no key to create or paste. Mailroom shows what the app asked for in plain
 words, grouped as what it may read, what it may change, and sending and
-deleting, each of which can be left unticked; you also choose the accounts and
+deleting, each of which can be left unticked. Permissions the app did not ask
+for are listed too, unticked, under "Also allow", for an app that cannot ask for
+more later; you also choose the accounts and
 the limits, and sending and deleting can wait for your approval ("ask me
 first"). Allowing both sending and deleting needs a typed confirmation, exactly
 as for a key.

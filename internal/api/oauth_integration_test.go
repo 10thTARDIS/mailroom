@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -831,16 +832,15 @@ func TestOAuthScopeCeiling(t *testing.T) {
 	h := newOAHarness(t)
 	cid := h.cimdURL()
 	_, challenge := pkce()
-	// The client asks for mail:read only; a forged form adds mail:delete.
+	// The client asks for mail:read only. The page offers the rest of the closed
+	// set unticked (TestOAuthAlsoAllow), but a scope outside the closed set,
+	// forged into the form, is refused.
 	_, body := h.authorize(t, h.a.UserID, h.authorizeURL(cid, challenge, url.Values{"scope": {"mail:read"}}))
-	if strings.Contains(body, `value="mail:delete"`) {
-		t.Error("the page offers a scope nobody asked for")
-	}
 	reqID := requestID(t, body)
 	form := defaultDecision(reqID, "approve")
-	form["scope"] = []string{"mail:read", "mail:delete"}
+	form["scope"] = []string{"mail:read", "admin:all"}
 	if resp, _ := h.decide(t, h.a.UserID, form, nil); resp.StatusCode == http.StatusSeeOther {
-		t.Fatal("a scope beyond the request was approved")
+		t.Fatal("a scope outside the closed set was approved")
 	}
 	// The request is still undecided: the honest form works, holding mail:read only.
 	form["scope"] = []string{"mail:read"}
@@ -954,11 +954,11 @@ func TestOAuthReauthorizationScopeCeiling(t *testing.T) {
 	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Join(scopes, ",") != "mail:read,search:read" {
 		t.Errorf("grant holds %v, want both", scopes)
 	}
-	// A scope in neither set is still refused.
-	if st, _ := approve("search:read", []string{"mail:read", "search:read", "mail:delete"}); st == http.StatusSeeOther {
-		t.Error("a scope in neither the request nor the grant was approved")
+	// A scope outside the closed set is still refused.
+	if st, _ := approve("search:read", []string{"mail:read", "search:read", "admin:all"}); st == http.StatusSeeOther {
+		t.Error("an unknown scope was approved")
 	}
-	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Contains(strings.Join(scopes, ","), "mail:delete") {
+	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Contains(strings.Join(scopes, ","), "admin:all") {
 		t.Errorf("grant holds %v", scopes)
 	}
 }
@@ -1209,5 +1209,154 @@ func TestOAuthAuthorizeNotChargedOnSuccess(t *testing.T) {
 	}
 	if resp, _ := h.authorize(t, h.b.UserID, h.authorizeURL(cid, challenge, nil)); resp.StatusCode != 200 {
 		t.Errorf("another user was refused because of A's failures: %d", resp.StatusCode)
+	}
+}
+
+var tickedScopeRe = regexp.MustCompile(`name="scope" value="([a-z]+:[a-z]+)" checked`)
+
+// tickedScopes are the scopes a consent page starts ticked.
+func tickedScopes(body string) []string {
+	var out []string
+	for _, m := range tickedScopeRe.FindAllStringSubmatch(body, -1) {
+		out = append(out, m[1])
+	}
+	return out
+}
+
+func (h *oaHarness) grantConfirm(t *testing.T, user ulid.ULID, clientID string) (confirm []string) {
+	t.Helper()
+	if err := h.super.QueryRow(context.Background(), `
+		SELECT confirm_scopes FROM app.api_keys
+		 WHERE user_id=$1 AND kind='oauth' AND oauth_client_id=$2 ORDER BY created_at DESC LIMIT 1`,
+		user.String(), clientID).Scan(&confirm); err != nil {
+		t.Fatalf("grant confirm scopes: %v", err)
+	}
+	return
+}
+
+// ADR-050 section 5 (amended): the consent page offers the whole closed set. What
+// the app requested (and, on re-authorization, what the grant holds) is only
+// pre-ticked; every other scope is offered unticked under "Also allow".
+func TestOAuthAlsoAllow(t *testing.T) {
+	h := newOAHarness(t)
+	cid := h.cimdURL()
+	start := url.Values{"scope": {"mail:read search:read"}}
+	open := func() (string, string) {
+		verifier, challenge := pkce()
+		resp, body := h.authorize(t, h.a.UserID, h.authorizeURL(cid, challenge, start))
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("authorize: %d", resp.StatusCode)
+		}
+		return body, verifier
+	}
+	approve := func(body string, form url.Values) (int, string) {
+		resp, b := h.decide(t, h.a.UserID, form, nil)
+		return resp.StatusCode, b
+	}
+
+	// 1. Every scope is offered; only the requested two are ticked; the rest are
+	// under "Also allow"; an unrequested destructive scope defaults to ask-first.
+	body, _ := open()
+	for _, sc := range allScopes {
+		if !strings.Contains(body, `name="scope" value="`+sc+`"`) {
+			t.Errorf("the page does not offer %s", sc)
+		}
+	}
+	if got := strings.Join(tickedScopes(body), ","); got != "mail:read,search:read" {
+		t.Errorf("pre-ticked = %s, want the requested scopes only", got)
+	}
+	if i := strings.Index(body, "Also allow"); i < 0 || strings.Index(body, `value="mail:draft"`) < i {
+		t.Error("an unrequested scope is not under Also allow")
+	}
+	for _, sc := range []string{"mail:send", "mail:delete"} {
+		if !strings.Contains(body, `name="confirm" value="`+sc+`" checked`) {
+			t.Errorf("unrequested %s does not default to ask-first", sc)
+		}
+	}
+
+	// 2. Approving the page unchanged grants exactly the requested scopes, and
+	// the token response says so.
+	body, verifier := open()
+	form := url.Values{"request": {requestID(t, body)}, "action": {"approve"}, "scope": tickedScopes(body),
+		"accounts_mode": {"all"}, "rate": {"60"}, "budget": {"500"}, "suspend": {"1"}}
+	resp, _ := h.decide(t, h.a.UserID, form, nil)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unchanged approval: %d", resp.StatusCode)
+	}
+	if _, scopes, _, _ := h.grantFor(t, h.a.UserID, cid); strings.Join(scopes, ",") != "mail:read,search:read" {
+		t.Errorf("unchanged page granted %v", scopes)
+	}
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	st, out := h.exchange(t, loc.Query().Get("code"), verifier, cid)
+	if st != 200 || !strings.Contains(out["scope"].(string), "search:read") || strings.Contains(out["scope"].(string), "mail:draft") {
+		t.Fatalf("token: %d %v", st, out)
+	}
+	names, _ := h.mcp(t, out["access_token"].(string)).ToolNames(context.Background())
+	if slices.Contains(names, "draft_new") {
+		t.Error("draft_new listed to a grant without mail:draft")
+	}
+
+	// 3. Unknown scopes are refused; send and delete together need the typed
+	// acknowledgement.
+	body, _ = open()
+	bad := url.Values{"request": {requestID(t, body)}, "action": {"approve"}, "scope": {"mail:read", "admin:all"},
+		"accounts_mode": {"all"}, "rate": {"60"}, "budget": {"500"}}
+	if st, _ := approve(body, bad); st == http.StatusSeeOther {
+		t.Error("an unknown scope was approved")
+	}
+	both := url.Values{"request": {requestID(t, body)}, "action": {"approve"}, "scope": {"mail:read", "mail:send", "mail:delete"},
+		"confirm": {"mail:send", "mail:delete"}, "accounts_mode": {"all"}, "rate": {"60"}, "budget": {"500"}}
+	if st, _ := approve(body, both); st == http.StatusSeeOther {
+		t.Error("send and delete were approved without the typed acknowledgement")
+	}
+
+	// 4. Ticking an unrequested scope grants it; with the ask-first box left as
+	// the page had it, a destructive one is held; the new tool appears.
+	body, verifier = open()
+	if !strings.Contains(body, `value="mail:read" checked`) {
+		t.Error("re-authorization does not pre-tick the grant's scopes")
+	}
+	form = url.Values{"request": {requestID(t, body)}, "action": {"approve"},
+		"scope": append(tickedScopes(body), "mail:draft", "mail:send"), "confirm": {"mail:send"},
+		"accounts_mode": {"all"}, "rate": {"60"}, "budget": {"500"}, "suspend": {"1"}}
+	resp, _ = h.decide(t, h.a.UserID, form, nil)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("approval with Also allow ticks: %d", resp.StatusCode)
+	}
+	_, scopes, _, _ := h.grantFor(t, h.a.UserID, cid)
+	for _, want := range []string{"mail:read", "search:read", "mail:draft", "mail:send"} {
+		if !slices.Contains(scopes, want) {
+			t.Errorf("grant %v lacks %s", scopes, want)
+		}
+	}
+	if len(scopes) != 4 {
+		t.Errorf("grant holds %v, want exactly the four ticked", scopes)
+	}
+	if c := h.grantConfirm(t, h.a.UserID, cid); !slices.Equal(c, []string{"mail:send"}) {
+		t.Errorf("confirm scopes = %v, want mail:send held for approval", c)
+	}
+	loc, _ = url.Parse(resp.Header.Get("Location"))
+	st, out = h.exchange(t, loc.Query().Get("code"), verifier, cid)
+	if st != 200 {
+		t.Fatalf("token: %d %v", st, out)
+	}
+	for _, want := range []string{"mail:draft", "mail:send"} {
+		if !strings.Contains(out["scope"].(string), want) {
+			t.Errorf("token scope %q does not report %s", out["scope"], want)
+		}
+	}
+	names, _ = h.mcp(t, out["access_token"].(string)).ToolNames(context.Background())
+	if !slices.Contains(names, "draft_new") {
+		t.Errorf("draft_new not listed after ticking mail:draft: %v", names)
+	}
+
+	// 5. Re-authorization pre-ticks everything the grant holds; the rest stay
+	// under Also allow.
+	body, _ = open()
+	if got := strings.Join(tickedScopes(body), ","); got != "mail:read,search:read,mail:draft,mail:send" {
+		t.Errorf("re-authorization pre-ticked %s", got)
+	}
+	if i := strings.Index(body, "Also allow"); i < 0 || strings.Index(body, `value="mail:delete"`) < i {
+		t.Error("a scope the grant lacks is not under Also allow on re-authorization")
 	}
 }

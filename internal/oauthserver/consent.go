@@ -73,6 +73,7 @@ const pageCSS = `:root{color-scheme:light dark;--bg:#ffffff;--fg:#1a1a1a;--muted
 body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 system-ui,sans-serif}
 main{max-width:40rem;margin:0 auto;padding:1rem}
 h1{font-size:1.5rem;line-height:1.25}
+h2{font-size:1.25rem;line-height:1.25;margin-top:1.5rem}
 fieldset{border:1px solid var(--line);border-radius:.5rem;margin:1rem 0;padding:.5rem 1rem .75rem;min-width:0}
 legend{font-weight:600;padding:0 .25rem}
 label{display:block;padding:.3rem 0}
@@ -122,8 +123,8 @@ type scopeGroup struct {
 	Title       string
 	Hint        string
 	Destructive bool
+	AskHint     string
 	Rows        []scopeRow
-	ShowAck     bool // the typed confirmation, in the destructive group only
 }
 
 type accountRow struct {
@@ -141,7 +142,9 @@ type consentView struct {
 	Registered      string // "manual" for the user's own registration
 	RedirectHost    string
 	LoopbackWarning bool
-	Groups          []scopeGroup
+	Groups          []scopeGroup // ticked from the request or the grant
+	AlsoGroups      []scopeGroup // everything else in the closed set, unticked
+	ShowAck         bool         // the typed send-and-delete confirmation
 	Unavailable     []string
 	Accounts        []accountRow
 	Restricted      bool
@@ -155,7 +158,15 @@ type consentView struct {
 	AskHint         string
 }
 
-var consentTmpl = template.Must(template.New("consent").Parse(`<!doctype html>
+const groupTmpl = `{{define "group"}}<fieldset><legend>{{.Title}}</legend>
+<p class="hint">{{.Hint}}</p>
+{{range .Rows}}<label><input type="checkbox" name="scope" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Words}} <code>{{.Name}}</code>{{if .New}} <span class="new">(new)</span>{{end}}</label>
+{{if .Destructive}}<label class="ask"><input type="checkbox" name="confirm" value="{{.Name}}"{{if .AskChecked}} checked{{end}}> {{.AskLabel}}</label>
+{{end}}{{end}}
+{{if .Destructive}}<p class="hint">{{.AskHint}}</p>{{end}}
+</fieldset>{{end}}`
+
+var consentTmpl = template.Must(template.Must(template.New("consent").Parse(groupTmpl)).Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer"><title>Approve an app - Mailroom</title><style>{{.CSS}}</style></head>
@@ -170,17 +181,15 @@ var consentTmpl = template.Must(template.New("consent").Parse(`<!doctype html>
 {{if .Reauth}}<p>This app is already connected. The settings below are its current ones; scopes marked <span class="new">new</span> are newly requested.</p>{{end}}
 <form method="post" action="/oauth/consent">
 <input type="hidden" name="request" value="{{.RequestID}}">
-{{range $g := .Groups}}<fieldset><legend>{{$g.Title}}</legend>
-<p class="hint">{{$g.Hint}}</p>
-{{range $g.Rows}}<label><input type="checkbox" name="scope" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Words}} <code>{{.Name}}</code>{{if .New}} <span class="new">(new)</span>{{end}}</label>
-{{if .Destructive}}<label class="ask"><input type="checkbox" name="confirm" value="{{.Name}}"{{if .AskChecked}} checked{{end}}> {{.AskLabel}}</label>
-{{end}}{{end}}
-{{if $g.Destructive}}<p class="hint">{{$.AskHint}}</p>{{end}}
-{{if $g.ShowAck}}<p class="hint" id="ack-help">Only needed if you allow both sending and deleting. An app with both can mail anyone as you and then remove the trace.</p>
+{{range $g := .Groups}}{{template "group" $g}}{{end}}
+{{if .AlsoGroups}}<h2>Also allow</h2>
+<p class="hint">The app did not ask for these. Tick any you want it to have.</p>
+{{range $g := .AlsoGroups}}{{template "group" $g}}{{end}}{{end}}
+{{if .ShowAck}}<fieldset><legend>Sending and deleting together</legend>
+<p class="hint" id="ack-help">Only needed if you allow both sending and deleting. An app with both can mail anyone as you and then remove the trace.</p>
 <label for="ack">To allow both, type: <code>send and delete</code></label>
 <input type="text" id="ack" name="ack" autocomplete="off" spellcheck="false" aria-describedby="ack-help">
-{{end}}</fieldset>
-{{end}}
+</fieldset>{{end}}
 {{if .Unavailable}}<p class="hint">Asked for, but not available here: {{range $i, $s := .Unavailable}}{{if $i}}, {{end}}<code>{{$s}}</code>{{end}}</p>{{end}}
 <fieldset><legend>Which accounts</legend>
 <label><input type="radio" name="accounts_mode" value="all"{{if not .Restricted}} checked{{end}}> Every account</label>
@@ -254,11 +263,10 @@ func (s *Server) offered(requested []string) (known, unknown []string) {
 	return known, unknown
 }
 
-// ceiling is every scope the consent page offers, and so the most a decision may
-// grant: the request's scopes that are in the closed set, plus (on
-// re-authorization) the scopes the grant already holds. consentFor renders it
-// and parseDecision enforces it, from this one function so they cannot drift.
-func (s *Server) ceiling(requested, grantScopes []string) []string {
+// preticked is what the consent page starts ticked: the request's scopes that
+// are in the closed set, plus (on re-authorization) the scopes the grant already
+// holds. It decides only what is pre-ticked, never what may be granted.
+func (s *Server) preticked(requested, grantScopes []string) []string {
 	known, _ := s.offered(requested)
 	var out []string
 	for _, sc := range s.policy.Scopes {
@@ -268,6 +276,14 @@ func (s *Server) ceiling(requested, grantScopes []string) []string {
 	}
 	return out
 }
+
+// ceiling is the most a decision may grant: the whole closed set (ADR-050
+// section 5, amended). The page offers every scope, the requested ones ticked
+// and the rest under "Also allow", because a client that asks only for the
+// starting set and supports neither custom scopes nor step-up could otherwise
+// never be granted more. consentFor renders it and parseDecision enforces it,
+// from this one function so they cannot drift. Unknown scopes are not in it.
+func (s *Server) ceiling() []string { return s.policy.Scopes }
 
 func (s *Server) buildConsent(ctx context.Context, tx *store.UserTx, req store.NewOAuthRequest, rawID, errMsg string) (consentView, error) {
 	return s.consentFor(ctx, tx, req.ClientID, req.ClientName, req.ClientKind, req.RedirectHost, req.AllLoopback, req.Scopes, rawID, errMsg)
@@ -295,11 +311,12 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 	scopes := known
 	if hasGrant {
 		v.Reauth = true
-		scopes = s.ceiling(requested, grant.Scopes)
+		scopes = s.preticked(requested, grant.Scopes)
 		v.Rate, v.Budget, v.Suspend = grant.RatePerMin, grant.DailyBudget, grant.SuspendOnAnomaly
 		v.Restricted = grant.AccountIDs != nil
 	}
-	v.Groups, v.AskHint = s.groupsFor(scopes, grant, hasGrant)
+	v.Groups, v.AlsoGroups, v.AskHint = s.groupsFor(scopes, grant, hasGrant)
+	v.ShowAck = len(s.policy.Destructive) > 0
 	for _, a := range accounts {
 		row := accountRow{ID: a.ID.String(), Name: a.Name}
 		if hasGrant && grant.AccountIDs != nil {
@@ -314,48 +331,52 @@ func (s *Server) consentFor(ctx context.Context, tx *store.UserTx, clientID, nam
 	return v, nil
 }
 
-// groupsFor arranges the offered scopes into the page's groups: read, change,
-// and sending and deleting, each scope in words with its raw name beside it.
-func (s *Server) groupsFor(scopes []string, grant store.APIKey, hasGrant bool) ([]scopeGroup, string) {
-	groups := []*scopeGroup{
-		{Title: "What it may read", Hint: "Looking only; nothing is changed."},
-		{Title: "What it may change", Hint: "Changes your mail, labels and contacts, but never sends or deletes."},
-		{Title: "Sending and deleting", Destructive: true,
-			Hint: "These have the most effect, so each can wait for your approval before it happens."},
-	}
-	offeredDestructive := 0
-	for _, sc := range scopes {
-		row := scopeRow{Name: sc, Words: scopeWords(sc), Checked: true}
-		if hasGrant && !slices.Contains(grant.Scopes, sc) {
-			row.New = true
+// groupsFor arranges every scope of the closed set into the page's groups: read,
+// change, and sending and deleting, each scope in words with its raw name beside
+// it. Scopes in ticked go in the first list, ticked; every other scope goes in
+// the second, unticked ("Also allow"). A destructive scope's ask-first box starts
+// ticked wherever it is, so ticking the scope holds it for approval by default.
+func (s *Server) groupsFor(ticked []string, grant store.APIKey, hasGrant bool) (main, also []scopeGroup, hint string) {
+	build := func(want bool) []scopeGroup {
+		groups := []*scopeGroup{
+			{Title: "What it may read", Hint: "Looking only; nothing is changed."},
+			{Title: "What it may change", Hint: "Changes your mail, labels and contacts, but never sends or deletes."},
+			{Title: "Sending and deleting", Destructive: true,
+				Hint: "These have the most effect, so each can wait for your approval before it happens.", AskHint: wordsAskFirstHint},
 		}
-		g := groups[1]
-		switch {
-		case slices.Contains(s.policy.Destructive, sc):
-			g = groups[2]
-			// Destructive scopes start as "ask me first", and keep the grant's
-			// own choice on re-authorization unless newly requested.
-			row.Destructive, row.AskChecked = true, true
-			row.AskLabel = wordsAskFirstFor + scopeWords(sc)
-			if hasGrant && slices.Contains(grant.Scopes, sc) {
-				row.AskChecked = slices.Contains(grant.ConfirmScopes, sc)
+		for _, sc := range s.policy.Scopes {
+			if slices.Contains(ticked, sc) != want {
+				continue
 			}
-			offeredDestructive++
-		case strings.HasSuffix(sc, ":read"):
-			g = groups[0]
+			row := scopeRow{Name: sc, Words: scopeWords(sc), Checked: want}
+			if want && hasGrant && !slices.Contains(grant.Scopes, sc) {
+				row.New = true
+			}
+			g := groups[1]
+			switch {
+			case slices.Contains(s.policy.Destructive, sc):
+				g = groups[2]
+				// Destructive scopes start as "ask me first", and keep the grant's
+				// own choice on re-authorization when it already holds the scope.
+				row.Destructive, row.AskChecked = true, true
+				row.AskLabel = wordsAskFirstFor + scopeWords(sc)
+				if hasGrant && slices.Contains(grant.Scopes, sc) {
+					row.AskChecked = slices.Contains(grant.ConfirmScopes, sc)
+				}
+			case strings.HasSuffix(sc, ":read"):
+				g = groups[0]
+			}
+			g.Rows = append(g.Rows, row)
 		}
-		g.Rows = append(g.Rows, row)
-	}
-	// The typed confirmation is needed, and so shown, only when the page offers
-	// every destructive scope, which is what parseDecision requires of "both".
-	groups[2].ShowAck = len(s.policy.Destructive) > 0 && offeredDestructive == len(s.policy.Destructive)
-	var out []scopeGroup
-	for _, g := range groups {
-		if len(g.Rows) > 0 {
-			out = append(out, *g)
+		var out []scopeGroup
+		for _, g := range groups {
+			if len(g.Rows) > 0 {
+				out = append(out, *g)
+			}
 		}
+		return out
 	}
-	return out, wordsAskFirstHint
+	return build(true), build(false), wordsAskFirstHint
 }
 
 var errRefused = errors.New("oauthserver: decision refused")
@@ -413,13 +434,7 @@ func (s *Server) Consent() http.Handler {
 				redirect = "deny"
 				return nil
 			}
-			var grantScopes []string
-			if g, ok, err := tx.LockOAuthGrantForClient(r.Context(), req.ClientID); err != nil {
-				return err
-			} else if ok {
-				grantScopes = g.Scopes
-			}
-			in, msg := s.parseDecision(r, req, s.ceiling(req.Scopes, grantScopes))
+			in, msg := s.parseDecision(r, req, s.ceiling())
 			if msg != "" {
 				refusal = msg
 				return errRefused
@@ -487,8 +502,8 @@ func (s *Server) Consent() http.Handler {
 }
 
 // parseDecision turns the posted form into a grant approval, enforcing the
-// ceiling: a grant can hold only scopes the page offered (the request's, in the
-// closed set), however the form was crafted.
+// ceiling: a grant can hold only scopes in the closed set, however the form was
+// crafted. The request decides only what the page pre-ticks.
 func (s *Server) parseDecision(r *http.Request, req store.OAuthRequest, offered []string) (GrantApproval, string) {
 	f := r.PostForm
 	in := GrantApproval{ClientID: req.ClientID, ClientName: req.ClientName, ClientKind: req.ClientKind,

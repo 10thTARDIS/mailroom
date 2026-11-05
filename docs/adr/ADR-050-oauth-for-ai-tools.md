@@ -253,6 +253,17 @@ The consent screen:
   and the typed confirmation when send and delete are granted together. On
   re-authorization it starts from the grant's current settings, with newly
   requested scopes added and highlighted.
+- **Amendment (increment 4): the page offers the whole closed set.** The scopes the
+  app requested (and, on re-authorization, the grant's current scopes) are ticked
+  as above; every other scope of ADR-042's closed set is shown unticked under
+  "Also allow", in the same groups and words, and the ceiling of a decision is the
+  whole closed set (unknown scopes are still refused). The request decides only
+  what is pre-ticked. Reason: a client that requests only the starting set and
+  supports neither custom scopes nor step-up (§8) could otherwise never be granted
+  anything more, and Settings cannot widen a grant. A destructive scope's ask-first
+  box starts ticked wherever the scope is shown, and the typed send-and-delete
+  acknowledgement and every other rule still apply through the same writer. Nothing
+  in discovery changes: `scopes_supported` stays the minimal starting set.
 - **Approve** is a same-origin POST guarded by the existing `CSRFGuard`, from a
   page served with `frame-ancestors 'none'`. The request id is single-use and
   bound to the signed-in user who opened it, so a forged or replayed approval
