@@ -34,18 +34,18 @@ func consentSamples() map[string]func(w *httptest.ResponseRecorder) {
 	acct := []accountRow{{ID: "01J00000000000000000000001", Name: "Personal"}, {ID: "01J00000000000000000000002", Name: "Work", Checked: true}}
 	return map[string]func(*httptest.ResponseRecorder){
 		"consent-full": func(w *httptest.ResponseRecorder) {
-			groups, hint := s.groupsFor(testClosedSet, store.APIKey{Scopes: []string{"mail:read", "mail:send"},
+			groups, also, hint := s.groupsFor([]string{"mail:read", "mail:send", "mail:delete"}, store.APIKey{Scopes: []string{"mail:read", "mail:send"},
 				ConfirmScopes: []string{}}, true)
 			renderConsent(w, 422, consentView{RequestID: "req-0123", ClientName: "Example Assistant", Verified: true,
 				ClientHost: "app.example.com", RedirectHost: "127.0.0.1", LoopbackWarning: true, Reauth: true,
-				Groups: groups, AskHint: hint, Unavailable: []string{"admin:all"}, Accounts: acct, Restricted: true,
+				Groups: groups, AlsoGroups: also, ShowAck: true, AskHint: hint, Unavailable: []string{"admin:all"}, Accounts: acct, Restricted: true,
 				Rate: 60, Budget: 500, Suspend: true, MaxRate: 600, MaxBudget: 20000,
 				Error: "To allow both sending and deleting, type: send and delete"})
 		},
 		"consent-readonly": func(w *httptest.ResponseRecorder) {
-			groups, hint := s.groupsFor([]string{"mail:read", "search:read"}, store.APIKey{}, false)
+			groups, also, hint := s.groupsFor([]string{"mail:read", "search:read"}, store.APIKey{}, false)
 			renderConsent(w, 200, consentView{RequestID: "req-4567", ClientName: "Unverified Tool",
-				RedirectHost: "tool.example.com", Groups: groups, AskHint: hint, Accounts: acct[:1],
+				RedirectHost: "tool.example.com", Groups: groups, AlsoGroups: also, ShowAck: true, AskHint: hint, Accounts: acct[:1],
 				Rate: 60, Budget: 500, Suspend: true, MaxRate: 600, MaxBudget: 20000})
 		},
 		"error": func(w *httptest.ResponseRecorder) {
@@ -96,9 +96,11 @@ func TestConsentPageContent(t *testing.T) {
 			t.Errorf("scope %s is not shown as %q with the raw name beside it", sc, words)
 		}
 	}
-	// Groups, in order, and only the destructive one has ask-first choices.
+	// Groups, in order, and only destructive scopes have ask-first choices.
 	i1, i2, i3 := strings.Index(full, "What it may read"), strings.Index(full, "What it may change"), strings.Index(full, "Sending and deleting")
-	if i1 < 0 || i2 <= i1 || i3 <= i2 {
+	// In the ticked part only read and sending/deleting appear (the sample ticks
+	// no "change" scope); the change group comes later, under Also allow.
+	if i1 < 0 || i3 <= i1 || i2 <= i3 || i2 < strings.Index(full, "Also allow") {
 		t.Errorf("groups out of order or missing: %d %d %d", i1, i2, i3)
 	}
 	for _, sc := range testClosedSet {
@@ -107,8 +109,21 @@ func TestConsentPageContent(t *testing.T) {
 		if has != destructive {
 			t.Errorf("ask-first choice for %s = %v, want %v", sc, has, destructive)
 		}
-		if destructive && strings.Index(full, `name="confirm" value="`+sc+`"`) < i3 {
-			t.Errorf("ask-first choice for %s is outside the sending and deleting group", sc)
+	}
+	ticked := func(page, sc string) bool { return strings.Contains(page, `name="scope" value="`+sc+`" checked`) }
+	// The full sample ticks read, send and delete; the other seven are offered unticked.
+	also := strings.Index(full, "Also allow")
+	if also < 0 || !strings.Contains(full, "The app did not ask for these. Tick any you want it to have.") {
+		t.Fatal("no Also allow part")
+	}
+	for _, sc := range testClosedSet {
+		want := sc == "mail:read" || sc == "mail:send" || sc == "mail:delete"
+		if got := ticked(full, sc); got != want {
+			t.Errorf("full page: %s ticked = %v, want %v", sc, got, want)
+		}
+		pos := strings.Index(full, `name="scope" value="`+sc+`"`)
+		if pos < 0 || (pos > also) == want {
+			t.Errorf("full page: %s is in the wrong part (also=%d pos=%d)", sc, also, pos)
 		}
 	}
 	// Re-authorization: the grant's own ask-first choice and the new marker.
@@ -117,8 +132,8 @@ func TestConsentPageContent(t *testing.T) {
 	if strings.Contains(full, `name="confirm" value="mail:send" checked`) || !strings.Contains(full, `name="confirm" value="mail:delete" checked`) {
 		t.Error("on re-authorization the grant's own ask-first choice must be kept and a newly requested scope must start as ask-first")
 	}
-	if !strings.Contains(full, "(new)") {
-		t.Error("newly requested scopes are not marked")
+	if strings.Count(full, "(new)") != 1 {
+		t.Error("exactly the newly requested scope is marked new")
 	}
 	// The typed confirmation is explained, labelled and tied to its help text.
 	for _, want := range []string{"Only needed if you allow both sending and deleting", `<label for="ack">`, `id="ack"`, `aria-describedby="ack-help"`,
@@ -127,9 +142,22 @@ func TestConsentPageContent(t *testing.T) {
 			t.Errorf("full page lacks %q", want)
 		}
 	}
+	// The read-only request: two scopes ticked, everything else offered
+	// unticked, and an unticked destructive scope still defaults to ask-first.
 	ro := renderSample("consent-readonly")
-	if strings.Contains(ro, `id="ack"`) || strings.Contains(ro, "Sending and deleting") || strings.Contains(ro, `name="confirm"`) {
-		t.Error("a page that offers no destructive scope shows the send-and-delete controls")
+	for _, sc := range testClosedSet {
+		want := sc == "mail:read" || sc == "search:read"
+		if got := ticked(ro, sc); got != want {
+			t.Errorf("read-only page: %s ticked = %v, want %v", sc, got, want)
+		}
+		if !strings.Contains(ro, `name="scope" value="`+sc+`"`) {
+			t.Errorf("read-only page does not offer %s", sc)
+		}
+	}
+	for _, sc := range []string{"mail:send", "mail:delete"} {
+		if !strings.Contains(ro, `name="confirm" value="`+sc+`" checked`) {
+			t.Errorf("unticked %s does not default to ask-first", sc)
+		}
 	}
 	if !strings.Contains(ro, "Name given by the app, not verified") {
 		t.Error("an unverified app is not labelled as such")

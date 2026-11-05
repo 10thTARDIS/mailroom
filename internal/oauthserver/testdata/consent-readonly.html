@@ -6,6 +6,7 @@
 body{margin:0;background:var(--bg);color:var(--fg);font:1rem/1.5 system-ui,sans-serif}
 main{max-width:40rem;margin:0 auto;padding:1rem}
 h1{font-size:1.5rem;line-height:1.25}
+h2{font-size:1.25rem;line-height:1.25;margin-top:1.5rem}
 fieldset{border:1px solid var(--line);border-radius:.5rem;margin:1rem 0;padding:.5rem 1rem .75rem;min-width:0}
 legend{font-weight:600;padding:0 .25rem}
 label{display:block;padding:.3rem 0}
@@ -41,7 +42,36 @@ button.secondary{background:transparent;color:var(--fg);border-color:var(--line)
 
 
 </fieldset>
+<h2>Also allow</h2>
+<p class="hint">The app did not ask for these. Tick any you want it to have.</p>
+<fieldset><legend>What it may read</legend>
+<p class="hint">Looking only; nothing is changed.</p>
+<label><input type="checkbox" name="scope" value="labels:read"> See labels <code>labels:read</code></label>
+<label><input type="checkbox" name="scope" value="contacts:read"> See contacts <code>contacts:read</code></label>
 
+
+</fieldset><fieldset><legend>What it may change</legend>
+<p class="hint">Changes your mail, labels and contacts, but never sends or deletes.</p>
+<label><input type="checkbox" name="scope" value="mail:draft"> Write drafts <code>mail:draft</code></label>
+<label><input type="checkbox" name="scope" value="mail:move"> Move, mark and label mail <code>mail:move</code></label>
+<label><input type="checkbox" name="scope" value="labels:write"> Create and edit labels <code>labels:write</code></label>
+<label><input type="checkbox" name="scope" value="contacts:write"> Edit contacts <code>contacts:write</code></label>
+
+
+</fieldset><fieldset><legend>Sending and deleting</legend>
+<p class="hint">These have the most effect, so each can wait for your approval before it happens.</p>
+<label><input type="checkbox" name="scope" value="mail:send"> Send mail <code>mail:send</code></label>
+<label class="ask"><input type="checkbox" name="confirm" value="mail:send" checked> Ask me before it can: Send mail</label>
+<label><input type="checkbox" name="scope" value="mail:delete"> Delete mail (to Trash) <code>mail:delete</code></label>
+<label class="ask"><input type="checkbox" name="confirm" value="mail:delete" checked> Ask me before it can: Delete mail (to Trash)</label>
+
+<p class="hint">Each request waits for you to approve or deny it here. Unanswered requests are denied after 24 hours.</p>
+</fieldset>
+<fieldset><legend>Sending and deleting together</legend>
+<p class="hint" id="ack-help">Only needed if you allow both sending and deleting. An app with both can mail anyone as you and then remove the trace.</p>
+<label for="ack">To allow both, type: <code>send and delete</code></label>
+<input type="text" id="ack" name="ack" autocomplete="off" spellcheck="false" aria-describedby="ack-help">
+</fieldset>
 
 <fieldset><legend>Which accounts</legend>
 <label><input type="radio" name="accounts_mode" value="all" checked> Every account</label>
