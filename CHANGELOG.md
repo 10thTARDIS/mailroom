@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.100.0-beta.4] — 2026-11-05
+
+**The approval screen now lets you give an AI app more than it asked for.** Testing with a real app showed that some apps ask only for reading and searching and have no way to ask for more, so they could never draft or send. Now every permission is on the screen, and you tick the extra ones you want.
+
 ### Connecting AI tools with OAuth
 
 - **You can allow more than an app asked for.** Some AI apps ask only for the basic permissions (reading and searching mail) and cannot ask for more later, so they could never be given anything else. The approval screen now lists every permission, with the ones the app asked for already ticked and the rest unticked under "Also allow". Tick any you want the app to have; sending and deleting still start as "ask me first" and still need the typed confirmation when you allow both. An app that is approved as shown gets exactly what it asked for, and it is told what it actually received.
