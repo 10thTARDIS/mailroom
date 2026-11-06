@@ -5553,9 +5553,16 @@ function phoneWidthProbe(limit) {
   //     non-empty aria-label): a screen-reader user must know what the block is
   //     before they reach it.
   // The OUTSIDE check is NOT waived: the box itself must still fit the screen.
+  //   * A TOOLBAR (role="toolbar", the composer's formatting bar, ADR-051) is the
+  //     one other shape: it scrolls sideways at a phone's width on purpose, and its
+  //     keyboard route is its own items, not a tab stop of the container (which
+  //     would be a second stop in front of the roving one). So instead of its own
+  //     tabindex it must hold the roving stop (a descendant with tabindex 0), and
+  //     it must be named like the rest.
   const intentionalScroller = (el) => {
     if (el.getAttribute("data-scroll-x") !== "intentional") return false;
-    if (!(el.tabIndex >= 0)) return false;
+    const toolbar = el.getAttribute("role") === "toolbar" && !!el.querySelector('[tabindex="0"]');
+    if (!(el.tabIndex >= 0) && !toolbar) return false;
     const labelledby = el.getAttribute("aria-labelledby");
     if (labelledby) {
       const named = labelledby

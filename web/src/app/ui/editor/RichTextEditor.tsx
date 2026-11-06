@@ -567,6 +567,9 @@ export default function RichTextEditor({
         ref={toolbarRef}
         className="editor-toolbar"
         role="toolbar"
+        // On a narrow screen the bar scrolls sideways inside itself; its keyboard
+        // route is its own roving items, which scroll into view when focused.
+        data-scroll-x="intentional"
         aria-label={t("compose.formatting")}
         onKeyDown={onToolbarKey}
       >

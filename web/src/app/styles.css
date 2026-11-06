@@ -1621,8 +1621,6 @@ a.attachment:hover { background: var(--bg-sunken); }
 @media (max-width: 720px), (max-height: 520px) {
   .editor-toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
   .editor-toolbar > .editor-tool { flex: none; }
-  .editor-palette { flex-wrap: nowrap; overflow-x: auto; }
-  .editor-palette > * { flex: none; }
 }
 .editor-body {
   display: flex;
