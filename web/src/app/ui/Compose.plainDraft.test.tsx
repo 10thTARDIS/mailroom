@@ -20,7 +20,11 @@ const htmlPart = { ...plainPart, partId: "2", blobId: "B2", type: "text/html" };
 const values = {
   "1": { value: "line one\nline two", isEncodingProblem: false, isTruncated: false },
   "2": { value: "<p>rich draft</p>", isEncodingProblem: false, isTruncated: false },
+  // As Mailroom now saves it (#93): one paragraph soft-wrapped (trailing space),
+  // then a hard break the user typed.
+  "3": { value: "a long paragraph that was \r\nsoft wrapped when saved\r\nsecond line", isEncodingProblem: false, isTruncated: false },
 };
+const flowedPart = { ...plainPart, partId: "3", blobId: "B3", format: "flowed", delSp: false };
 const base = {
   id: "D1",
   threadId: "T1",
@@ -96,5 +100,12 @@ describe("resuming a plain-text draft", () => {
   it("control: a draft with a text/html part still opens in rich mode (no body textarea)", async () => {
     await mount({ ...base, textBody: [plainPart], htmlBody: [htmlPart] });
     expect(textareaValues()).not.toContain("line one\nline two");
+  });
+
+  // #93: Mailroom saves plain drafts format=flowed. Read raw, every soft wrap
+  // would come back as a line break and the next save would make it permanent.
+  it("unflows a format=flowed draft: soft wraps join, typed breaks stay", async () => {
+    await mount({ ...base, textBody: [flowedPart], htmlBody: [flowedPart] });
+    expect(textareaValues()).toContain("a long paragraph that was soft wrapped when saved\nsecond line");
   });
 });

@@ -1,0 +1,30 @@
+[
+  {
+    "original": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.",
+    "wire": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps \r\nover the lazy dog. The quick brown fox jumps over the lazy dog. The \r\nquick brown fox jumps over the lazy dog. The quick brown fox jumps over \r\nthe lazy dog. The quick brown fox jumps over the lazy dog. The quick \r\nbrown fox jumps over the lazy dog. The quick brown fox jumps over the \r\nlazy dog.\r\n"
+  },
+  {
+    "original": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.\n\nSecond paragraph.\nA hard break above.",
+    "wire": "The quick brown fox jumps over the lazy dog. The quick brown fox jumps \r\nover the lazy dog. The quick brown fox jumps over the lazy dog. The \r\nquick brown fox jumps over the lazy dog. The quick brown fox jumps over \r\nthe lazy dog. The quick brown fox jumps over the lazy dog. The quick \r\nbrown fox jumps over the lazy dog. The quick brown fox jumps over the \r\nlazy dog.\r\n\r\nSecond paragraph.\r\nA hard break above.\r\n"
+  },
+  {
+    "original": "\u003e The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.\n\u003e\u003e The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.\n\u003e\u003e\u003e The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog.\nmy reply",
+    "wire": "\u003e The quick brown fox jumps over the lazy dog. The quick brown fox \r\n\u003e jumps over the lazy dog. The quick brown fox jumps over the lazy dog. \r\n\u003e The quick brown fox jumps over the lazy dog. The quick brown fox \r\n\u003e jumps over the lazy dog. The quick brown fox jumps over the lazy dog. \r\n\u003e The quick brown fox jumps over the lazy dog. The quick brown fox \r\n\u003e jumps over the lazy dog.\r\n\u003e\u003e The quick brown fox jumps over the lazy dog. The quick brown fox \r\n\u003e\u003e jumps over the lazy dog. The quick brown fox jumps over the lazy \r\n\u003e\u003e dog. The quick brown fox jumps over the lazy dog. The quick brown \r\n\u003e\u003e fox jumps over the lazy dog. The quick brown fox jumps over the lazy \r\n\u003e\u003e dog. The quick brown fox jumps over the lazy dog. The quick brown \r\n\u003e\u003e fox jumps over the lazy dog.\r\n\u003e\u003e\u003e The quick brown fox jumps over the lazy dog. The quick brown fox \r\n\u003e\u003e\u003e jumps over the lazy dog. The quick brown fox jumps over the lazy \r\n\u003e\u003e\u003e dog. The quick brown fox jumps over the lazy dog. The quick brown \r\n\u003e\u003e\u003e fox jumps over the lazy dog. The quick brown fox jumps over the \r\n\u003e\u003e\u003e lazy dog. The quick brown fox jumps over the lazy dog. The quick \r\n\u003e\u003e\u003e brown fox jumps over the lazy dog.\r\nmy reply\r\n"
+  },
+  {
+    "original": " leading space\nFrom the desk\nword word word word word word word word word word word word word word \u003ewrapped gt",
+    "wire": "  leading space\r\n From the desk\r\nword word word word word word word word word word word word word word \r\n \u003ewrapped gt\r\n"
+  },
+  {
+    "original": "body\n\n-- \nName",
+    "wire": "body\r\n\r\n-- \r\nName\r\n"
+  },
+  {
+    "original": "see https://example.com/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/end now",
+    "wire": "see \r\nhttps://example.com/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/segment/end \r\nnow\r\n"
+  },
+  {
+    "original": "Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉",
+    "wire": "Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — \r\n“naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 Renée wrote — “naïve” 日本語 🎉 \r\nRenée wrote — “naïve” 日本語 🎉\r\n"
+  }
+]

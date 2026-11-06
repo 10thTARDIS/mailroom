@@ -360,7 +360,7 @@ func writeBody(b *strings.Builder, d Draft) error {
 		}
 		writeHeader(b, "Content-Type", `multipart/alternative; boundary="`+boundary+`"`)
 		b.WriteString("\r\n")
-		writePart(b, boundary, "text/plain; charset=utf-8", d.TextBody)
+		writePlainPart(b, boundary, d.TextBody)
 		writePart(b, boundary, "text/calendar; charset=utf-8; method="+method, string(d.Calendar.Data))
 		b.WriteString("--" + boundary + "--\r\n")
 	case d.HTMLBody != "" && d.TextBody != "":
@@ -370,13 +370,13 @@ func writeBody(b *strings.Builder, d Draft) error {
 		}
 		writeHeader(b, "Content-Type", `multipart/alternative; boundary="`+boundary+`"`)
 		b.WriteString("\r\n")
-		writePart(b, boundary, "text/plain; charset=utf-8", d.TextBody)
+		writePlainPart(b, boundary, d.TextBody)
 		writePart(b, boundary, "text/html; charset=utf-8", d.HTMLBody)
 		b.WriteString("--" + boundary + "--\r\n")
 	case d.HTMLBody != "":
 		writeTextPart(b, "text/html; charset=utf-8", d.HTMLBody)
 	default:
-		writeTextPart(b, "text/plain; charset=utf-8", d.TextBody)
+		writeFlowedPart(b, d.TextBody)
 	}
 	return nil
 }
@@ -406,9 +406,31 @@ const bodyLineLimit = 998
 // readable in the raw. The switch is not cosmetic: it is the difference between
 // a claim about the content that happens to be true and one that is checked.
 func writeTextPart(b *strings.Builder, contentType, body string) {
+	writeTextPartEnc(b, contentType, body, false)
+}
+
+// writeFlowedPart writes a format=flowed plain-text entity (#93). The soft
+// breaks of flowed text ARE trailing spaces, and a trailing space is the one
+// thing a 7bit body cannot keep safely: RFC 3156 §5 has a signer strip trailing
+// white space before hashing, and mail gateways are known to strip it in
+// transit. Either would silently turn every soft break into a hard one (or make
+// the signed bytes differ from the sent bytes). So a flowed body with any soft
+// break is always quoted-printable, where the space travels as =20 and what is
+// signed is exactly what is sent. A body with no soft break stays 7bit.
+func writeFlowedPart(b *strings.Builder, body string) {
+	flowed := flowText(body)
+	writeTextPartEnc(b, flowedContentType, flowed, hasTrailingSpaceLine(flowed))
+}
+
+// hasTrailingSpaceLine reports whether any line of s ends in a space or tab.
+func hasTrailingSpaceLine(s string) bool {
+	return strings.Contains(s, " \r\n") || strings.Contains(s, "\t\r\n")
+}
+
+func writeTextPartEnc(b *strings.Builder, contentType, body string, forceQP bool) {
 	content := normalizeEOL(body)
 	writeHeader(b, "Content-Type", contentType)
-	if is7BitSafe(content) {
+	if !forceQP && is7BitSafe(content) {
 		writeHeader(b, "Content-Transfer-Encoding", "7bit")
 		b.WriteString("\r\n")
 		b.WriteString(content)
@@ -706,6 +728,12 @@ func normalizeEOL(s string) string {
 		s += "\r\n"
 	}
 	return s
+}
+
+// writePlainPart writes a multipart/alternative plain-text part, flowed (#93).
+func writePlainPart(b *strings.Builder, boundary, body string) {
+	b.WriteString("--" + boundary + "\r\n")
+	writeFlowedPart(b, body)
 }
 
 func writePart(b *strings.Builder, boundary, contentType, body string) {

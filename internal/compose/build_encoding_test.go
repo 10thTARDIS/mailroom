@@ -183,7 +183,10 @@ func TestAlternativePartsAreBothTransportSafe(t *testing.T) {
 func TestTrailingWhitespaceSurvivesEncoding(t *testing.T) {
 	const text = "trailing spaces here   \nand a tab\t\nnon-ascii é forces encoding\n"
 
-	built := buildOne(t, Draft{TextBody: text})
+	// An HTML-only body: a plain-text part is flowed (#93) and has user trailing
+	// spaces stripped on purpose (RFC 3676 §4.1; see flowed_test.go), so this
+	// transfer-encoding property is exercised on the part that keeps them.
+	built := buildOne(t, Draft{HTMLBody: text})
 	body := bodyOf(t, built.Raw)
 
 	if !strings.Contains(body, "=20") && !strings.Contains(body, "=09") {
