@@ -82,7 +82,7 @@ func assertSafeDOM(t *testing.T, in, out string) {
 			}
 			for _, a := range n.Attr {
 				key := strings.ToLower(a.Key)
-				val := normalizeURL(a.Val) // lowercase, control/space characters stripped
+				val := oracleStrip(a.Val) // an independent WHATWG-style stripper, not the code under test
 
 				if strings.HasPrefix(key, "on") {
 					fail("attribute %q survived: an event handler reached the DOM", key)
@@ -93,11 +93,11 @@ func assertSafeDOM(t *testing.T, in, out string) {
 
 				switch key {
 				case "href":
-					if scheme, ok := splitScheme(val); ok && !linkSchemes[scheme] {
-						fail("href with scheme %q survived (%q)", scheme, a.Val)
+					if !hasAnyPrefix(val, "http:", "https:", "mailto:", "tel:", "#") {
+						fail("href=%q survived and is not http:, https:, mailto:, tel: or #", a.Val)
 					}
 				case "src":
-					if classifyImageSrc(a.Val) != srcInline {
+					if !hasAnyPrefix(val, "cid:", "data:image/") || strings.HasPrefix(val, "data:image/svg") {
 						fail("src=%q survived and is not an inline (data:image/cid:) source", a.Val)
 					}
 				case "srcset", "background", "poster", "action", "formaction",
@@ -1429,6 +1429,30 @@ func TestNoFalseRemoteContentBanner(t *testing.T) {
 	}
 }
 
+// oracleStrip is the test oracle's OWN WHATWG pre-parse stripping: trim C0
+// controls and spaces at the ends, drop tab/LF/CR inside, lowercase ASCII. It
+// shares no code with normalizeURL, so loosening that cannot loosen the oracle.
+func oracleStrip(s string) string {
+	s = strings.TrimFunc(s, func(r rune) bool { return r <= 0x20 })
+	s = strings.NewReplacer("\t", "", "\n", "", "\r", "").Replace(s)
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 32
+		}
+	}
+	return string(b)
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestURLClassificationMatchesTheBrowser pins normalizeURL to the WHATWG URL
 // parser's pre-parse stripping: leading and trailing C0 controls and spaces go,
 // and an interior tab, LF or CR goes; an interior space, an interior control
@@ -1454,6 +1478,9 @@ func TestURLClassificationMatchesTheBrowser(t *testing.T) {
 		{"an interior NUL is not stripped", "ci\x00d:x", srcNone},
 		{"an interior DEL is not stripped", "ci\x7fd:x", srcNone},
 		{"an svg disguised with an interior space stays refused (not widened)", "data:image/svg +xml,x", srcNone},
+		{"an svg disguised with an interior NUL stays refused", "data:image/svg\x00+xml,x", srcNone},
+		{"an svg disguised with an interior DEL stays refused", "data:image/svg\x7f+xml,x", srcNone},
+		{"an svg disguised with an interior C0 control stays refused", "data:image/svg\x01+xml,x", srcNone},
 		{"https stays remote", " https://example.com/a.png", srcRemote},
 		{"h ttps is relative", "h ttps://example.com/a.png", srcNone},
 		{"javascript with a tab is still a scheme and refused", "java\tscript:alert(1)", srcNone},

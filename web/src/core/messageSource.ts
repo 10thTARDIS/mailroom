@@ -49,6 +49,44 @@ export type HeaderRow = {
   value: string;
 };
 
+/** How much of the start of the message the Headers view will parse. */
+export const MAX_HEADER_PARSE_BYTES = 64 * 1024;
+/** How many header rows the Headers view will render. */
+export const MAX_HEADER_ROWS = 1000;
+
+export type HeaderRows = {
+  rows: HeaderRow[];
+  /** Header lines that were not turned into rows (past the row or byte cap). */
+  omitted: number;
+};
+
+/** parseHeaderRows bounded for display: only the first MAX_HEADER_PARSE_BYTES
+ * characters are looked at, and at most MAX_HEADER_ROWS rows come back, so a
+ * hostile message of a million one-character header lines cannot become a
+ * million DOM nodes. `omitted` counts the header lines left out (a lower bound
+ * when the byte cap cut the block short). */
+export function parseHeaderRowsCapped(
+  source: string,
+  maxChars: number = MAX_HEADER_PARSE_BYTES,
+  maxRows: number = MAX_HEADER_ROWS,
+): HeaderRows {
+  const window = source.length > maxChars ? source.slice(0, maxChars) : source;
+  const all = parseHeaderRows(window);
+  const cutByBytes = source.length > maxChars && !/\r?\n\r?\n|\r\r/.test(window);
+  const rows = all.length > maxRows ? all.slice(0, maxRows) : all;
+  let omitted = all.length - rows.length;
+  if (cutByBytes) {
+    // Count the lines after the window up to the end of the header block, bounded
+    // by the display limit the caller already applied.
+    const rest = source.slice(maxChars).split(/\r\n|\n|\r/);
+    for (const line of rest) {
+      if (line === "") break;
+      omitted++;
+    }
+  }
+  return { rows, omitted };
+}
+
 /** The header block of a message, in order, as received. The block ends at the
  * first empty line. A continuation line (it starts with a space or a tab)
  * belongs to the field above it; a continuation with nothing above it, or a

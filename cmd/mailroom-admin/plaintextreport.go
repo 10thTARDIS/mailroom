@@ -32,6 +32,9 @@ import (
 // command measures, on the real corpus, how big that population is and how many
 // messages the rule would touch, so the decision is made on numbers.
 //
+// (Opening the blob store may create its directory, like every other report
+// command here; the database access is read-only.)
+//
 // It changes nothing, and neither does anything it calls. Every database read is a
 // read-only transaction (UserReadTx, rolled back); the blobs are only read. It
 // prints COUNTS, the thresholds in force, the --limit bound, and a few HASHED
@@ -290,13 +293,15 @@ func (a *ptAgg) print(w io.Writer, limit int) {
 	if len(a.samples) > 0 {
 		say(w, "  sample of would-change messages (hashed ids): %s\n", strings.Join(a.samples, " "))
 	}
-	if limit > 0 && a.limited {
+	switch {
+	case limit > 0 && a.limited:
 		say(w, "  BOUND: stopped at --limit %d per user (oldest first) with messages still unread; every count above is a LOWER BOUND for the whole mailbox.\n", limit)
-	} else if limit > 0 {
-		say(w, "  --limit %d was not reached; the counts cover the whole mailbox.\n", limit)
-	} else if a.unreadable > 0 {
+	case limit > 0:
+		say(w, "  --limit %d was not reached; every message of the user was walked.\n", limit)
+	}
+	if a.unreadable > 0 {
 		say(w, "  BOUND: %d message(s) could not be read; the counts are lower bounds by that many.\n", a.unreadable)
-	} else {
+	} else if !a.limited {
 		say(w, "  the counts cover every message of the user.\n")
 	}
 }

@@ -28,7 +28,7 @@ import type { JSX } from "react";
 
 import { stripBidiControls } from "../../core/hostileText";
 import type { BlobFetch } from "../../core/jmap/blobs";
-import { decodeAll, decodeSource, parseHeaderRows } from "../../core/messageSource";
+import { decodeAll, decodeSource, parseHeaderRowsCapped } from "../../core/messageSource";
 import { t } from "../i18n";
 import { closeFocusTarget, trapTab } from "./focusTrap";
 
@@ -97,7 +97,8 @@ export function ViewSourceDialog({
   }, []);
 
   const shown = useMemo(() => (typeof state === "object" ? decodeSource(state.bytes) : null), [state]);
-  const rows = useMemo(() => (shown ? parseHeaderRows(shown.text) : []), [shown]);
+  const headers = useMemo(() => (shown ? parseHeaderRowsCapped(shown.text) : { rows: [], omitted: 0 }), [shown]);
+  const rows = headers.rows;
 
   const doCopy = async (): Promise<void> => {
     if (typeof state !== "object") return;
@@ -208,6 +209,11 @@ export function ViewSourceDialog({
                       <dd>{stripBidiControls(r.value)}</dd>
                     </div>
                   ))}
+                  {headers.omitted > 0 ? (
+                    <div className="view-source-header view-source-header-more">
+                      <dd>{t("source.headers.more", { count: headers.omitted })}</dd>
+                    </div>
+                  ) : null}
                 </dl>
               )}
             </>

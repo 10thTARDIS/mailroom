@@ -20,9 +20,7 @@ const HOSTILE =
   "<script>window.__pwned = 'script'</script>\r\n" +
   "<img src=x onerror=\"window.__pwned = 'onerror'\">\r\n" +
   "<a href=\"javascript:window.__pwned = 'href'\">click</a>\r\n" +
-  // Split so the repository's frame-sandbox scan (cmd/mailroom/security_test.go)
-  // does not mistake a line of hostile TEST DATA for a frame this app renders.
-  "<" + "iframe srcdoc=\"<script>parent.__pwned = 'srcdoc'</script>\"></" + "iframe>\r\n";
+  "<iframe srcdoc=\"<script>parent.__pwned = 'srcdoc'</script>\"></iframe>\r\n";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -136,6 +134,17 @@ describe("the headers view", () => {
     expect(names).toEqual(["Received", "Subject", "Received"]);
     expect(values).toEqual(["a", "long  folded", "b"]);
     expect(button("Headers")!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("a header block built to be huge", () => {
+  it("renders at most the row cap plus one note, not a node per header line", async () => {
+    await show(ok("a:\r\n".repeat(100_000) + "\r\nbody"));
+    flushSync(() => button("Headers")!.click());
+    expect(host.querySelectorAll("dt").length).toBe(1000);
+    expect(host.querySelector(".view-source-header-more")?.textContent).toBe(
+      "…and 99000 more header lines; download the .eml to see them all",
+    );
   });
 });
 

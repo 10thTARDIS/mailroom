@@ -2,7 +2,15 @@
 
 import { describe, expect, it } from "vitest";
 
-import { MAX_SOURCE_DISPLAY_BYTES, decodeAll, decodeSource, parseHeaderRows } from "./messageSource";
+import {
+  MAX_HEADER_PARSE_BYTES,
+  MAX_HEADER_ROWS,
+  MAX_SOURCE_DISPLAY_BYTES,
+  decodeAll,
+  decodeSource,
+  parseHeaderRows,
+  parseHeaderRowsCapped,
+} from "./messageSource";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -73,5 +81,28 @@ describe("parseHeaderRows", () => {
 
   it("returns nothing for a message with no header block", () => {
     expect(parseHeaderRows("\r\nbody")).toEqual([]);
+  });
+});
+
+describe("parseHeaderRowsCapped", () => {
+  it("caps 100k one-character header lines at the row cap and counts what it left out", () => {
+    const src = "a:\r\n".repeat(100_000) + "\r\nbody";
+    const out = parseHeaderRowsCapped(src);
+    expect(out.rows.length).toBe(MAX_HEADER_ROWS);
+    expect(out.omitted).toBe(100_000 - MAX_HEADER_ROWS);
+  });
+
+  it("stops parsing at the byte cap, never reading the whole megabyte", () => {
+    const src = "a:\r\n".repeat(MAX_SOURCE_DISPLAY_BYTES / 4);
+    const out = parseHeaderRowsCapped(src);
+    expect(out.rows.length).toBe(MAX_HEADER_ROWS);
+    expect(out.omitted).toBeGreaterThan(0);
+    expect(MAX_HEADER_PARSE_BYTES).toBeLessThan(MAX_SOURCE_DISPLAY_BYTES);
+  });
+
+  it("reports nothing omitted for an ordinary message", () => {
+    const out = parseHeaderRowsCapped("A: 1\r\nB: 2\r\n\r\nbody");
+    expect(out.rows.length).toBe(2);
+    expect(out.omitted).toBe(0);
   });
 });

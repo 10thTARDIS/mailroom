@@ -617,10 +617,12 @@ func classifyImageSrc(raw string) srcKind {
 	case strings.HasPrefix(s, "data:image/"):
 		// A data: URL is bytes, not a fetch — but only an IMAGE one. data:text/html
 		// and data:image/svg+xml are scripting contexts wearing an <img> costume.
-		// Interior spaces are no longer stripped by normalizeURL (a browser keeps
-		// them), so look through them here: an SVG that was refused when its
-		// spaces were dropped must stay refused.
-		if strings.HasPrefix(strings.ReplaceAll(s, " ", ""), "data:image/svg+xml") {
+		// DENY checks look at a MAXIMALLY stripped copy (every rune <= 0x20 and DEL
+		// removed: the old, greedy normalisation), because normalizeURL now strips
+		// only what a browser does and an SVG that was refused when its interior
+		// spaces and controls were dropped must stay refused. ALLOW decisions keep
+		// the strict form.
+		if strings.HasPrefix(greedyStrip(s), "data:image/svg+xml") {
 			return srcNone
 		}
 		return srcInline
@@ -688,6 +690,20 @@ func normalizeURL(raw string) string {
 		b.WriteRune(r)
 	}
 	return strings.ToLower(b.String())
+}
+
+// greedyStrip removes every rune at or below 0x20 and DEL. It is the pre-#90
+// normalisation, kept for DENY checks only: stripping more than a browser can
+// only make a denylist refuse more.
+func greedyStrip(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r <= 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // hasScheme reports whether s begins with an RFC 3986 scheme.

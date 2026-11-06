@@ -2632,6 +2632,8 @@ const en = {
   "source.truncated":
     "Showing the first {shown} of {total}. Download the .eml for the whole message.",
   "source.headers.none": "This message has no header lines.",
+  "source.headers.more":
+    "…and {count} more header lines; download the .eml to see them all",
   "source.noName": "(not a header line)",
   // The picker the pane's item opens: one area per item, the answer is a move.
   "refile.picker.title": "Re-file to…",

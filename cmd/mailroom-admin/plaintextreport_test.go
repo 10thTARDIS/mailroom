@@ -151,7 +151,7 @@ func TestPlaintextReportPrintsBoundsAndParametersAndNoContent(t *testing.T) {
 	a.limited = false
 	buf.Reset()
 	a.print(&buf, 5)
-	if strings.Contains(buf.String(), "LOWER BOUND") || !strings.Contains(buf.String(), "was not reached") {
+	if strings.Contains(buf.String(), "LOWER BOUND") || !strings.Contains(buf.String(), "was not reached") || !strings.Contains(buf.String(), "the counts cover every message") {
 		t.Errorf("an uncut scan claims a bound:\n%s", buf.String())
 	}
 }
@@ -160,5 +160,21 @@ func TestPlaintextReportHashedSamplesAreNotTheIDs(t *testing.T) {
 	id := ulid.ULID{1, 2, 3}
 	if h := ptHashID(id); len(h) != 12 || strings.Contains(id.String(), h) || h == ptHashID(ulid.ULID{1, 2, 4}) {
 		t.Errorf("ptHashID(%s) = %q: want 12 hex characters, unrelated to the id and distinct per id", id, h)
+	}
+}
+
+// A limit that was not reached must not hide unreadable messages: the counts are
+// a lower bound by that many, and the output must not claim the whole mailbox.
+func TestPlaintextReportUnreadableBoundSurvivesAnUnreachedLimit(t *testing.T) {
+	a := newPtAgg()
+	a.scanned, a.unreadable = 10, 3
+	var buf bytes.Buffer
+	a.print(&buf, 50)
+	out := buf.String()
+	if !strings.Contains(out, "3 message(s) could not be read") {
+		t.Errorf("unreadable bound missing:\n%s", out)
+	}
+	if strings.Contains(out, "the counts cover every message") {
+		t.Errorf("claims full coverage despite unreadable messages:\n%s", out)
 	}
 }

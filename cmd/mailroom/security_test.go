@@ -409,6 +409,11 @@ func TestEveryIframeCarriesTheMessageSandbox(t *testing.T) {
 		if err != nil || d.IsDir() {
 			return err
 		}
+		// Test files hold hostile TEST DATA (a message body that names a frame), not
+		// frames this app renders; they are not scanned.
+		if strings.HasSuffix(path, ".test.ts") || strings.HasSuffix(path, ".test.tsx") {
+			return nil
+		}
 		if ext := filepath.Ext(path); ext != ".ts" && ext != ".tsx" {
 			return nil
 		}
