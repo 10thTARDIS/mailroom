@@ -21,7 +21,7 @@ superseding the old one — see `CLAUDE.md`.
 | [ADR-012](ADR-012-client-state-no-request-cache-library.md) | Client state in the shared TS client-core; no request-cache library (supersedes spec §3's TanStack Query) | Accepted |
 | [ADR-013](ADR-013-key-derivation-hkdf-not-wrapped-kek.md) | 0.5/1.0 keys are HKDF-derived from the master; the wrapped-KEK hierarchy (spec §9) is deferred to 1.x | Accepted |
 | [ADR-014](ADR-014-contact-resighting-no-change-row.md) | Re-sighting a known contact updates counters without a change row | Accepted |
-| [ADR-015](ADR-015-compose-editor-trusted-innerhtml.md) | The rich-text compose editor is the one allowed `innerHTML` site, marked and count-pinned | Accepted |
+| [ADR-015](ADR-015-compose-editor-trusted-innerhtml.md) | The rich-text compose editor is the one allowed `innerHTML` site, marked and count-pinned | Accepted; the `innerHTML` exception and plain-text-only paste are superseded by ADR-051 §4 (plain-text reply quotes remain) |
 | [ADR-016](ADR-016-web-push-vapid-derivation-and-per-user-send.md) | VAPID keys derived from the master key; per-user push sends | Accepted |
 | [ADR-017](ADR-017-signatures-and-templates-are-one-table-not-an-identity-column.md) | Signatures and templates are one `compose_snippets` table with a `kind`, not a column on `identities` (resolves spec §5 vs §17) | Accepted |
 | [ADR-018](ADR-018-redelivery-dedup-hash.md) | `dedup_hash` over an allowlist (identity headers + body) catches re-delivered mail; `content_hash` stays identity (amends ADR-001) | Accepted |

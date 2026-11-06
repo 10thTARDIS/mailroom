@@ -80,3 +80,7 @@ ghcr.io
 
 # README status badges (CI, release, licence, Go version).
 img.shields.io
+
+# The public npm registry: the only registry the editor's supply-chain test
+# (web/src/core/supplyChain/checkLock.ts) accepts in package-lock.json (ADR-051).
+registry.npmjs.org

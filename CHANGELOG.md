@@ -9,6 +9,49 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+The message editor has a new engine underneath. Everything you could do before
+(bold, italic, underline, bulleted and numbered lists, links, pictures in the
+text) works as it did, and pasting now keeps formatting. The message body also
+has a steadier shape: it fills the window and scrolls inside itself.
+
+### What's new
+
+- **Pasting keeps formatting.** Text copied from a web page, a document or another
+  mail keeps its bold, italic, lists and links when you paste it into a message.
+  Press Ctrl+Shift+V (Cmd+Shift+V on a Mac) to paste plain text instead.
+- **Pictures from the web are left out of a paste.** A picture that only lives on
+  a website is not linked into your message; you are told once, and can attach the
+  picture instead. Pictures you paste or drop from a file are attached as before.
+- **The message body fills the window.** The body stays one size, between the
+  address fields above and the attachments and Send, Send later and Discard
+  buttons below. Long messages scroll inside the body, and the buttons stay in
+  view, in rich text and in plain text, on a phone as well.
+- **Keyboard.** The formatting bar is a single stop for the Tab key, moved with
+  the arrow keys, and each button names its shortcut (Ctrl+B, Ctrl+I, Ctrl+U,
+  Ctrl+Shift+8 for a bulleted list, Ctrl+Shift+7 for a numbered one).
+
+### Safety and behaviour
+
+- **Links are limited to web and mail addresses.** A link you add (or paste) must
+  start with http, https or mailto. An address typed without a scheme, such as
+  `www.example.com`, gets `https://` in front. Anything else is refused with a
+  short note.
+- **Pasted content is cleaned as it goes in.** Only the formatting the editor
+  itself offers is kept; scripts, forms, embedded frames, styles and event
+  handlers in pasted content are dropped before they reach the page, and the
+  server still cleans every message again before it is sent.
+- **Signatures and templates are cleaned too.** The HTML of a saved signature or
+  template is now cleaned by the server when it is saved and when it is read, and
+  the editor leaves out web pictures from anything inserted, not only from pastes.
+- Tab leaves the message body as before, and Ctrl+Enter still sends.
+
+### Under the hood
+
+- The editor loads only when you open the composer, as a separate download, so
+  reading mail does not pay for it.
+- The build now refuses an editor that needs dynamic code, and a dependency
+  list that strays from the reviewed one.
+
 ## [1.100.0] — 2026-11-05
 
 **AI apps can now connect to Mailroom with OAuth: give an app your Mailroom's `/mcp` address, approve it once in your browser, and manage it alongside your API keys.** Until now an AI tool needed an API key created in Settings and pasted into it, or a local bridge for apps that only speak OAuth. Now any app that supports OAuth for MCP connects by address alone. You approve it on Mailroom's own screen, with the same choices as a key: what it may do, which accounts, its limits, and whether sending and deleting wait for your OK. An approved app can never do more than a key with the same settings, revoking it takes effect immediately, and API keys keep working exactly as before. This release gathers the four 1.100.0 betas.

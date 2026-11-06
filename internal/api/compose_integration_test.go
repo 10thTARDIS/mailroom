@@ -553,3 +553,32 @@ func TestEmailSubmissionSetHonoursTheAdvertisedSendLaterHorizon(t *testing.T) {
 			advertised, int(maxDelayedSend.Seconds()))
 	}
 }
+
+// An identity's htmlSignature is inserted into the composer (ADR-051), so it is
+// sanitised on write and again on read (a row stored before this was not).
+func TestIdentityHTMLSignatureIsSanitised(t *testing.T) {
+	h := newComposeHarness(t)
+	a, _ := seedTwo(t, h.super)
+	seedSendable(t, h.super, a, "", "catchall.example.com")
+
+	res := call(t, h.api.identitySet, a.UserID, map[string]any{
+		"create": map[string]any{"i1": map[string]any{"email": "shop@catchall.example.com", "htmlSignature": hostileSigHTML}},
+	})
+	created := snippetFromSet(t, res, "created", "i1")
+	id, _ := created["id"].(string)
+	assertSanitisedSignature(t, "create response", created["htmlSignature"].(string))
+
+	// UPDATE path.
+	call(t, h.api.identitySet, a.UserID, map[string]any{
+		"update": map[string]any{id: map[string]any{"htmlSignature": hostileSigHTML}},
+	})
+	// Legacy row, written straight to the table.
+	if _, err := h.super.Exec(context.Background(),
+		`UPDATE app.identities SET signature_html = $1 WHERE id = $2`, hostileSigHTML, id); err != nil {
+		t.Fatalf("seed raw row: %v", err)
+	}
+	got := call(t, h.api.identityGet, a.UserID, map[string]any{"ids": []string{id}})
+	list, _ := got["list"].([]any)
+	obj, _ := list[0].(map[string]any)
+	assertSanitisedSignature(t, "get of a legacy row", obj["htmlSignature"].(string))
+}

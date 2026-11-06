@@ -7,13 +7,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:tokens && tsc --noEmit && vite build",
+    "build": "npm run check:tokens && tsc --noEmit && vite build && npm run check:bundle",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check:tokens": "node scripts/check-tokens.mjs"
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs"
   },
   "dependencies": {
+    "@tiptap/core": "3.33.0",
+    "@tiptap/extension-file-handler": "3.33.0",
+    "@tiptap/extension-image": "3.33.0",
+    "@tiptap/pm": "3.33.0",
+    "@tiptap/react": "3.33.0",
+    "@tiptap/starter-kit": "3.33.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
