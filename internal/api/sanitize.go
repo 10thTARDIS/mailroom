@@ -617,7 +617,10 @@ func classifyImageSrc(raw string) srcKind {
 	case strings.HasPrefix(s, "data:image/"):
 		// A data: URL is bytes, not a fetch — but only an IMAGE one. data:text/html
 		// and data:image/svg+xml are scripting contexts wearing an <img> costume.
-		if strings.HasPrefix(s, "data:image/svg+xml") {
+		// Interior spaces are no longer stripped by normalizeURL (a browser keeps
+		// them), so look through them here: an SVG that was refused when its
+		// spaces were dropped must stay refused.
+		if strings.HasPrefix(strings.ReplaceAll(s, " ", ""), "data:image/svg+xml") {
 			return srcNone
 		}
 		return srcInline
@@ -666,15 +669,20 @@ func safeLinkURL(raw string) (string, bool) {
 	return strings.TrimSpace(raw), true
 }
 
-// normalizeURL lowercases and strips the bytes an HTML parser ignores when it
-// looks for a scheme. `java&Tab;script:` and "\x01javascript:" both reach us as
-// literal control characters (x/net/html has already decoded the entities), and
-// a browser will happily strip them before deciding the URL is javascript:. So
-// we strip them first, and decide on the same string the browser will.
+// normalizeURL lowercases a URL and applies the same pre-parse stripping as the
+// WHATWG URL parser, so we classify the string the browser will actually parse:
+// leading and trailing C0 controls and spaces (U+0000 to U+0020) are removed,
+// and a tab, LF or CR anywhere inside is removed. `java&Tab;script:` and
+// "\x01javascript:" both reach us as literal control characters (x/net/html has
+// already decoded the entities), and a browser strips them before deciding the
+// URL is javascript:. Interior spaces and other controls are NOT stripped: a
+// browser reads `d a t a:` as a relative URL, not as a data: URL, and so must
+// we. A leading no-break space is not a space to the browser either.
 func normalizeURL(raw string) string {
+	raw = strings.TrimFunc(raw, func(r rune) bool { return r <= 0x20 })
 	var b strings.Builder
 	for _, r := range raw {
-		if r <= 0x20 || r == 0x7f {
+		if r == '\t' || r == '\n' || r == '\r' {
 			continue
 		}
 		b.WriteRune(r)
@@ -688,8 +696,8 @@ func hasScheme(s string) bool {
 	return ok
 }
 
-// splitScheme returns the scheme of s (already normalized: lowercase, no
-// control/space characters), and whether it has one.
+// splitScheme returns the scheme of s (already normalized: lowercase, edges
+// trimmed, tab/LF/CR removed), and whether it has one.
 func splitScheme(s string) (string, bool) {
 	i := strings.IndexByte(s, ':')
 	if i <= 0 {

@@ -1428,3 +1428,58 @@ func TestNoFalseRemoteContentBanner(t *testing.T) {
 		}
 	}
 }
+
+// TestURLClassificationMatchesTheBrowser pins normalizeURL to the WHATWG URL
+// parser's pre-parse stripping: leading and trailing C0 controls and spaces go,
+// and an interior tab, LF or CR goes; an interior space, an interior control
+// other than those three, and a no-break space do not. The reference is a
+// browser, not our own earlier behaviour.
+func TestURLClassificationMatchesTheBrowser(t *testing.T) {
+	img := []struct {
+		name string
+		in   string
+		want srcKind
+	}{
+		{"interior spaces in data: are a relative URL", "d a t a:image/png,AAAA", srcNone},
+		{"interior space in cid: is a relative URL", "c id:x", srcNone},
+		{"a leading NBSP is not stripped, so no scheme matches", "\u00a0cid:x", srcNone},
+		{"a leading NBSP before data: is not a data URL", "\u00a0data:image/png,AAAA", srcNone},
+		{"a leading space is stripped", " cid:x", srcInline},
+		{"a trailing space is stripped", "cid:x ", srcInline},
+		{"leading C0 control is stripped", "\x01cid:x", srcInline},
+		{"an interior tab is stripped", "ci\td:x", srcInline},
+		{"an interior LF is stripped", "da\nta:image/png,AAAA", srcInline},
+		{"an interior CR is stripped", "ci\rd:x", srcInline},
+		{"entity-decoded tab as the parser delivers it", "c\tid:x", srcInline},
+		{"an interior NUL is not stripped", "ci\x00d:x", srcNone},
+		{"an interior DEL is not stripped", "ci\x7fd:x", srcNone},
+		{"an svg disguised with an interior space stays refused (not widened)", "data:image/svg +xml,x", srcNone},
+		{"https stays remote", " https://example.com/a.png", srcRemote},
+		{"h ttps is relative", "h ttps://example.com/a.png", srcNone},
+		{"javascript with a tab is still a scheme and refused", "java\tscript:alert(1)", srcNone},
+	}
+	for _, c := range img {
+		if got := classifyImageSrc(c.in); got != c.want {
+			t.Errorf("%s: classifyImageSrc(%q) = %v, want %v", c.name, c.in, got, c.want)
+		}
+	}
+
+	links := []struct {
+		name   string
+		in     string
+		wantOK bool
+	}{
+		{"java script: is relative, so refused", "java script:alert(1)", false},
+		{"h t t p is relative, so refused", "h t t p://example.com/", false},
+		{"a tab inside javascript: is refused", "java\tscript:alert(1)", false},
+		{"a leading NBSP javascript: is relative, so refused", "\u00a0javascript:alert(1)", false},
+		{"a leading space https link survives", " https://example.com/", true},
+		{"a tab inside https survives (the browser reads it as https)", "ht\ttps://example.com/", true},
+		{"mailto survives", "mailto:you@example.com", true},
+	}
+	for _, c := range links {
+		if _, ok := safeLinkURL(c.in); ok != c.wantOK {
+			t.Errorf("%s: safeLinkURL(%q) ok = %v, want %v", c.name, c.in, ok, c.wantOK)
+		}
+	}
+}
