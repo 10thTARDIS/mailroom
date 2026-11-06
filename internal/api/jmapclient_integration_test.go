@@ -92,7 +92,7 @@ func (r *jcRecorder) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	respBody, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	r.log.mu.Lock()
 	r.log.entries = append(r.log.entries, jcExchange{Step: r.log.cur, Method: req.Method, URL: req.URL.String(), Status: resp.StatusCode,
@@ -122,7 +122,7 @@ type jcEnv struct {
 	f   apiFixture
 
 	roToken, draftToken string
-	ro, draft           *jmap.Client
+	draft               *jmap.Client
 
 	drafts         ulid.ULID
 	m0, m1, m2, m3 ulid.ULID // seed (plain), alternative+attachment, list mail, html only
@@ -187,7 +187,7 @@ func (e *jcEnv) raw(token string, using []string, calls ...[]any) (int, []jcInvo
 	if err != nil {
 		e.t.Fatalf("raw: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	var env struct {
 		MethodResponses [][]json.RawMessage `json:"methodResponses"`
@@ -455,7 +455,7 @@ func (e *jcEnv) session() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
@@ -488,7 +488,7 @@ func stepSessionAuth(e *jcEnv) error {
 		if err != nil {
 			return err
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized {
 			return jcFail("token %q: status %d, want 401", tok, resp.StatusCode)
 		}
@@ -1071,7 +1071,7 @@ func stepDownload(e *jcEnv) error {
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	b, _ := io.ReadAll(rc)
 	if len(b) == 0 {
 		return jcFail("downloaded blob is empty")
@@ -1418,7 +1418,7 @@ func stepNotJSON(e *jcEnv) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	var pd struct {
 		Type string `json:"type"`
