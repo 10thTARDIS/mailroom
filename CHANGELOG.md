@@ -9,11 +9,20 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**The second beta of the new composer adds the formatting options the old editor
-never had.** Everything is on the formatting bar, each with a keyboard shortcut
-shown when you hover over its button.
+## [1.101.0-beta.3] — 2026-11-06
 
-### What's new
+**The third beta of v1.101 gives the composer a full set of formatting, and makes
+the plain-text mail you send fit any screen.** You can now choose fonts and sizes,
+colour and highlight text, strike through, add subscript and superscript, quote,
+write code and indent paragraphs, all from the formatting bar or the keyboard. The
+plain-text version of what you send now rewraps neatly on phones and narrow
+windows while keeping the line breaks you typed. The composer also holds still on
+a phone while it saves.
+
+### What's new: formatting
+
+Everything is on the formatting bar, and hovering over a button shows its
+keyboard shortcut.
 
 - **Fonts and sizes.** Pick a font (Sans-serif, Serif, Monospace or Wide) and a
   size (Small, Normal, Large or Huge) for the selected text. Choosing Default font
@@ -34,6 +43,9 @@ shown when you hover over its button.
   when there is nothing to undo or redo.
 - **On a narrow screen** the formatting bar scrolls sideways inside itself and
   the message body keeps its size.
+
+### What's new: plain-text mail
+
 - **Plain-text messages are formatted so other mail apps can rewrap them.** The
   plain-text version of every message you send (including the plain alternative
   of a formatted message) is now sent in the standard "flowed" form. A long
@@ -46,12 +58,6 @@ shown when you hover over its button.
   trailing space means "this line continues". Drafts you reopen and messages
   you quote in a reply keep their paragraphs whole rather than coming back
   broken into short lines.
-- **Messages that carry a soft line break are sent quoted-printable.** The
-  plain-text part of a message that wraps travels in an encoding that protects
-  those trailing spaces from mail systems that would otherwise strip them, and
-  a signed message signs exactly the text that is sent. Short messages with no
-  wrapping are sent as before.
-
 ### Safety and behaviour
 
 - **Only the offered fonts, sizes and plain colours are kept.** When you paste
@@ -63,6 +69,18 @@ shown when you hover over its button.
   as ordinary text, and turns paragraph indents into leading spaces.
 - The server still cleans every message again before it is sent; every new
   format is checked to come through that cleaning intact.
+- **Plain text that wraps travels in a protective encoding.** The plain-text
+  part of a message that wraps is sent in an encoding that keeps its line-end
+  markers safe from mail systems that would otherwise strip them, and a signed
+  message signs exactly the text that is sent. Short messages with no
+  wrapping are sent as before.
+
+### Fixes
+
+- **The composer no longer jumps on a phone while it saves.** The line that says
+  "Saving…" or "Saved" stays on one line (a long message is shortened with "…"),
+  so the message body keeps its height as the status changes. The formatting bar
+  also keeps its height when a long message fills the body.
 
 ### Under the hood
 
