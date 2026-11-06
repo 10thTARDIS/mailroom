@@ -9,6 +9,42 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### What's new
+
+- **View source.** The More menu of a message has a new **View source** item. It
+  shows the message exactly as it arrived, as plain text in a fixed-width block,
+  and never as a web page, so a hostile message cannot do anything by being
+  looked at. A **Headers** tab lists every header line in the order it was
+  received, with long wrapped headers joined onto one line. **Copy** puts the
+  whole message on the clipboard and **Download .eml** saves it. A very large
+  message is shown cut off after 1 MiB with a note saying so; the copy and the
+  download always have all of it.
+- **A QR code on the public key page.** The page that shows a key's fingerprint
+  now also shows a QR code of it, in the form OpenPGP apps scan
+  (`OPENPGP4FPR:` followed by the fingerprint), beside the fingerprint written
+  out in groups. It is drawn by the server as part of the page; the page still
+  runs no script and loads nothing from elsewhere.
+
+### For the person who runs Mailroom
+
+- **`mailroom-admin plaintext-report`.** A read-only count of how much plain-text
+  mail is hard-wrapped, as a first step before deciding whether to rejoin such
+  lines on narrow screens. Per user it reports how many messages are shown as
+  plain text, how many are already marked as flowed text, how many look wrapped
+  at a fixed width, how many lines a rejoin rule would join, and for each of the
+  others why it was not counted (too short, mixed line lengths, lists, quoted
+  text, code-like indentation, a signature only). It prints the thresholds it
+  used, says so when `--limit` stopped the scan early, and never prints message
+  text. Nothing about how mail is displayed changes.
+
+### Under the hood
+
+- Links and images are now read the way a browser reads them. Spaces inside
+  a web address are no longer ignored, so `d a t a:` is a relative address as it
+  is in a browser, and only spaces and control characters at the ends, plus a
+  tab or line break inside, are skipped. Nothing that was refused before is
+  allowed now.
+
 ## [1.101.0-beta.1] — 2026-11-06
 
 **The first beta of the new composer:** the message editor has a new engine underneath. Everything you could do before

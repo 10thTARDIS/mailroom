@@ -83,7 +83,7 @@ func TestPlaintextReportCountsEachCategoryExactly(t *testing.T) {
 	want := map[string]int{
 		"scanned": 11 /* the empty one is a message with no text */, "unreadable": 0,
 		"notPlain": 2 /* html, empty */, "plain": 9,
-		"flowed": 1, "unmarked": 8, "looksWrap": 2, "wouldChange": 2, "joins": 3*joinsA,
+		"flowed": 1, "unmarked": 8, "looksWrap": 2, "wouldChange": 2, "joins": 3 * joinsA,
 	}
 	got := map[string]int{
 		"scanned": a.scanned, "unreadable": a.unreadable, "notPlain": a.notPlain, "plain": a.plain,
