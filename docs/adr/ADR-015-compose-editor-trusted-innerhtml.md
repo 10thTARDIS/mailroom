@@ -1,7 +1,14 @@
 # ADR-015: The rich-text compose editor is the one allowed `innerHTML` site
 
 **Status:** Accepted (narrow, enforced exception to the no-`innerHTML` web
-invariant; raised by rich-text compose)
+invariant; raised by rich-text compose). **Partly superseded by ADR-051 §4:** the
+`innerHTML` exception, its `trusted-html:` markers and counted pin, and the
+plain-text-only paste rule are retired, because the editor is Tiptap and
+`web/src/app/ui/Compose.tsx` no longer uses `innerHTML`; paste is now rich,
+parsed into the editor's schema in an inert document. **Still in force:** reply
+quotes are the parent's plain text, HTML-escaped, never the parent's HTML, and
+every outgoing body passes `SanitizeOutboundHTML`. The text below is the
+original decision, kept as the record.
 
 ## Context
 

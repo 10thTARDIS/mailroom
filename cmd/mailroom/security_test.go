@@ -304,20 +304,15 @@ func assertNoInlineScript(t *testing.T, name, html string) {
 // from quietly landing.
 func TestWebNeverInjectsHTMLIntoOurOwnDOM(t *testing.T) {
 	src := filepath.Join(webRoot(t), "src")
-	// The rich-text COMPOSE editor is the ONE place allowed to touch innerHTML —
-	// and what it touches is NOT attacker-controlled message HTML. Reply quotes
-	// are built from the parent's PLAIN text, HTML-escaped; the html→text step
-	// parses into an INERT <template> (no rendering, no resource loads, no script
-	// or onerror execution); and reads return the user's OWN authored content,
-	// re-sanitized server-side on send. Every such line must live in Compose.tsx
-	// AND carry the "trusted-html:" marker, and each is justified in
-	// docs/adr/ADR-015. The message-RENDERING path is unaffected and still
-	// forbidden everywhere. The exact count is pinned so a new use cannot slip in
-	// without review (bump it here AND extend ADR-015).
-	composeEditor := filepath.FromSlash("app/ui/Compose.tsx")
-	const trustedHTMLMarker = "trusted-html:"
-	const wantTrustedHTMLUses = 3
-	trustedUses := 0
+	// NO EXCEPTIONS. The compose editor used to be the one counted exception
+	// (ADR-015: a contentEditable is seeded and read through innerHTML). It is
+	// Tiptap now (ADR-051): the seed goes through a schema parse, the read-back is
+	// the editor's serializer, a paste is parsed in an inert document, and the
+	// html-to-text step uses DOMParser. So the rule is absolute again and applies
+	// to Compose.tsx like every other file. The check scans OUR source, not
+	// node_modules; the library's own DOM handling is covered by the hostile-paste
+	// suite (web/src/app/ui/editor/hostilePaste.test.tsx) and the server's
+	// SanitizeOutboundHTML. See ADR-051 section 4.
 	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -342,10 +337,6 @@ func TestWebNeverInjectsHTMLIntoOurOwnDOM(t *testing.T) {
 				if !strings.Contains(line, bad) {
 					continue
 				}
-				if rel == composeEditor && strings.Contains(line, trustedHTMLMarker) {
-					trustedUses++
-					continue // an individually-justified compose-editor use (ADR-015)
-				}
 				t.Errorf("web/src/%s uses %s:\n\t%s\n"+
 					"A message body is attacker-controlled. It is rendered in a sandboxed "+
 					"iframe (ui/messageDocument.ts) and nowhere else — see docs/hostile-content.md.",
@@ -356,12 +347,6 @@ func TestWebNeverInjectsHTMLIntoOurOwnDOM(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walking web/src: %v", err)
-	}
-	if trustedUses != wantTrustedHTMLUses {
-		t.Errorf("found %d trusted-html: compose-editor uses, want exactly %d.\n"+
-			"A new innerHTML use in Compose.tsx must be individually justified in ADR-015 and "+
-			"this count bumped; a removed one must drop it — silent drift is not allowed.",
-			trustedUses, wantTrustedHTMLUses)
 	}
 }
 

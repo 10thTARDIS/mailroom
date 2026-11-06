@@ -266,6 +266,7 @@ const tally = {
   folded: 0,
   phoneWidth: 0,
   phoneMenus: 0,
+  composerEditor: 0,
   keys: 0,
   contacts: 0,
   apiKeys: 0,
@@ -1248,6 +1249,7 @@ const SURFACES = [
       // `c` — the key, not the URL, so the shell's own chain is what opens it.
       await page.keyboard.press("c");
       await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+      await waitForEditor(page);
     },
   },
   {
@@ -1264,6 +1266,7 @@ const SURFACES = [
     async open(page) {
       await load(page, "#/inbox/review?compose=forward:" + FIX.attachment.id);
       await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+      await waitForEditor(page);
     },
     // ⚠ mailroom#614, BOTH WAYS, IN A REAL BROWSER — and the fixture put back.
     //
@@ -5572,6 +5575,328 @@ function phoneWidthProbe(limit) {
   return { iw: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, offenders };
 }
 
+/**
+ * The composer's editor is its own chunk (ADR-051), fetched after the composer
+ * opens. Until it arrives the composer holds a placeholder, and axe run against
+ * the placeholder would be a clean result about a page the user never works in.
+ * So every composer surface waits for the REAL editing surface, and for the
+ * toolbar, before it is measured.
+ */
+async function waitForEditor(page) {
+  await waitForSelectorD(page, 'section.compose .ProseMirror[contenteditable="true"]', { timeout: 30000 });
+  await waitForSelectorD(page, 'section.compose [role="toolbar"] button', { timeout: 30000 });
+}
+
+/**
+ * THE COMPOSE EDITOR IN A REAL BROWSER (ADR-051 beta 1, #82/#83). Three things
+ * jsdom cannot answer:
+ *
+ *   1. CSP. The shell's policy has no 'unsafe-eval' and no inline script. A
+ *      draft holding a `<span style="color:…">` is loaded and a hostile HTML
+ *      paste is made, with a `securitypolicyviolation` listener installed BEFORE
+ *      the app's scripts (evaluateOnNewDocument) so nothing that happens during
+ *      load is missed. The listener is proved live by a deliberate violation (an
+ *      inline script, which the policy refuses), and the paste is also checked at
+ *      the network: no request may be made to the host the payload names.
+ *   2. The paste, in the real parser: a handler that would set a flag does not
+ *      run, nothing dangerous is left, a remote picture is gone and the user was
+ *      told, and ordinary formatting survives.
+ *   3. THE FIXED-SIZE BODY (#83), measured: the body keeps its size when long
+ *      content is put in it, scrolls inside itself, and the toolbar, the
+ *      attachment area and Send stay on screen — in rich mode and in plain mode,
+ *      at desktop width and at a phone's 360 px.
+ */
+async function composerEditorSurfaces(page, cdp) {
+  const fail = (what) => {
+    throw new Fail(33, "COMPOSER " + what);
+  };
+  const PAYLOAD_HOST = "evil.example";
+  const requested = [];
+  const onRequest = (req) => {
+    if (req.url().indexOf(PAYLOAD_HOST) >= 0) requested.push(req.url());
+  };
+  page.on("request", onRequest);
+  // Before any script of the next document runs.
+  await page.evaluateOnNewDocument(() => {
+    window.__cspViolations = [];
+    document.addEventListener("securitypolicyviolation", (e) => {
+      window.__cspViolations.push(e.effectiveDirective + " " + e.blockedURI + " " + e.sourceFile);
+    });
+  });
+
+  // ---- a draft whose body carries a styled span ---------------------------
+  // A draft is EDITED by creating its next version and destroying the old one in
+  // one Email/set, so an id does not survive an edit (and an autosave is an edit).
+  // Every stage that edits therefore starts from a fresh draft and ends by
+  // discarding whatever the composer holds at that point.
+  const makeDraft = async () => {
+    const made = await page.evaluate(async () => {
+      const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
+      const accountId = Object.values(sess.primaryAccounts)[0];
+      const res = await fetch(sess.apiUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+          methodCalls: [
+            ["Email/set", { accountId, create: { d: {
+              keywords: { $draft: true },
+              subject: "Editor fixture",
+              to: [{ name: "", email: "alice@example.com" }],
+              textBody: [{ partId: "1", type: "text/plain" }],
+              htmlBody: [{ partId: "2", type: "text/html" }],
+              bodyValues: {
+                "1": { value: "Hello red words" },
+                "2": { value: '<p>Hello <span style="color:#aa0000">red</span> <strong>words</strong></p>' },
+              },
+            } } }, "c"],
+          ],
+        }),
+      });
+      const body = await res.json();
+      const r = body.methodResponses && body.methodResponses[0];
+      return r && r[1] && r[1].created && r[1].created.d ? { id: r[1].created.d.id } : { error: JSON.stringify(body) };
+    });
+    if (!made || made.error) fail("could not create the fixture draft: " + (made ? made.error : "no answer"));
+    return made.id;
+  };
+  const openDraft = async () => {
+    const id = await makeDraft();
+    await load(page, "#/inbox/review?compose=draft:" + id);
+    await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+    await waitForEditor(page);
+    await until("the draft's text is in the editor", 30000, () =>
+      page.evaluate(() => {
+        const el = document.querySelector("section.compose .editor-surface");
+        return !!el && el.textContent.indexOf("Hello red words") >= 0;
+      }),
+    33);
+  };
+  // Discards what the composer holds, and waits for the destroy to land so no later
+  // surface sees the draft.
+  const discardOpenDraft = async () => {
+    const destroyed = page.waitForResponse(
+      (r) => r.request().method() === "POST" && (r.request().postData() || "").indexOf('"destroy"') >= 0,
+      { timeout: 30000 },
+    );
+    await page.click("section.compose button.compose-discard");
+    const res = await destroyed;
+    if (!res.ok()) fail("discarding the fixture draft: HTTP " + res.status());
+    await until("the composer has closed", 30000, () => page.evaluate(() => !document.querySelector("section.compose")), 33);
+  };
+
+  await openDraft();
+
+  // A draft's span is real content (the text), kept; no violation while loading.
+  const afterLoad = await page.evaluate(() => window.__cspViolations.slice());
+  if (afterLoad.length) fail("CSP violations while loading the draft: " + JSON.stringify(afterLoad));
+  const strong = await page.evaluate(() => document.querySelectorAll("section.compose .editor-surface strong").length);
+  if (strong !== 1) fail("the draft's <strong> did not survive into the editor (strong=" + strong + ")");
+
+  // ---- a hostile paste in the real parser ----------------------------------
+  const pasteHtml = (html, text) =>
+    page.evaluate(
+      (html, text) => {
+        const el = document.querySelector("section.compose .editor-surface");
+        el.focus();
+        const dt = new DataTransfer();
+        dt.setData("text/html", html);
+        dt.setData("text/plain", text);
+        el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+      },
+      html,
+      text,
+    );
+  const hostile =
+    '<p style="color:#00aa00">pasted <span style="color:red">span</span> <b>bold</b> <i>italic</i></p>' +
+    '<ul><li>one</li><li>two</li></ul>' +
+    '<p><a href="https://example.com/ok">kept link</a> <a href="javascript:window.__pwned=1">scripted link</a></p>' +
+    '<img src=x onerror="window.__pwned=1">' +
+    '<img src="https://' + PAYLOAD_HOST + '/t.png">' +
+    '<svg onload="window.__pwned=1"></svg><iframe src="https://' + PAYLOAD_HOST + '/f"></iframe>' +
+    '<script>window.__pwned=1</script><style>body{background:url(https://' + PAYLOAD_HOST + '/css)}</style>' +
+    '<form action="https://' + PAYLOAD_HOST + '/post"><input name=pw></form>' +
+    '<div style="background:url(https://' + PAYLOAD_HOST + '/bg)">styled div</div>';
+  await pasteHtml(hostile, "plain fallback");
+  await sleep(1500); // an image load or a handler needs a tick to show itself
+  const pasted = await page.evaluate(() => {
+    const root = document.querySelector("section.compose .editor-surface");
+    const bad = root.querySelectorAll("script, style, iframe, object, embed, form, input, svg, meta, link, img:not(.ProseMirror-separator)");
+    const attrs = [];
+    root.querySelectorAll("*").forEach((el) => {
+      for (const a of el.attributes) if (a.name.startsWith("on") || (a.name === "style")) attrs.push(el.tagName + "[" + a.name + "]");
+    });
+    const hrefs = [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    return {
+      pwned: window.__pwned === 1,
+      bad: bad.length,
+      attrs,
+      hrefs,
+      bold: root.querySelectorAll("strong").length,
+      italic: root.querySelectorAll("em").length,
+      items: root.querySelectorAll("ul li").length,
+      text: root.textContent,
+      toast: [...document.querySelectorAll(".toasts *")].map((n) => n.textContent).join(" | "),
+    };
+  });
+  if (pasted.pwned) fail("a pasted handler RAN (window.__pwned)");
+  if (pasted.bad) fail("dangerous elements survived the paste: " + pasted.bad);
+  if (pasted.attrs.length) fail("event-handler or style attributes survived the paste: " + pasted.attrs.join(","));
+  if (pasted.hrefs.join(",") !== "https://example.com/ok") fail("links after paste: " + JSON.stringify(pasted.hrefs));
+  if (pasted.bold < 2 || pasted.italic < 1 || pasted.items !== 2) {
+    fail("formatting did not survive the paste: " + JSON.stringify({ bold: pasted.bold, italic: pasted.italic, items: pasted.items }));
+  }
+  if (pasted.text.indexOf("scripted link") < 0 || pasted.text.indexOf("styled div") < 0) fail("the pasted text was lost: " + pasted.text);
+  if (pasted.toast.indexOf("Pictures from the web were left out") < 0) fail("the user was not told about the dropped pictures: " + pasted.toast);
+  if (requested.length) fail("the paste caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
+  const afterPaste = await page.evaluate(() => window.__cspViolations.slice());
+  if (afterPaste.length) fail("CSP violations after the paste: " + JSON.stringify(afterPaste));
+
+  // ---- the listener is live: a deliberate violation must be seen -----------
+  await control("composer-csp-listener", async () => {
+    await page.evaluate(() => {
+      const s = document.createElement("script");
+      s.textContent = "window.__inlineRan = 1"; // an inline script: refused by script-src 'self'
+      document.body.appendChild(s);
+    });
+    await sleep(300);
+    const seen = await page.evaluate(() => ({ v: window.__cspViolations.slice(), ran: window.__inlineRan === 1 }));
+    console.log("composer csp control: violations=" + JSON.stringify(seen.v) + " ranAnyway=" + seen.ran);
+    return seen.v.length > 0 && /script-src/.test(seen.v[0]) && !seen.ran;
+  });
+  await page.evaluate(() => { window.__cspViolations.length = 0; });
+
+  // ---- the fixed-size body, measured ---------------------------------------
+  const longHtml = Array.from({ length: 150 }, (_, i) => "<p>line " + i + " of a long message body</p>").join("");
+  const longText = Array.from({ length: 150 }, (_, i) => "line " + i + " of a long message body").join("\n");
+  const measure = () =>
+    page.evaluate(() => {
+      const r = (el) => (el ? el.getBoundingClientRect() : null);
+      const compose = document.querySelector("section.compose");
+      const surface = document.querySelector("section.compose .editor-surface, section.compose textarea.editor-plain");
+      const toolbar = document.querySelector("section.compose .editor-toolbar");
+      const submit = document.querySelector('section.compose button[type="submit"]');
+      const cr = r(compose), sr = r(surface), tr = r(toolbar), br = r(submit);
+      const cs = getComputedStyle(surface);
+      const hit = (el) => {
+        const b = r(el);
+        const x = b.left + b.width / 2, y = b.top + b.height / 2;
+        const top = document.elementFromPoint(x, y);
+        return !!top && (top === el || el.contains(top));
+      };
+      return {
+        compose: cr && cr.height,
+        surfaceH: sr && sr.height,
+        scrollH: surface.scrollHeight,
+        clientH: surface.clientHeight,
+        overflowY: cs.overflowY,
+        toolbarVisible: tr ? tr.top >= cr.top - 1 && tr.bottom <= cr.bottom + 1 && tr.height > 0 : null,
+        submitInView: br.top >= 0 && br.bottom <= window.innerHeight && br.height > 0,
+        submitReachable: hit(submit),
+        docScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+        view: window.innerWidth + "x" + window.innerHeight,
+      };
+    });
+  const bodyCheck = async (label) => {
+    const before = await measure();
+    // Put 150 lines in: rich by pasting HTML, plain by setting the value through
+    // the native setter and an input event, as typing would.
+    if (label.indexOf("rich") >= 0) {
+      await pasteHtml(longHtml, longText);
+    } else {
+      await page.evaluate((text) => {
+        const ta = document.querySelector("section.compose textarea.editor-plain");
+        const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        set.call(ta, text);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+      }, longText);
+    }
+    await sleep(500);
+    const after = await measure();
+    const where = label + " (" + after.view + ")";
+    if (Math.abs(after.surfaceH - before.surfaceH) > 1 || Math.abs(after.compose - before.compose) > 1) {
+      fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose + ")");
+    }
+    if (!(after.scrollH > after.clientH + 20)) fail(where + ": the long body does not scroll inside itself (scrollH=" + after.scrollH + " clientH=" + after.clientH + ")");
+    if (after.overflowY !== "auto") fail(where + ": the body's overflow-y is " + after.overflowY);
+    if (!after.submitInView || !after.submitReachable) fail(where + ": Send is not on screen / reachable: " + JSON.stringify(after));
+    if (after.toolbarVisible === false) fail(where + ": the toolbar left the composer: " + JSON.stringify(after));
+    if (label.indexOf("rich") >= 0 && after.toolbarVisible !== true) fail(where + ": no toolbar found");
+    console.log("composer body " + where + " fixed at " + Math.round(after.surfaceH) + "px, scrolls " + after.scrollH + "/" + after.clientH);
+  };
+  await bodyCheck("rich desktop");
+  await page.click("section.compose .editor-mode-toggle");
+  await waitForSelectorD(page, "section.compose textarea.editor-plain", { timeout: 30000 });
+  await bodyCheck("plain desktop");
+  await discardOpenDraft();
+
+  // The same at a phone's width.
+  await page.setViewport({ width: 360, height: 740, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+  await openDraft();
+  await bodyCheck("rich phone");
+  await page.click("section.compose .editor-mode-toggle");
+  await waitForSelectorD(page, "section.compose textarea.editor-plain", { timeout: 30000 });
+  await bodyCheck("plain phone");
+  await discardOpenDraft();
+
+  // A landscape phone: a short, narrow docked pane. The composer's fields must
+  // still be reachable (an earlier version pinned the whole attachment/send block
+  // to the bottom, which at 844x390 was taller than the form and sat over the
+  // recipient field, so the field could not be clicked), and Send must be
+  // reachable by scrolling the form.
+  await page.setViewport({ width: 844, height: 390, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+  await load(page, "#/inbox/review?compose=new");
+  await waitForSelectorD(page, 'section.compose[role="dialog"] input.compose-chip-text', { timeout: 30000 });
+  await waitForEditor(page);
+  const landscape = await page.evaluate(() => {
+    const hits = (el) => {
+      const b = el.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return !!top && (top === el || el.contains(top));
+    };
+    const to = document.querySelector("section.compose input.compose-chip-text");
+    const subject = document.querySelector("section.compose .field input.text-input");
+    const submit = document.querySelector('section.compose button[type="submit"]');
+    const toOk = hits(to);
+    subject.scrollIntoView({ block: "center" });
+    const subjectOk = hits(subject);
+    submit.scrollIntoView({ block: "center" });
+    const submitOk = hits(submit);
+    return { toOk, subjectOk, submitOk };
+  });
+  if (!landscape.toOk || !landscape.subjectOk || !landscape.submitOk) {
+    fail("at 844x390 a composer field or Send is covered: " + JSON.stringify(landscape));
+  }
+  await page.setViewport({ width: 1680, height: 1100 });
+  await load(page, "#/inbox/review");
+  await waitForDesk(page);
+
+  // The control for the layout half: with the body's own scrolling taken away the
+  // check must see the body grow. (Removing overflow in the page is the
+  // mechanism a CSS regression would remove.)
+  await control("composer-body-scrolls", async () => {
+    await openDraft();
+    await page.evaluate(() => {
+      // CSSOM, not a <style> tag, so the app's CSP cannot quietly refuse it.
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(".editor-surface { overflow-y: visible !important; flex: none !important; min-height: 0 !important; }");
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    });
+    const before = await measure();
+    await pasteHtml(longHtml, longText);
+    await sleep(500);
+    const after = await measure();
+    console.log("composer layout control: surface " + before.surfaceH + " -> " + after.surfaceH);
+    return Math.abs(after.surfaceH - before.surfaceH) > 50;
+  });
+
+  // ---- leave nothing behind: discard the fixture draft ----------------------
+  await discardOpenDraft();
+  page.off("request", onRequest);
+  tally.composerEditor = 1;
+}
+
 async function phoneWidthSurfaces(page, contactIds) {
   const plain = FIX.messages.find((m) => m.subject === "Lunch on Thursday?") || FIX.messages[0];
   const waitPane = async (page, subject) => {
@@ -6542,6 +6867,9 @@ async function main() {
     // Mail-provider sign-in (#52) before the phone-width pass, which measures
     // the same surfaces with the same in-page fixture.
     await oauthSurfaces(page, cdp);
+    // The composer's editor in a real browser (ADR-051): CSP, paste, fixed-size
+    // body. Before the phone-width pass so its fixture draft is gone by then.
+    await composerEditorSurfaces(page, cdp);
     await phoneWidthSurfaces(page, contactIds);
     await apiKeysCleanup(page);
     // Every pop-up menu on a phone (#880), after the API-key requests are denied
@@ -6632,6 +6960,8 @@ async function main() {
         (tally.apiKeys ? "ok" : "NOT-RUN") +
         " oauth=" +
         (tally.oauth ? "ok" : "NOT-RUN") +
+        " composer_editor=" +
+        (tally.composerEditor ? "ok" : "NOT-RUN") +
         " axe_version=" +
         axeVersion +
         " NOT_CHECKED=held-attachment-panel,message-body-iframe,at-phrasing",

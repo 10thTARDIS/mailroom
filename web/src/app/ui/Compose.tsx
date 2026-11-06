@@ -49,8 +49,8 @@
 //     — the alias model run backwards — and the hint yields the moment the user
 //     touches the From themselves.
 //
-// RICH TEXT (#46) and ATTACHMENTS (#85) are as they were: a dependency-free
-// contentEditable with an execCommand toolbar and a plain-text toggle, and an
+// RICH TEXT (#46) and ATTACHMENTS (#85) are as they were: a rich-text editor
+// (Tiptap, since ADR-051; ./editor/) with a toolbar and a plain-text toggle, and an
 // upload-on-choose that puts a blobId in the draft create rather than bytes in the
 // JSON. Forward adds one thing to that: a part of the parent travels by REFERENCE
 // (its part blobId), which internal/api/draft.go resolveAttachments accepts
@@ -78,6 +78,7 @@ import { htmlToRender } from "./bodyChoice";
 import { ImportKeyDialog } from "./ImportKeyDialog";
 import { SendLaterMenu } from "./SendLaterMenu";
 import { SnippetPicker } from "./SnippetPicker";
+import { RichEditor } from "./editor/LazyRichEditor";
 import { isWithheld, scanStateFor, withheldReasonKey } from "./attachmentScanPolicy";
 import { focusMessageListSoon, trapTab } from "./focusTrap";
 import { t, type MessageKey } from "../i18n";
@@ -210,9 +211,10 @@ function textToHtml(text: string): string {
  * bullet, a blockquote's lines are prefixed with "> ", and an image collapses to
  * its alt text — a readable plain rendering, not a perfect one. */
 function htmlToText(html: string): string {
-  const tpl = document.createElement("template");
-  tpl.innerHTML = html; // trusted-html: inert <template>, no rendering/execution (ADR-015)
-  return walkText(tpl.content)
+  // DOMParser builds an inert document (no scripts run, nothing loads), which is
+  // all this needs: walk it for text. (ADR-051 §4; this was a <template> before.)
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return walkText(doc.body)
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -315,190 +317,6 @@ function quotedHtml(parent: EffectiveEmail | null): string {
   if (!text) return "";
   const bodyHtml = escapeHtml(text).replace(/\n/g, "<br>");
   return `<p><br></p><p>${escapeHtml(quoteHeader(parent))}</p><blockquote>${bodyHtml}</blockquote>`;
-}
-
-/** The dependency-free rich-text editor: a contentEditable surface plus a small
- * execCommand toolbar. It is UNCONTROLLED — the initial HTML is written to the
- * DOM once (writing innerHTML on every render would slam the caret to the top on
- * each keystroke) and every edit is read back out through `onChange`. */
-function RichEditor({
-  initialHTML,
-  onChange,
-  onImageFile,
-  onBlur,
-  label,
-}: {
-  initialHTML: string;
-  onChange: (html: string) => void;
-  onImageFile: (file: File) => Promise<string | null>;
-  onBlur?: () => void;
-  label: string;
-}): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null);
-  const imgRef = useRef<HTMLInputElement>(null);
-  const savedRange = useRef<Range | null>(null);
-
-  useEffect(() => {
-    if (ref.current) ref.current.innerHTML = initialHTML; // trusted-html: escaped plain-text reply quote only (ADR-015)
-    // initialHTML is the mount-time seed only; onChange is stable enough for our
-    // use and re-seeding on either would fight the uncontrolled editor. The
-    // composer re-KEYS this component when the seed legitimately changes (a From
-    // change while the body is untouched), which is a remount rather than a
-    // re-seed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const sync = (): void => {
-    if (ref.current) onChange(ref.current.innerHTML); // trusted-html: reads user's own authored content, re-sanitized server-side on send (ADR-015)
-  };
-
-  // SECURITY (ADR-015): paste as PLAIN TEXT. Pasting rich HTML would inject
-  // attacker-controlled markup (e.g. copied from a malicious page) straight into
-  // our live editable DOM, where an <img onerror> fires — precisely the vector
-  // the no-innerHTML invariant guards against. Rich paste would need a
-  // client-side sanitizer we deliberately don't ship; plain-text paste closes it.
-  const pasteAsText = (e: React.ClipboardEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
-    document.execCommand("insertText", false, text);
-    sync();
-  };
-
-  // Save/restore the caret across actions that steal focus (a link prompt, the
-  // image file dialog): without it, insertHTML/createLink would land nowhere.
-  const saveSelection = (): void => {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0 && ref.current?.contains(sel.anchorNode)) {
-      savedRange.current = sel.getRangeAt(0).cloneRange();
-    }
-  };
-  const restoreSelection = (): void => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    const r = savedRange.current;
-    if (r) {
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(r);
-    }
-  };
-
-  // execCommand is deprecated but universally implemented and needs no library —
-  // exactly the minimal, self-contained editor #46 asks for (no npm dep, no CSP
-  // or bundle cost). The result is re-read via sync() and SERVER-sanitized before
-  // it is transmitted, so an odd browser's output cannot become hostile bytes.
-  const exec = (command: string, value?: string): void => {
-    document.execCommand(command, false, value);
-    sync();
-  };
-
-  const addLink = (): void => {
-    const url = window.prompt(t("compose.linkPrompt"));
-    restoreSelection();
-    if (url && url.trim() !== "") document.execCommand("createLink", false, url.trim());
-    sync();
-  };
-
-  const onImageChosen = async (files: FileList | null): Promise<void> => {
-    const file = files?.[0];
-    if (imgRef.current) imgRef.current.value = "";
-    if (!file) return;
-    const cid = await onImageFile(file);
-    if (!cid) return;
-    restoreSelection();
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<img src="cid:${cid}" alt="${escapeHtml(file.name)}" style="max-width:100%">`,
-    );
-    sync();
-  };
-
-  // A formatting button that acts on the LIVE selection: mousedown+preventDefault
-  // keeps the editor focused (a plain onClick would blur it first).
-  const tool = (cmd: string, labelKey: MessageKey, glyph: string, cssGlyph = false): JSX.Element => (
-    <button
-      type="button"
-      className="editor-tool"
-      aria-label={t(labelKey)}
-      title={t(labelKey)}
-      data-glyph={cssGlyph ? glyph : undefined}
-      onMouseDown={(ev) => {
-        ev.preventDefault();
-        exec(cmd);
-      }}
-    >
-      {cssGlyph ? null : glyph}
-    </button>
-  );
-
-  // "1." is TEXT to axe (WCAG 2.5.3, label-content-name-mismatch in axe-core
-  // 4.14): a name of "Numbered list" does not contain it. Painted from CSS
-  // (.editor-tool[data-glyph]::before) it is decoration, not label content.
-
-  return (
-    <div className="editor">
-      <div className="editor-toolbar" role="toolbar" aria-label={t("compose.formatting")}>
-        {tool("bold", "compose.bold", "B")}
-        {tool("italic", "compose.italic", "I")}
-        {tool("underline", "compose.underline", "U")}
-        {tool("insertUnorderedList", "compose.bulletList", "•")}
-        {tool("insertOrderedList", "compose.numberList", "1.", true)}
-        <button
-          type="button"
-          className="editor-tool"
-          aria-label={t("compose.link")}
-          title={t("compose.link")}
-          // Save the caret while it is still in the editor; the prompt blurs it.
-          onMouseDown={(ev) => {
-            ev.preventDefault();
-            saveSelection();
-          }}
-          onClick={addLink}
-        >
-          🔗
-        </button>
-        <button
-          type="button"
-          className="editor-tool"
-          aria-label={t("compose.insertImage")}
-          title={t("compose.insertImage")}
-          onMouseDown={(ev) => {
-            ev.preventDefault();
-            saveSelection();
-          }}
-          onClick={() => imgRef.current?.click()}
-        >
-          🖼
-        </button>
-      </div>
-      <div
-        ref={ref}
-        className="editor-surface"
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline="true"
-        aria-label={label}
-        onInput={sync}
-        onBlur={() => {
-          saveSelection();
-          onBlur?.();
-        }}
-        onPaste={pasteAsText}
-      />
-      <input
-        ref={imgRef}
-        type="file"
-        accept="image/*"
-        className="editor-image-input"
-        aria-hidden="true"
-        tabIndex={-1}
-        onChange={(ev) => void onImageChosen(ev.target.files)}
-      />
-    </div>
-  );
 }
 
 /** The text/html actually spliced in for a signature SOURCE (a snippet's own
@@ -1864,12 +1682,13 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
                 setHtmlBody(html);
               }}
               onImageFile={insertImageUpload}
+              onNotice={(message) => pushToast({ kind: "info", message })}
               onBlur={() => void runAutosave(true)}
               label={t("compose.body")}
             />
           ) : (
             <textarea
-              className="textarea"
+              className="textarea editor-plain"
               value={body}
               rows={10}
               aria-label={t("compose.body")}

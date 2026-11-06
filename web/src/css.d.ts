@@ -48,3 +48,11 @@ declare module "*.html?raw" {
   const html: string;
   export default html;
 }
+
+// And for the LOCKFILE and package.json (ADR-051 §2): the editor's supply-chain
+// test (core/supplyChain/checkLock.test.ts) checks what the build would actually
+// install, which is only knowable from those files.
+declare module "*.json?raw" {
+  const text: string;
+  export default text;
+}

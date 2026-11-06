@@ -1496,10 +1496,18 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .message-folded-time { color: var(--fg-muted); white-space: nowrap; }
 
-/* ---- rich-text compose editor (#46, dependency-free contentEditable) ------ */
+/* ---- rich-text compose editor (#46; Tiptap/ProseMirror since ADR-051) ------ */
+/* THE FIXED-SIZE BODY (#83): `.editor` is a flex column that fills the body field
+   (`.field-grow`, itself the growing child of `.compose-form`); the toolbar keeps
+   its height, and `.editor-surface` takes the rest and SCROLLS INSIDE ITSELF. The
+   action row below stays in view (`.compose-actions`, sticky). The
+   `min-height` keeps the writing area usable when the window is short, in which
+   case the form scrolls instead of the editor collapsing. */
 .editor {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 12rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
@@ -1542,9 +1550,15 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .editor-tool[data-glyph]::before { content: attr(data-glyph); }
 .editor-tool:hover { background: var(--bg-hover); }
+.editor-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .editor-surface {
-  min-height: 12.8571rem;
-  max-height: 40vh;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px 12px;
   color: var(--fg);
@@ -1552,6 +1566,42 @@ a.attachment:hover { background: var(--bg-sunken); }
   line-height: 1.5;
   outline: none;
 }
+.editor-loading { padding: 10px 12px; color: var(--fg-muted); }
+/* The ProseMirror base rules, shipped here instead of injected by the library
+   (`injectCSS: false`, ADR-051 §2) so the styles are ours and reviewable. This
+   is prosemirror-view's own base sheet, minus the pieces for features the schema
+   does not have (gap cursor, tables). */
+.ProseMirror {
+  position: relative;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  -webkit-font-variant-ligatures: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+}
+.ProseMirror pre { white-space: pre-wrap; }
+.ProseMirror li { position: relative; }
+.ProseMirror-hideselection *::selection { background: transparent; }
+.ProseMirror-hideselection *::-moz-selection { background: transparent; }
+.ProseMirror-hideselection { caret-color: transparent; }
+.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+li.ProseMirror-selectednode { outline: none; }
+li.ProseMirror-selectednode::after {
+  content: "";
+  position: absolute;
+  left: -32px;
+  right: -2px;
+  top: -2px;
+  bottom: -2px;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+}
+.ProseMirror img.ProseMirror-separator,
+.ProseMirror-separator { display: none !important; }
+.editor-surface p { margin: 0 0 0.5em; }
+.editor-surface ul, .editor-surface ol { margin: 0 0 0.5em; padding-inline-start: 1.5em; }
+.editor-surface li > p { margin: 0; }
 .editor-surface:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .editor-surface img { max-width: 100%; height: auto; }
 /* Quoted text is TEXT, not a label, so it is not muted: --fg-muted misses AAA
@@ -1687,7 +1737,9 @@ a.attachment:hover { background: var(--bg-sunken); }
 .recipient-address { color: var(--fg-muted); font-size: 0.8571rem; }
 .field-row { display: flex; gap: 8px; }
 .field-row .select { max-width: 260px; }
-.field-grow { flex: 1; }
+.compose-form .field.field-grow { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Plain mode fills the body field the same way the rich editor does (#83). */
+.compose-form .field-grow > .editor-plain { flex: 1 1 auto; min-height: 12rem; resize: none; overflow-y: auto; }
 .hint { margin: 0 0 10px; font-size: 0.8571rem; color: var(--fg-muted); }
 
 .inline-form { display: flex; gap: 6px; padding: 6px 4px; }
@@ -1721,6 +1773,25 @@ a.attachment:hover { background: var(--bg-sunken); }
 .compose-header h2 { font-size: 1rem; margin: 0; }
 .compose-form { padding: 12px 16px 16px; overflow-y: auto; display: flex; flex-direction: column; }
 .compose-actions { display: flex; gap: 8px; margin-top: 12px; }
+/* Send, Send later and Discard stay in view while the form scrolls (#83): on a
+   window too short for the fields, the body at its floor and this row, the form
+   scrolls and this row stays at its bottom edge. Only the ROW sticks. An earlier
+   version stuck the whole block under it (attachments, the send line, the
+   encryption switch), which on a short, narrow docked pane (a landscape phone)
+   was taller than the form and covered the recipient field, so nothing above it
+   could be clicked. And not at all on a short viewport, where the row alone would
+   take too much of what is left. */
+.compose-form > .compose-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  flex: none;
+  background: var(--bg-raised);
+  padding-block: 6px;
+}
+@media (max-height: 520px) {
+  .compose-form > .compose-actions { position: static; }
+}
 
 .palette {
   position: fixed;

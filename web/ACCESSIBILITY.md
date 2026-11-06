@@ -119,6 +119,7 @@ does not re-announce the sentence around it).
 | desk halves | `role="tablist"` of `role="tab"`, one tab stop, `aria-controls` → the grid. Each tab is named explicitly ("Review first, 6 messages") rather than from its label plus a count pill, because the grid BORROWS that name: a grid cannot also be a `tabpanel`, so it takes the panel's place and its name |
 | the line | `role="slider"`, `aria-valuemin=0` / `max=1` / `now`, and an `aria-valuetext` that states the split rather than the number |
 | toolbars | `role="toolbar" aria-label`, every button a word |
+| the composer's formatting bar | `role="toolbar"` with **one tab stop** (roving `tabIndex`; Left, Right, Home and End move along it), toggle buttons carry `aria-pressed`, and each title lists its shortcut. The editing surface is a `role="textbox" aria-multiline` named "Message". Tab leaves the body (it does not indent a list item). The editor is a separate chunk, so the composer shows a polite "Loading the editor…" status until it arrives, and the axe lane waits for the real surface before it measures (ADR-051) |
 | sender popover | `role="tooltip"` while hovered (the anchor points `aria-describedby` at it), `role="dialog"` once pinned |
 | attachment viewer | `role="dialog" aria-modal`, focus trapped, Escape closes and returns focus |
 | settings | `role="dialog" aria-modal`, focus trapped, with an `<h2>` for the page and an `<h3>` per row. Deliberately **not** a `main` landmark: the list route stays mounted underneath, so a second `main` would be a real violation |

@@ -57,14 +57,13 @@ auto-height, below), and it is safe only because `allow-same-origin` is not:
 delete its own `sandbox` attribute. We take one precisely because we never take
 the other — a script in this frame has no origin to abuse.
 
-> **One narrow exception to "never injected into our DOM": the rich-text
-> compose editor** (`web/src/app/ui/Compose.tsx`). A `contentEditable` editor is
-> read/seeded via `innerHTML`, but what it touches is not attacker message HTML:
-> reply quotes are the parent's *plain text*, HTML-escaped; the html→text step
-> uses an inert `<template>`; reads return the user's own content (re-sanitized
-> server-side on send); and paste is forced to plain text. Each use carries a
-> `trusted-html:` marker and the forcing test pins their file and count. See
-> `docs/adr/ADR-015`. The message-**rendering** path above is unaffected.
+> **No exception any more.** The rich-text compose editor (Tiptap, ADR-051)
+> used to be the one counted `innerHTML` site (ADR-015). It now seeds through a
+> schema parse, reads back through the editor's serializer, and parses a paste
+> into its schema in an inert document, so `web/src/app/ui/Compose.tsx` is held to
+> the same no-`innerHTML` rule as every other file. Reply quotes are still the
+> parent's *plain text*, HTML-escaped (ADR-015). See `docs/adr/ADR-051` §4. The
+> message-**rendering** path above is unaffected.
 
 **Content-fit auto-height, and why `allow-scripts` is not a hole.**
 A parent cannot measure an opaque-origin iframe's content, so sizing the frame to

@@ -144,6 +144,12 @@
 #                                 suggestions) is off the screen, cut off,
 #                                 not scrollable to its last item, or covered
 #                                 (#880; axe cannot see this class of defect)
+#    33  COMPOSER               — the compose editor in a real browser (ADR-051):
+#                                 a CSP violation while loading a draft or pasting
+#                                 HTML, a pasted handler that ran, dangerous
+#                                 markup or a remote picture left in a paste, or
+#                                 the body not keeping a fixed size and scrolling
+#                                 inside itself with Send in view (#83)
 #
 # Usage:  scripts/a11y-e2e.sh
 #         MAILROOM_IMAGE=mailroom:test scripts/a11y-e2e.sh
