@@ -25,9 +25,13 @@ folders are Mailboxes.
 ## Consequences
 
 - The RFC state/changes machinery *is* the client sync protocol — built once.
-- Third-party JMAP clients can genuinely connect; aerc (via rockorager
-  go-jmap) serves as a free external conformance client — no CI workflow runs
-  it today, this is a manual/local check.
+- Third-party JMAP clients can genuinely connect; rockorager/go-jmap (the
+  library aerc is built on) serves as a free external conformance client. CI
+  job `jmap-client` (`scripts/jmap-client-test.sh`) drives it against the real
+  server with an API key sent as a bearer token. The non-conformances it
+  found are listed in `internal/api/testdata/jmapclient-known-gaps.txt`; a new
+  failure outside that list, or a listed step that starts passing, turns the
+  job red.
 - Full RFC 8620 (WebSocket push, quotas extension) is explicitly out for v1.0.
 
 ## References

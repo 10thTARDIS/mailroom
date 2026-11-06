@@ -148,7 +148,8 @@ GOCID=$(docker create --network "$NET" -w /src \
   -e MAILROOM_TEST_APP_URL="postgres://mailroom_app:$PW@pg:5432/mailroom" \
   -e MAILROOM_TEST_ADMIN_URL="postgres://mailroom_admin:$PW@pg:5432/mailroom" \
   -e MAILROOM_TEST_OWNER_URL="postgres://mailroom_owner:$PW@pg:5432/mailroom" \
-  "$GO_IMAGE" go test -tags integration -count=1 -p 1 -timeout "${MAILROOM_IT_TIMEOUT:-20m}" ${GOTESTFLAGS:-} ./...)
+  -e MAILROOM_JMAPCLIENT_RECORD="${MAILROOM_JMAPCLIENT_RECORD:-}" \
+  "$GO_IMAGE" go test -tags "${MAILROOM_IT_TAGS:-integration}" -count=1 -p 1 -timeout "${MAILROOM_IT_TIMEOUT:-20m}" ${GOTESTFLAGS:-} ${MAILROOM_IT_PKGS:-./...})
 docker cp "$HOSTDIR/." "$GOCID:/src"
 docker start -a "$GOCID"
 echo "integration suite passed"
