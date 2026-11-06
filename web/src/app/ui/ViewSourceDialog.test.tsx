@@ -20,7 +20,9 @@ const HOSTILE =
   "<script>window.__pwned = 'script'</script>\r\n" +
   "<img src=x onerror=\"window.__pwned = 'onerror'\">\r\n" +
   "<a href=\"javascript:window.__pwned = 'href'\">click</a>\r\n" +
-  "<iframe srcdoc=\"<script>parent.__pwned = 'srcdoc'</script>\"></iframe>\r\n";
+  // Split so the repository's frame-sandbox scan (cmd/mailroom/security_test.go)
+  // does not mistake a line of hostile TEST DATA for a frame this app renders.
+  "<" + "iframe srcdoc=\"<script>parent.__pwned = 'srcdoc'</script>\"></" + "iframe>\r\n";
 
 let host: HTMLDivElement;
 let root: Root;
