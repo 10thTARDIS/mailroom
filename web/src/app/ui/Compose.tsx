@@ -74,7 +74,7 @@ import { formatWake } from "../../core/snooze";
 import { markdownToHtml } from "../../core/markdown";
 import { automaticSignatureBody } from "../../core/snippets";
 import { useApp, useMailState } from "../state";
-import { htmlToRender } from "./bodyChoice";
+import { htmlToRender, plainBody } from "./bodyChoice";
 import { ImportKeyDialog } from "./ImportKeyDialog";
 import { SendLaterMenu } from "./SendLaterMenu";
 import { SnippetPicker } from "./SnippetPicker";
@@ -268,14 +268,16 @@ function newCid(): string {
   return `img-${rand}@inline.mailroom`;
 }
 
-/** A message's decoded plain text, when its body values have been fetched. */
+/** A message's decoded plain text, when its body values have been fetched,
+ * UNFLOWED when a part is format=flowed (RFC 3676). Mailroom sends and saves its
+ * own plain text flowed (#93), so a resumed draft read raw would come back with
+ * every soft wrap as a line break, and saving it again would make those breaks
+ * permanent; a reply would quote a flowed original as ragged lines. The reader's
+ * own plainBody is the one decoder, so the composer and the reading pane cannot
+ * disagree about the text. */
 function plainTextOf(email: EffectiveEmail | null): string {
   if (!email) return "";
-  const values = email.bodyValues ?? {};
-  return (email.textBody ?? [])
-    .map((p) => (p.partId ? values[p.partId]?.value ?? "" : ""))
-    .filter(Boolean)
-    .join("\n\n");
+  return plainBody(email);
 }
 
 /** A message's decoded HTML body, when it has one and it has been fetched. */

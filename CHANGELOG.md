@@ -20,7 +20,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   put them. Quoted replies keep their quote marks on every line, the signature
   line (`-- `) stays on its own line, and a long web address is never broken in
   two. Spaces you left at the end of a line are dropped, since in this format a
-  trailing space means "this line continues".
+  trailing space means "this line continues". Drafts you reopen and messages
+  you quote in a reply keep their paragraphs whole rather than coming back
+  broken into short lines.
 - **Messages that carry a soft line break are sent quoted-printable.** The
   plain-text part of a message that wraps travels in an encoding that protects
   those trailing spaces from mail systems that would otherwise strip them, and
