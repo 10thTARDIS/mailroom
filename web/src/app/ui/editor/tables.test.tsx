@@ -7,12 +7,16 @@
 // last cell, which would be a keyboard trap), and the table at the edge of the
 // document. The hostile versions of these are in hostilePaste.test.tsx.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { button, click, mountEditor, press } from "./editorTestkit";
 import type { Mounted } from "./editorTestkit";
+
+// Every test mounts a real editor, some several; the default 5 s is too tight when the
+// machine is busy (a loaded CI runner timed out on the first, plainest tests).
+vi.setConfig({ testTimeout: 60_000 });
 import { CELL_STYLE, HEADER_CELL_STYLE, TABLE_EXTENSIONS, TABLE_STYLE } from "./tables";
 
 let m: Mounted | null = null;

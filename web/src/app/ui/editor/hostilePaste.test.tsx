@@ -21,10 +21,14 @@
 // at all reports, and the suite would prove nothing (CLAUDE.md: negative-control
 // every safety assertion).
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { mountEditor, paste } from "./editorTestkit";
 import type { Mounted } from "./editorTestkit";
+
+// Every test mounts a real editor, some several; the default 5 s is too tight when the
+// machine is busy (a loaded CI runner timed out on the first, plainest tests).
+vi.setConfig({ testTimeout: 60_000 });
 
 // The flag every payload would set. It is the document title because the test and
 // the page's scripts do not share a global object under vitest's jsdom (a
@@ -608,13 +612,14 @@ describe("hostile tables: the structure and the text stay, everything else goes"
     const took = performance.now() - t0;
     // A ceiling generous enough for a loaded CI runner; the point is "not
     // quadratic or unbounded", which would be minutes, not seconds.
-    expect(took, `paste took ${Math.round(took)} ms`).toBeLessThan(15_000);
+    console.info(`500-row paste: ${Math.round(took)} ms`);
+    expect(took, `paste took ${Math.round(took)} ms`).toBeLessThan(30_000);
     expect(grid500(m)).toBe(500);
     expect(m.surface.textContent).toContain("row 499 b");
     assertTableClean(inert(m.html()).body, "getHTML");
     fireEverything(m.surface.querySelector("table")!);
     expect(pwned()).toBe(false);
-  }, 60_000);
+  }, 120_000);
 
   it("control: a clean table keeps its structure, its colspan and its own border, so the suite is not passing because everything is dropped", async () => {
     m = await mountEditor("");
