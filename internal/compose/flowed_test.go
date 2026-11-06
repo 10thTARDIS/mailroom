@@ -188,9 +188,10 @@ func TestFlowUserTrailingSpacesAreNotSoftBreaks(t *testing.T) {
 }
 
 func TestFlowSignatureNeverSoftBroken(t *testing.T) {
-	// A line made only of "--" mid-paragraph: breaking after it would leave
+	// A paragraph that opens with "--" and then a token too long to share the
+	// line (a URL): breaking after it would leave
 	// the line "-- ", which a reader treats as the separator.
-	in := strings.Repeat("x", 71) + " -- " + strings.Repeat("y", 10) + " tail"
+	in := "-- " + strings.Repeat("y", 80) + " tail"
 	wire := flowText(in)
 	for _, l := range physicalLines(wire) {
 		if l == "-- " {
