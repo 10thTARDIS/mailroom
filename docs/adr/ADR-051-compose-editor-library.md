@@ -1,7 +1,8 @@
 # ADR-051: The compose editor moves to Tiptap (ProseMirror), with rich paste parsed into its schema
 
-**Status:** Proposed (v1.101.0; #82, #83). Amends ADR-015, which it partly
-supersedes (§4).
+**Status:** Accepted (v1.101.0; #82, #83). Amends ADR-015, which it partly
+supersedes (§4). The operator's decisions (2026-11-06): Tiptap 3 (§1), and paste
+keeps formatting, with Mod-Shift-V for plain text (§4).
 
 ## Context
 
