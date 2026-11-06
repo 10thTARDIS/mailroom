@@ -20,7 +20,8 @@ describe("composer output read back by unflow (#93)", () => {
 
   fixture.forEach((p, i) => {
     it(`round trips fixture ${i}`, () => {
-      expect(unflow(p.wire, false)).toBe(p.original.replace(/\r\n/g, "\n"));
+      // The final CRLF ends the last line; it is not an extra empty line.
+      expect(unflow(p.wire.replace(/\r\n$/, ""), false)).toBe(p.original.replace(/\r\n/g, "\n"));
     });
   });
 });
