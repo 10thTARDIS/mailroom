@@ -1,0 +1,68 @@
+/* VIEW SOURCE (#43). The source dialog is a wide .sheet showing the raw message
+   in a monospace block. Colours come from the shared tokens, so light and dark
+   follow the theme with nothing of their own. Loaded last, after viewer.css. */
+.view-source {
+  width: min(900px, calc(100vw - 24px));
+  max-height: 86vh;
+  max-height: 86dvh;
+  top: 6vh;
+  display: flex;
+  flex-direction: column;
+}
+.view-source .sheet-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.view-source-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+}
+.view-source-tabs,
+.view-source-actions {
+  display: flex;
+  gap: 8px;
+}
+.view-source-tabs .button[aria-pressed="true"] {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+}
+.view-source-text {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 60vh;
+  max-height: 60dvh;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 0.8571rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.view-source-headers {
+  margin: 8px 0 0;
+  padding: 6px 12px;
+  overflow: auto;
+  max-height: 60vh;
+  max-height: 60dvh;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 0.8571rem;
+}
+.view-source-header { padding: 3px 0; border-bottom: 1px solid var(--border); }
+.view-source-header:last-child { border-bottom: 0; }
+.view-source-header dt { font-weight: 600; color: var(--fg-muted); }
+.view-source-header dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (forced-colors: active) {
+  .view-source-tabs .button[aria-pressed="true"] { outline: 2px solid Highlight; }
+}

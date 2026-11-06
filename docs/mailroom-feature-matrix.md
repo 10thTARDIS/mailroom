@@ -52,7 +52,7 @@ Companion to **mailroom-spec.md** (v0.4). Goal: an exhaustive inventory of featu
 | Inline (CID) images | | shipped (v1.0.0) |
 | Preview text / snippets | | shipped (v1.0.0) |
 | Reading-pane layouts (vertical/horizontal/none) | | shipped |
-| View source / raw headers | Partial: raw bytes are reachable via the JMAP blob download (`internal/api/blob.go`), so an API client can fetch source; the web client has no "view source" menu item or raw-headers view | v1.0 (partial) — #43 |
+| View source / raw headers | **View source…** in a message's More menu opens the raw message as text in a monospace block (never rendered as HTML), with a Headers tab (every header in order, folded lines joined), Copy, and a .eml download through the existing blob download; a message over 1 MiB is shown truncated with a note (`web/src/app/ui/ViewSourceDialog.tsx`, `web/src/core/messageSource.ts`) | **shipped (v1.101.0)** — #43 |
 | Print / export message to PDF | Browser print-to-PDF, deliberately, rather than a bespoke renderer | shipped (v1.1.0) |
 | Message translation | Needs T2 or ext. service | v2 — #4 |
 | Read receipts — request/send | Privacy-sensitive, optional | v2 — #11 |

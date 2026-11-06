@@ -41,6 +41,8 @@ import "./compose.css";
 // be able to override both the docked-panel geometry in styles.css and anything
 // compose.css says about that track.
 import "./viewer.css";
+// View source (#43): one dialog, its own small rules, loaded last.
+import "./source.css";
 import { AppProvider } from "./state";
 import { App } from "./ui/App";
 import { installPopoverFit } from "./ui/popoverFit";

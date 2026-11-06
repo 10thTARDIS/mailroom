@@ -2616,6 +2616,23 @@ const en = {
   // "Re-file" is the desk's word for moving mail between areas (#921), and the
   // ellipsis is the same promise that a dialog follows.
   "pane.menu.refile": "Re-file…",
+  // View source (#43): the raw message as text, and its header block. The
+  // ellipsis promises a dialog.
+  "pane.menu.viewSource": "View source…",
+  "source.title": "Message source",
+  "source.tabs": "What to show",
+  "source.tab.source": "Source",
+  "source.tab.headers": "Headers",
+  "source.loading": "Loading the message…",
+  "source.failed": "The message source could not be loaded.",
+  "source.copy": "Copy",
+  "source.copied": "Copied",
+  "source.copyFailed": "Copying was not allowed by the browser.",
+  "source.download": "Download .eml",
+  "source.truncated":
+    "Showing the first {shown} of {total}. Download the .eml for the whole message.",
+  "source.headers.none": "This message has no header lines.",
+  "source.noName": "(not a header line)",
   // The picker the pane's item opens: one area per item, the answer is a move.
   "refile.picker.title": "Re-file to…",
   "pane.labels": "Where this message is filed",
