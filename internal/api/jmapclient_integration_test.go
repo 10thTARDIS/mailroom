@@ -1756,6 +1756,12 @@ func newJCEnv(t *testing.T) *jcEnv {
 	// session-path stub); cmd/mailroom answers 401 on JMAP paths. Mount the same
 	// gate with a 401 so the unauthenticated case is observable.
 	gate := &auth.BearerGate{Resolve: h.store.ResolveAPIKeyToken, Limiter: auth.NewFailureLimiter(1000, time.Millisecond)}
+	// The service's per-user request limiter is not what this checks, and a fast
+	// runner sends the whole program inside one bucket's burst: CI answered 429
+	// from the eighth-to-last step on, while a slower host never did. A
+	// non-positive config disables it (RateLimitConfig's documented opt-out).
+	// The key's own per-minute rate (ADR-042 §5) stays in force.
+	h.api.limiter = NewRateLimiter(RateLimitConfig{})
 	e.srv = httptest.NewServer(gate.Wrap(h.api.Handler(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})))
@@ -1786,6 +1792,11 @@ func TestJMAPClientConformance(t *testing.T) {
 			case err == nil && listed:
 				outcomes = append(outcomes, outcome{s.id, s.rfc, "STALE", gap})
 				t.Errorf("step now PASSES but is still listed as a known gap (%s): delete its line from testdata/jmapclient-known-gaps.txt", gap)
+			case err != nil && rateLimitedErr(err):
+				// A rate-limited step tested nothing. It must never pass as a
+				// known gap, or a throttled run would read as conformance.
+				outcomes = append(outcomes, outcome{s.id, s.rfc, "FAIL", err.Error()})
+				t.Errorf("the harness was rate limited, so this step tested nothing: %v", err)
 			case err != nil && listed:
 				outcomes = append(outcomes, outcome{s.id, s.rfc, "known-gap", err.Error()})
 				t.Skipf("known gap %s\n%v", gap, err)
@@ -1819,4 +1830,11 @@ func TestJMAPClientConformance(t *testing.T) {
 			t.Errorf("write record: %v", err)
 		}
 	}
+}
+
+// rateLimitedErr reports whether a step failed because the server throttled the
+// harness rather than because of the behaviour the step checks.
+func rateLimitedErr(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "HTTP 429") || strings.Contains(m, "rateLimited") || strings.Contains(m, " 429 ")
 }
