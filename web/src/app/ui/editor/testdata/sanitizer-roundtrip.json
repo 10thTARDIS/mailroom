@@ -1,7 +1,96 @@
 [
   {
+    "name": "bold",
+    "html": "<p><strong>sample</strong></p>",
+    "text": "sample",
+    "expect": [
+      {
+        "tag": "strong"
+      }
+    ]
+  },
+  {
+    "name": "italic",
+    "html": "<p><em>sample</em></p>",
+    "text": "sample",
+    "expect": [
+      {
+        "tag": "em"
+      }
+    ]
+  },
+  {
+    "name": "underline",
+    "html": "<p><u>sample</u></p>",
+    "text": "sample",
+    "expect": [
+      {
+        "tag": "u"
+      }
+    ]
+  },
+  {
+    "name": "bulleted list",
+    "html": "<ul><li><p>sample</p></li></ul>",
+    "text": "• sample",
+    "expect": [
+      {
+        "tag": "ul"
+      },
+      {
+        "tag": "li",
+        "within": "ul"
+      }
+    ]
+  },
+  {
+    "name": "numbered list",
+    "html": "<ol><li><p>sample</p></li></ol>",
+    "text": "• sample",
+    "expect": [
+      {
+        "tag": "ol"
+      },
+      {
+        "tag": "li",
+        "within": "ol"
+      }
+    ]
+  },
+  {
+    "name": "link",
+    "html": "<p><a href=\"https://example.com/page\">sample</a></p>",
+    "text": "sample",
+    "expect": [
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "https://example.com/page"
+        }
+      }
+    ]
+  },
+  {
+    "name": "inline picture",
+    "html": "<p>see:<img src=\"cid:pic1@inline.mailroom\" alt=\"a picture\" style=\"max-width: 100%;\"></p>",
+    "text": "see:[a picture]",
+    "expect": [
+      {
+        "tag": "img",
+        "attrs": {
+          "src": "cid:pic1@inline.mailroom",
+          "alt": "a picture"
+        },
+        "style": {
+          "max-width": "100%"
+        }
+      }
+    ]
+  },
+  {
     "name": "strike-through",
     "html": "<p><s>sample</s></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "s"
@@ -11,6 +100,7 @@
   {
     "name": "subscript",
     "html": "<p><sub>sample</sub></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "sub"
@@ -20,6 +110,7 @@
   {
     "name": "superscript",
     "html": "<p><sup>sample</sup></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "sup"
@@ -29,6 +120,7 @@
   {
     "name": "inline code",
     "html": "<p><code>sample</code></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "code"
@@ -38,6 +130,7 @@
   {
     "name": "code block",
     "html": "<pre><code>line one</code></pre>",
+    "text": "line one",
     "expect": [
       {
         "tag": "code",
@@ -48,6 +141,7 @@
   {
     "name": "block quote",
     "html": "<blockquote><p>sample</p></blockquote>",
+    "text": "> sample",
     "expect": [
       {
         "tag": "blockquote"
@@ -57,6 +151,7 @@
   {
     "name": "text colour",
     "html": "<p><span style=\"color: rgb(204, 0, 0);\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -69,6 +164,7 @@
   {
     "name": "highlight colour",
     "html": "<p><span style=\"background-color: rgb(255, 255, 0);\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -81,6 +177,7 @@
   {
     "name": "font Sans-serif",
     "html": "<p><span style=\"font-family: Arial, Helvetica, sans-serif;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -93,6 +190,7 @@
   {
     "name": "font Serif",
     "html": "<p><span style=\"font-family: Georgia, &quot;Times New Roman&quot;, serif;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -105,6 +203,7 @@
   {
     "name": "font Monospace",
     "html": "<p><span style=\"font-family: &quot;Courier New&quot;, Courier, monospace;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -117,6 +216,7 @@
   {
     "name": "font Wide",
     "html": "<p><span style=\"font-family: Verdana, Geneva, sans-serif;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -129,6 +229,7 @@
   {
     "name": "size Small",
     "html": "<p><span style=\"font-size: 12px;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -141,6 +242,7 @@
   {
     "name": "size Large",
     "html": "<p><span style=\"font-size: 18px;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -153,6 +255,7 @@
   {
     "name": "size Huge",
     "html": "<p><span style=\"font-size: 24px;\">sample</span></p>",
+    "text": "sample",
     "expect": [
       {
         "tag": "span",
@@ -165,6 +268,7 @@
   {
     "name": "paragraph indent, two levels",
     "html": "<p style=\"margin-left: 4em;\">sample</p>",
+    "text": "    sample",
     "expect": [
       {
         "tag": "p",
@@ -177,6 +281,7 @@
   {
     "name": "deepest paragraph indent",
     "html": "<p style=\"margin-left: 12em;\">sample</p>",
+    "text": "            sample",
     "expect": [
       {
         "tag": "p",
@@ -189,6 +294,7 @@
   {
     "name": "nested list",
     "html": "<ul><li><p>one</p><ul><li><p>two</p></li></ul></li></ul>",
+    "text": "• one\n  • two",
     "expect": [
       {
         "tag": "ul",
@@ -199,6 +305,7 @@
   {
     "name": "everything on one span, indent and strike on its paragraph",
     "html": "<p style=\"margin-left: 2em;\"><span style=\"color: rgb(11, 46, 107); background-color: rgb(182, 215, 168); font-family: Verdana, Geneva, sans-serif; font-size: 18px;\"><s>sample</s></span></p>",
+    "text": "  sample",
     "expect": [
       {
         "tag": "span",
@@ -223,6 +330,7 @@
   {
     "name": "a quote holding an indented, coloured paragraph",
     "html": "<blockquote><p style=\"margin-left: 2em;\"><span style=\"color: rgb(103, 78, 167);\">quoted</span></p></blockquote>",
+    "text": ">   quoted",
     "expect": [
       {
         "tag": "blockquote"
@@ -239,6 +347,166 @@
         "style": {
           "color": "rgb(103, 78, 167)"
         }
+      }
+    ]
+  },
+  {
+    "name": "table, no header row",
+    "html": "<p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a1</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b1</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c1</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a2</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b2</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c2</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c3</p></td></tr></tbody></table><p><br></p>",
+    "text": "before\na1  b1  c1\na2  b2  c2\na3  b3  c3",
+    "expect": [
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        }
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "table"
+      }
+    ]
+  },
+  {
+    "name": "table, header row",
+    "html": "<p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Item</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Qty</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Price</p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Apple</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>1.50</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Watermelon</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>12</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>0.20</p></td></tr></tbody></table><p><br></p>",
+    "text": "before\nItem        Qty  Price\n----------  ---  -----\nApple       3    1.50\nWatermelon  12   0.20",
+    "expect": [
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        }
+      },
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "table"
+      }
+    ]
+  },
+  {
+    "name": "table, formatting inside cells",
+    "html": "<p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Name</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Note</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p><br></p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><span style=\"color: rgb(204, 0, 0);\"><strong>word</strong></span></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><em>other</em></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr></tbody></table><p><br></p>",
+    "text": "before\nName  Note\n----  -----  -\nword  other",
+    "expect": [
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "strong",
+        "within": "td"
+      },
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(204, 0, 0)"
+        },
+        "within": "td"
+      },
+      {
+        "tag": "em",
+        "within": "td"
+      }
+    ]
+  },
+  {
+    "name": "table inside a quote",
+    "html": "<blockquote><p>quoted</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>h1</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>h2</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p><br></p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>x</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>y</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr></tbody></table></blockquote>",
+    "text": "> quoted\n> h1  h2\n> --  --  -\n> x   y",
+    "expect": [
+      {
+        "tag": "blockquote"
+      },
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "pasted table with colspan and rowspan",
+    "html": "<p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" colspan=\"2\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Heading</p></th></tr><tr><td rowspan=\"2\" style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>left</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>right</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>below</p></td></tr></tbody></table><p><br></p>",
+    "text": "before\nHeading\n-------  -----\nleft     right\nbelow",
+    "expect": [
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col",
+          "colspan": "2"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "attrs": {
+          "rowspan": "2"
+        },
+        "within": "table"
       }
     ]
   }

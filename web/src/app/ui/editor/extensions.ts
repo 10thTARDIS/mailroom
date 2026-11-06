@@ -43,10 +43,26 @@ export interface EditorHooks {
  * target, rel and title are not parsed (so they cannot be kept) and not rendered:
  * the server decides rel and target when the message is sent. Done by wrapping the
  * kit's own link extension, which avoids depending on its package directly. */
+/** Where a `font-weight` style may make text bold: everywhere except while the
+ * parser is directly inside a table or a row, which is where a table's own cells
+ * are read. (ProseMirror reads an element's styles in its PARENT's context.) The
+ * editor writes `font-weight:bold` on a header cell, and without this, reopening a
+ * draft would read it back as a bold mark on every header cell's text, so a
+ * reopened document would differ from the one saved. It is also what the fixed-list
+ * rule asks: a style on a table, row or cell is not read. */
+const BOLD_STYLE_CONTEXT = "doc/|paragraph/|blockquote/|bulletList/|orderedList/|listItem/|codeBlock/|tableCell/|tableHeader/";
+
 const Kit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() ?? []).map((ext) =>
-      ext.name === "link"
+      ext.name === "bold"
+        ? ext.extend({
+            parseHTML(this: { parent?: () => unknown }) {
+              const rules = (this.parent?.() ?? []) as Array<Record<string, unknown>>;
+              return rules.map((rule) => ("style" in rule ? { ...rule, context: BOLD_STYLE_CONTEXT } : rule)) as never;
+            },
+          })
+        : ext.name === "link"
         ? ext.extend({
             addAttributes() {
               return {

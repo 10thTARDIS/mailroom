@@ -131,3 +131,35 @@ export async function click(el: HTMLElement): Promise<void> {
     el.click();
   });
 }
+
+/** Puts the cursor at the end of cell (row, col) of the first table, and types
+ * `text` there (when given). */
+export async function inCell(m: Mounted, row: number, col: number, text?: string): Promise<void> {
+  let pos = -1;
+  let r = -1;
+  let tableSeen = false;
+  m.editor.state.doc.descendants((node, p) => {
+    if (node.type.name === "table") {
+      if (tableSeen) return false;
+      tableSeen = true;
+    }
+    if (node.type.name === "tableRow") {
+      r += 1;
+      if (r === row) {
+        let off = p + 1;
+        node.forEach((cell, _o, i) => {
+          if (i === col) pos = off + cell.nodeSize - 2; // the end of the cell's last paragraph
+          off += cell.nodeSize;
+        });
+      }
+      return false;
+    }
+    return true;
+  });
+  if (pos < 0) throw new Error(`no cell ${row},${col}`);
+  await act(async () => {
+    m.editor.commands.focus();
+    m.editor.commands.setTextSelection(pos);
+    if (text) m.editor.commands.insertContent(text);
+  });
+}

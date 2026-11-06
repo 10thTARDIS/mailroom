@@ -305,6 +305,29 @@ describe("what a table writes: mail-client HTML", () => {
   });
 });
 
+describe("a header cell's own bold is not read back as a bold mark", () => {
+  it("reopening the editor's own header HTML adds no <strong> (the document does not change on reopen)", async () => {
+    m = await withTable();
+    await typeInto(m, "Head");
+    const saved = m.html();
+    await m.unmount();
+    m = await mountEditor(saved);
+    expect(m.html()).toBe(saved);
+    expect(m.html()).not.toContain("<strong>");
+  });
+
+  it("a pasted font-weight on a header or cell is dropped (style on a cell is not read)", async () => {
+    m = await mountEditor('<table><tr><th style="font-weight:700">h</th><td style="font-weight:bold">c</td></tr></table>');
+    expect(m.html()).not.toContain("<strong>");
+  });
+
+  it("control: bold from a style on a span or paragraph is still read, inside a cell and outside one", async () => {
+    m = await mountEditor('<p><span style="font-weight:bold">out</span></p><table><tr><td><p><span style="font-weight:bold">in</span></p></td></tr></table>');
+    expect(m.html()).toContain("<strong>out</strong>");
+    expect(m.html()).toContain("<strong>in</strong>");
+  });
+});
+
 describe("Tab leaves the editor, even from a table", () => {
   it("Tab in the LAST cell is not handled: no row is added, the key is not cancelled, the cursor stays", async () => {
     m = await withTable();
