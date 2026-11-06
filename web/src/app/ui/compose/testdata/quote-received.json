@@ -1,0 +1,394 @@
+[
+  {
+    "name": "img onerror",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cimg src=x onerror=\"document.title='pwned'\"\u003e",
+    "html": "\u003cimg\u003e"
+  },
+  {
+    "name": "inline img with onerror",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cimg src=\"cid:a@inline.mailroom\" onerror=\"document.title='pwned'\" onload=\"document.title='pwned'\"\u003e",
+    "html": "\u003cimg src=\"cid:a@inline.mailroom\"\u003e"
+  },
+  {
+    "name": "svg onload",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003csvg onload=\"document.title='pwned'\"\u003e\u003ccircle r=1\u003e\u003c/circle\u003e\u003c/svg\u003e",
+    "html": ""
+  },
+  {
+    "name": "javascript: link",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003ca href=\"javascript:document.title='pwned'\" onclick=\"document.title='pwned'\"\u003eclick me\u003c/a\u003e",
+    "html": "\u003ca\u003eclick me\u003c/a\u003e"
+  },
+  {
+    "name": "data:text/html link",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003ca href=\"data:text/html,\u003cscript\u003edocument.title='pwned'\u003c/script\u003e\"\u003edata link\u003c/a\u003e",
+    "html": "\u003ca\u003edata link\u003c/a\u003e"
+  },
+  {
+    "name": "iframe",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003ciframe src=\"https://evil.example/frame\" onload=\"document.title='pwned'\"\u003e\u003c/iframe\u003e",
+    "html": ""
+  },
+  {
+    "name": "script",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cscript\u003edocument.title='pwned'\u003c/script\u003e\u003cp\u003eafter script\u003c/p\u003e",
+    "html": "\u003cp\u003eafter script\u003c/p\u003e"
+  },
+  {
+    "name": "style element",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cstyle\u003ebody{background:url(https://evil.example/css)}\u003c/style\u003e\u003cp\u003eafter style\u003c/p\u003e",
+    "html": "\u003cp\u003eafter style\u003c/p\u003e"
+  },
+  {
+    "name": "form with input",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cform action=\"https://evil.example/post\"\u003e\u003cinput name=pw value=secret onfocus=\"document.title='pwned'\" autofocus\u003e\u003c/form\u003e",
+    "html": ""
+  },
+  {
+    "name": "css url() in style attribute",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cdiv style=\"background:url(https://evil.example/x)\" onclick=\"document.title='pwned'\"\u003estyled\u003c/div\u003e",
+    "html": "\u003cdiv\u003estyled\u003c/div\u003e"
+  },
+  {
+    "name": "remote image",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003cimg src=\"https://evil.example/t.png\"\u003e\u003cp\u003eafter\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003cimg data-mailroom-remote-src=\"/jmap/proxy/01ARZ3NDEKTSV4RRFFQ69G5FAV/01BX5ZZKBKACTAV9WEVGEMMVRZ/68d9c2fc819c77cd3d84ba82218108e5\" data-mailroom-blocked=\"\"\u003e\u003cp\u003eafter\u003c/p\u003e"
+  },
+  {
+    "name": "object",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cobject data=\"https://evil.example/o\" onload=\"document.title='pwned'\"\u003e\u003c/object\u003e",
+    "html": ""
+  },
+  {
+    "name": "embed",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cembed src=\"https://evil.example/e\" onload=\"document.title='pwned'\"\u003e",
+    "html": ""
+  },
+  {
+    "name": "meta refresh",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cmeta http-equiv=\"refresh\" content=\"0;url=https://evil.example/r\"\u003e\u003cp\u003eafter meta\u003c/p\u003e",
+    "html": "\u003cp\u003eafter meta\u003c/p\u003e"
+  },
+  {
+    "name": "parked image with srcset",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003cimg src=\"https://evil.example/t.png\" srcset=\"https://evil.example/t2.png 2x\" alt=\"remote\"\u003e\u003cp\u003eafter\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003cimg data-mailroom-remote-src=\"/jmap/proxy/01ARZ3NDEKTSV4RRFFQ69G5FAV/01BX5ZZKBKACTAV9WEVGEMMVRZ/68d9c2fc819c77cd3d84ba82218108e5\" alt=\"remote\" data-mailroom-blocked=\"\"\u003e\u003cp\u003eafter\u003c/p\u003e"
+  },
+  {
+    "name": "tracking pixel",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cp\u003ehello\u003c/p\u003e\u003cimg src=\"https://tracker.example/p.gif\" width=\"1\" height=\"1\"\u003e",
+    "html": "\u003cp\u003ehello\u003c/p\u003e\u003cimg data-mailroom-pixel-src=\"https://tracker.example/p.gif\" width=\"1\" height=\"1\" data-mailroom-blocked=\"\"\u003e"
+  },
+  {
+    "name": "cid with no matching part",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cp\u003epic\u003c/p\u003e\u003cimg src=\"cid:ghost@example.com\" onerror=\"document.title='pwned'\"\u003e",
+    "html": "\u003cp\u003epic\u003c/p\u003e\u003cimg src=\"cid:ghost@example.com\"\u003e"
+  },
+  {
+    "name": "javascript: link in a paragraph",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003cp\u003esee \u003ca href=\"javascript:document.title='pwned'\"\u003ethis\u003c/a\u003e now\u003c/p\u003e",
+    "html": "\u003cp\u003esee \u003ca\u003ethis\u003c/a\u003e now\u003c/p\u003e"
+  },
+  {
+    "name": "iframe srcdoc",
+    "group": "hostile",
+    "live": true,
+    "source": "\u003ciframe srcdoc=\"\u0026lt;script\u0026gt;document.title='pwned'\u0026lt;/script\u0026gt;\"\u003e\u003c/iframe\u003e\u003cp\u003eafter frame\u003c/p\u003e",
+    "html": "\u003cp\u003eafter frame\u003c/p\u003e"
+  },
+  {
+    "name": "base href",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cbase href=\"https://evil.example/\"\u003e\u003cp\u003e\u003ca href=\"relative\"\u003erel\u003c/a\u003e\u003cimg src=\"pic.png\"\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003ca\u003erel\u003c/a\u003e\u003cimg\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "style block with import",
+    "group": "hostile",
+    "live": false,
+    "source": "\u003cstyle\u003e@import url(https://evil.example/x.css); p{color:red}\u003c/style\u003e\u003cp\u003eafter style\u003c/p\u003e",
+    "html": "\u003cstyle\u003ep{color:red}\u003c/style\u003e\u003cp\u003eafter style\u003c/p\u003e"
+  },
+  {
+    "name": "newsletter",
+    "group": "layout",
+    "live": false,
+    "source": "\u003ctable role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:600px;margin:0 auto\"\u003e\u003ctr\u003e\u003ctd\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctr\u003e\u003ctd bgcolor=\"#336699\" style=\"padding:10px\"\u003e\u003ch1\u003eExample News\u003c/h1\u003e\u003cp\u003eIssue 42\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctr\u003e\u003ctd width=\"400\" valign=\"top\"\u003e\u003ch2\u003eMain story\u003c/h2\u003e\u003cp\u003eThe first paragraph of the main story, with a \u003ca href=\"https://example.com/story\"\u003elink\u003c/a\u003e.\u003c/p\u003e\u003cp\u003eA second paragraph.\u003c/p\u003e\u003c/td\u003e\u003ctd width=\"200\" valign=\"top\"\u003e\u003ch3\u003eSidebar\u003c/h3\u003e\u003cul\u003e\u003cli\u003eOne\u003c/li\u003e\u003cli\u003eTwo\u003c/li\u003e\u003c/ul\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctr\u003e\u003ctd align=\"center\" style=\"font-size:11px\"\u003eYou are receiving this because you subscribed. \u003ca href=\"https://example.com/unsub\"\u003eUnsubscribe\u003c/a\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e",
+    "html": "\u003ctable role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:600px;margin:0 auto\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd bgcolor=\"#336699\" style=\"padding:10px\"\u003e\u003ch1\u003eExample News\u003c/h1\u003e\u003cp\u003eIssue 42\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd width=\"400\" valign=\"top\"\u003e\u003ch2\u003eMain story\u003c/h2\u003e\u003cp\u003eThe first paragraph of the main story, with a \u003ca href=\"https://example.com/story\" target=\"_blank\" rel=\"noopener noreferrer nofollow\"\u003elink\u003c/a\u003e.\u003c/p\u003e\u003cp\u003eA second paragraph.\u003c/p\u003e\u003c/td\u003e\u003ctd width=\"200\" valign=\"top\"\u003e\u003ch3\u003eSidebar\u003c/h3\u003e\u003cul\u003e\u003cli\u003eOne\u003c/li\u003e\u003cli\u003eTwo\u003c/li\u003e\u003c/ul\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003ctable role=\"presentation\" width=\"100%\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd align=\"center\" style=\"font-size:11px\"\u003eYou are receiving this because you subscribed. \u003ca href=\"https://example.com/unsub\" target=\"_blank\" rel=\"noopener noreferrer nofollow\"\u003eUnsubscribe\u003c/a\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e"
+  },
+  {
+    "name": "plain data table",
+    "group": "layout",
+    "live": false,
+    "source": "\u003cp\u003ePrices:\u003c/p\u003e\u003ctable border=\"1\"\u003e\u003cthead\u003e\u003ctr\u003e\u003cth\u003eItem\u003c/th\u003e\u003cth\u003ePrice\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd\u003eTea\u003c/td\u003e\u003ctd\u003e3\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eCake\u003c/td\u003e\u003ctd\u003e4\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003eThanks\u003c/p\u003e",
+    "html": "\u003cp\u003ePrices:\u003c/p\u003e\u003ctable border=\"1\"\u003e\u003cthead\u003e\u003ctr\u003e\u003cth\u003eItem\u003c/th\u003e\u003cth\u003ePrice\u003c/th\u003e\u003c/tr\u003e\u003c/thead\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd\u003eTea\u003c/td\u003e\u003ctd\u003e3\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eCake\u003c/td\u003e\u003ctd\u003e4\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003eThanks\u003c/p\u003e"
+  },
+  {
+    "name": "data table inside a layout table",
+    "group": "layout",
+    "live": false,
+    "source": "\u003ctable role=\"presentation\" width=\"600\"\u003e\u003ctr\u003e\u003ctd\u003e\u003ch2\u003eReport\u003c/h2\u003e\u003ctable\u003e\u003ctr\u003e\u003cth\u003eRegion\u003c/th\u003e\u003cth\u003eTotal\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eNorth\u003c/td\u003e\u003ctd\u003e10\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eSouth\u003c/td\u003e\u003ctd\u003e12\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e\u003cp\u003eEnd of report\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/table\u003e",
+    "html": "\u003ctable role=\"presentation\" width=\"600\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd\u003e\u003ch2\u003eReport\u003c/h2\u003e\u003ctable\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth\u003eRegion\u003c/th\u003e\u003cth\u003eTotal\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eNorth\u003c/td\u003e\u003ctd\u003e10\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd\u003eSouth\u003c/td\u003e\u003ctd\u003e12\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003eEnd of report\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e"
+  },
+  {
+    "name": "bold",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cstrong\u003esample\u003c/strong\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cstrong\u003esample\u003c/strong\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "italic",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cem\u003esample\u003c/em\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cem\u003esample\u003c/em\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "underline",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cu\u003esample\u003c/u\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cu\u003esample\u003c/u\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "bulleted list",
+    "group": "format",
+    "live": false,
+    "source": "\u003cul\u003e\u003cli\u003e\u003cp\u003esample\u003c/p\u003e\u003c/li\u003e\u003c/ul\u003e",
+    "html": "\u003cul\u003e\u003cli\u003e\u003cp\u003esample\u003c/p\u003e\u003c/li\u003e\u003c/ul\u003e"
+  },
+  {
+    "name": "numbered list",
+    "group": "format",
+    "live": false,
+    "source": "\u003col\u003e\u003cli\u003e\u003cp\u003esample\u003c/p\u003e\u003c/li\u003e\u003c/ol\u003e",
+    "html": "\u003col\u003e\u003cli\u003e\u003cp\u003esample\u003c/p\u003e\u003c/li\u003e\u003c/ol\u003e"
+  },
+  {
+    "name": "link",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003ca href=\"https://example.com/page\"\u003esample\u003c/a\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003ca href=\"https://example.com/page\" target=\"_blank\" rel=\"noopener noreferrer nofollow\"\u003esample\u003c/a\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "inline picture",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003esee:\u003cimg src=\"cid:pic1@inline.mailroom\" alt=\"a picture\" style=\"max-width: 100%;\"\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003esee:\u003cimg src=\"cid:pic1@inline.mailroom\" alt=\"a picture\" style=\"max-width:100%\"\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "strike-through",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cs\u003esample\u003c/s\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cs\u003esample\u003c/s\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "subscript",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003csub\u003esample\u003c/sub\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003csub\u003esample\u003c/sub\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "superscript",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003csup\u003esample\u003c/sup\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003csup\u003esample\u003c/sup\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "inline code",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003ccode\u003esample\u003c/code\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003ccode\u003esample\u003c/code\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "code block",
+    "group": "format",
+    "live": false,
+    "source": "\u003cpre\u003e\u003ccode\u003eline one\u003c/code\u003e\u003c/pre\u003e",
+    "html": "\u003cpre\u003e\u003ccode\u003eline one\u003c/code\u003e\u003c/pre\u003e"
+  },
+  {
+    "name": "block quote",
+    "group": "format",
+    "live": false,
+    "source": "\u003cblockquote\u003e\u003cp\u003esample\u003c/p\u003e\u003c/blockquote\u003e",
+    "html": "\u003cblockquote\u003e\u003cp\u003esample\u003c/p\u003e\u003c/blockquote\u003e"
+  },
+  {
+    "name": "text colour",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"color: rgb(204, 0, 0);\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"color:rgb(204, 0, 0)\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "highlight colour",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"background-color: rgb(255, 255, 0);\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"background-color:rgb(255, 255, 0)\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "font Sans-serif",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-family: Arial, Helvetica, sans-serif;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-family:Arial, Helvetica, sans-serif\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "font Serif",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-family: Georgia, \u0026quot;Times New Roman\u0026quot;, serif;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-family:Georgia, \u0026#34;Times New Roman\u0026#34;, serif\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "font Monospace",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-family: \u0026quot;Courier New\u0026quot;, Courier, monospace;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-family:\u0026#34;Courier New\u0026#34;, Courier, monospace\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "font Wide",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-family: Verdana, Geneva, sans-serif;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-family:Verdana, Geneva, sans-serif\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "size Small",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-size: 12px;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-size:12px\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "size Large",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-size: 18px;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-size:18px\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "size Huge",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003e\u003cspan style=\"font-size: 24px;\"\u003esample\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003e\u003cspan style=\"font-size:24px\"\u003esample\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "paragraph indent, two levels",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp style=\"margin-left: 4em;\"\u003esample\u003c/p\u003e",
+    "html": "\u003cp style=\"margin-left:4em\"\u003esample\u003c/p\u003e"
+  },
+  {
+    "name": "deepest paragraph indent",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp style=\"margin-left: 12em;\"\u003esample\u003c/p\u003e",
+    "html": "\u003cp style=\"margin-left:12em\"\u003esample\u003c/p\u003e"
+  },
+  {
+    "name": "nested list",
+    "group": "format",
+    "live": false,
+    "source": "\u003cul\u003e\u003cli\u003e\u003cp\u003eone\u003c/p\u003e\u003cul\u003e\u003cli\u003e\u003cp\u003etwo\u003c/p\u003e\u003c/li\u003e\u003c/ul\u003e\u003c/li\u003e\u003c/ul\u003e",
+    "html": "\u003cul\u003e\u003cli\u003e\u003cp\u003eone\u003c/p\u003e\u003cul\u003e\u003cli\u003e\u003cp\u003etwo\u003c/p\u003e\u003c/li\u003e\u003c/ul\u003e\u003c/li\u003e\u003c/ul\u003e"
+  },
+  {
+    "name": "everything on one span, indent and strike on its paragraph",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp style=\"margin-left: 2em;\"\u003e\u003cspan style=\"color: rgb(11, 46, 107); background-color: rgb(182, 215, 168); font-family: Verdana, Geneva, sans-serif; font-size: 18px;\"\u003e\u003cs\u003esample\u003c/s\u003e\u003c/span\u003e\u003c/p\u003e",
+    "html": "\u003cp style=\"margin-left:2em\"\u003e\u003cspan style=\"color:rgb(11, 46, 107);background-color:rgb(182, 215, 168);font-family:Verdana, Geneva, sans-serif;font-size:18px\"\u003e\u003cs\u003esample\u003c/s\u003e\u003c/span\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "a quote holding an indented, coloured paragraph",
+    "group": "format",
+    "live": false,
+    "source": "\u003cblockquote\u003e\u003cp style=\"margin-left: 2em;\"\u003e\u003cspan style=\"color: rgb(103, 78, 167);\"\u003equoted\u003c/span\u003e\u003c/p\u003e\u003c/blockquote\u003e",
+    "html": "\u003cblockquote\u003e\u003cp style=\"margin-left:2em\"\u003e\u003cspan style=\"color:rgb(103, 78, 167)\"\u003equoted\u003c/span\u003e\u003c/p\u003e\u003c/blockquote\u003e"
+  },
+  {
+    "name": "table, no header row",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse: collapse;\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ea1\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eb1\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ec1\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ea2\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eb2\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ec2\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ea3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eb3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ec3\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse:collapse\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ea1\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eb1\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ec1\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ea2\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eb2\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ec2\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ea3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eb3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ec3\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "table, header row",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse: collapse;\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eItem\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eQty\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ePrice\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eApple\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e1.50\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eWatermelon\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e12\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e0.20\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse:collapse\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eItem\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eQty\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ePrice\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eApple\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e3\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e1.50\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eWatermelon\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e12\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e0.20\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "table, formatting inside cells",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse: collapse;\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eName\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eNote\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cspan style=\"color: rgb(204, 0, 0);\"\u003e\u003cstrong\u003eword\u003c/strong\u003e\u003c/span\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cem\u003eother\u003c/em\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse:collapse\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eName\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eNote\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cspan style=\"color:rgb(204, 0, 0)\"\u003e\u003cstrong\u003eword\u003c/strong\u003e\u003c/span\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cem\u003eother\u003c/em\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e"
+  },
+  {
+    "name": "table inside a quote",
+    "group": "format",
+    "live": false,
+    "source": "\u003cblockquote\u003e\u003cp\u003equoted\u003c/p\u003e\u003ctable style=\"border-collapse: collapse;\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eh1\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eh2\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ex\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ey\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003c/blockquote\u003e",
+    "html": "\u003cblockquote\u003e\u003cp\u003equoted\u003c/p\u003e\u003ctable style=\"border-collapse:collapse\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eh1\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eh2\u003c/p\u003e\u003c/th\u003e\u003cth scope=\"col\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ex\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ey\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003c/blockquote\u003e"
+  },
+  {
+    "name": "pasted table with colspan and rowspan",
+    "group": "format",
+    "live": false,
+    "source": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse: collapse;\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" colspan=\"2\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eHeading\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd rowspan=\"2\" style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eleft\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003eright\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"\u003e\u003cp\u003ebelow\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e",
+    "html": "\u003cp\u003ebefore\u003c/p\u003e\u003ctable style=\"border-collapse:collapse\"\u003e\u003ctbody\u003e\u003ctr\u003e\u003cth scope=\"col\" colspan=\"2\" style=\"padding:4px 8px;text-align:left;font-weight:bold;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eHeading\u003c/p\u003e\u003c/th\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd rowspan=\"2\" style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eleft\u003c/p\u003e\u003c/td\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003eright\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003ctr\u003e\u003ctd style=\"padding:4px 8px;border:1px solid rgb(153, 153, 153)\"\u003e\u003cp\u003ebelow\u003c/p\u003e\u003c/td\u003e\u003c/tr\u003e\u003c/tbody\u003e\u003c/table\u003e\u003cp\u003e\u003cbr\u003e\u003c/p\u003e"
+  }
+]

@@ -21,6 +21,7 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { t, type MessageKey } from "../../i18n";
 import { buildEditorProps, buildExtensions } from "./extensions";
+import { editorHtml } from "./editorHtml";
 import { FONT_FAMILIES, FONT_SIZES } from "./styleValues";
 import type { EditorHooks } from "./extensions";
 import { isAllowedLinkUri, linkFromPrompt } from "./uri";
@@ -91,13 +92,7 @@ const SIZE_LABEL: Record<string, MessageKey> = {
 
 type PaletteKind = "text" | "highlight";
 
-/** The editor's HTML for the draft. An empty paragraph is written `<p><br></p>`:
- * mail clients draw a bare `<p></p>` with no height, which would lose the blank
- * lines the writer typed. (The serializer's output escapes all text, so a literal
- * empty-paragraph tag can only be an empty paragraph.) */
-export function editorHtml(editor: Editor): string {
-  return editor.getHTML().replace(/<p(\s[^>]*)?><\/p>/g, "<p$1><br></p>");
-}
+export { editorHtml };
 
 /** Whether the table the cursor is in has a header row (its first row is all header cells). */
 function firstRowIsHeader(ed: Editor): boolean {

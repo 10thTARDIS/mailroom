@@ -698,6 +698,8 @@ const en = {
   "compose.wildcardHint":
     "{domain} is a catchall: you can send as any address at this domain.",
   "compose.quoteHeader": "On {date}, {who} wrote:",
+  "compose.quotePictureOmitted": "[picture not included]",
+  "compose.quoteRestOmitted": "[The rest of the original message is not included]",
   "compose.attach": "Attach files",
   "compose.attachments": "Attached files",
   "compose.uploading": "Uploading…",

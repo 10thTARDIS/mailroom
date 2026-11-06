@@ -74,12 +74,16 @@ import { formatWake } from "../../core/snooze";
 import { markdownToHtml } from "../../core/markdown";
 import { automaticSignatureBody } from "../../core/snippets";
 import { useApp, useMailState } from "../state";
-import { htmlToRender, plainBody } from "./bodyChoice";
+import { htmlBodyTruncated, htmlToRender, plainBody } from "./bodyChoice";
 import { ImportKeyDialog } from "./ImportKeyDialog";
 import { SendLaterMenu } from "./SendLaterMenu";
 import { SnippetPicker } from "./SnippetPicker";
 import { RichEditor } from "./editor/LazyRichEditor";
 import { htmlToText } from "./editor/plainText";
+import { editorHtml } from "./editor/editorHtml";
+import type { Editor } from "@tiptap/core";
+import { formatQuote } from "./compose/quote";
+import type { CarriedPicture } from "./compose/quote";
 import { isWithheld, scanStateFor, withheldReasonKey } from "./attachmentScanPolicy";
 import { focusMessageListSoon, trapTab } from "./focusTrap";
 import { t, type MessageKey } from "../i18n";
@@ -261,11 +265,46 @@ function quotedText(parent: EffectiveEmail | null): string {
     .join("\n")}\n`;
 }
 
+/**
+ * THE QUOTE'S FORMATTED FORM (ADR-051 §7, #92), or null when the quote stays the
+ * plain one. Built from the HTML body value the server returned, which the
+ * reader's sanitiser has already been through — never from a raw part.
+ *
+ * Null (today's escaped plain-text quote) for:
+ *   - an original with no HTML body (`htmlBodyOf` is "");
+ *   - ⚠ AN ENCRYPTED ORIGINAL, whatever its state (`encrypted`, or a `decrypted`
+ *     verdict of either kind). ADR-037: its plaintext is never persisted, and the
+ *     quote of it is exactly what it was before formatted quoting existed. Its
+ *     parts are not carried either: the server refuses to attach a part of a
+ *     decrypted message;
+ *   - an original whose HTML leaves nothing to quote once pictures from the web
+ *     and layout are dealt with.
+ */
+function formattedQuoteOf(parent: EffectiveEmail | null): { html: string; carried: CarriedPicture[] } | null {
+  if (!parent) return null;
+  if (parent.encrypted === true || (parent.decrypted !== undefined && parent.decrypted !== null)) return null;
+  const html = htmlBodyOf(parent);
+  if (!html) return null;
+  const q = formatQuote({
+    html,
+    truncated: htmlBodyTruncated(parent),
+    parts: parent.attachments ?? [],
+    withheld: (partId) => isWithheld(parent.attachmentScan, partId),
+    canCarry: true,
+    notes: { picture: t("compose.quotePictureOmitted"), rest: t("compose.quoteRestOmitted") },
+  });
+  return q.html ? q : null;
+}
+
 /** The same quote as HTML: an empty line to type above, the attribution, then the
- * parent's text in a <blockquote>. Built from the parent's PLAIN text (escaped)
- * rather than its HTML — we quote what we are sure of. */
-function quotedHtml(parent: EffectiveEmail | null): string {
+ * parent's body in a <blockquote>. For an HTML original that is its formatting
+ * (`formatted`, above); otherwise the parent's PLAIN text, escaped — we quote
+ * what we are sure of. */
+function quotedHtml(parent: EffectiveEmail | null, formatted: { html: string } | null): string {
   if (!parent) return "";
+  if (formatted) {
+    return `<p><br></p><p>${escapeHtml(quoteHeader(parent))}</p><blockquote>${formatted.html}</blockquote>`;
+  }
   const text = plainTextOf(parent);
   if (!text) return "";
   const bodyHtml = escapeHtml(text).replace(/\n/g, "<br>");
@@ -292,9 +331,10 @@ function signatureBlockStrings(
 function openingBodies(
   parent: EffectiveEmail | null,
   sig: { html: string; text: string } | null,
+  formatted: { html: string } | null,
 ): { text: string; html: string } {
   const quoteText = quotedText(parent);
-  const quoteHtml = quotedHtml(parent);
+  const quoteHtml = quotedHtml(parent, formatted);
   const block = signatureBlockStrings(sig);
   if (!block) return { text: quoteText, html: quoteHtml };
   return {
@@ -528,10 +568,11 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
    * ago. So the picker is passed `untouched && not a resumed draft`, and the two
    * meanings are kept apart rather than sharing one boolean.
    */
+  const quote = useMemo(() => formattedQuoteOf(parent), [parent]);
   const opening = useRef(
     resumed
       ? { text: plainTextOf(resumed), html: htmlBodyOf(resumed) }
-      : openingBodies(parent, automaticSignatureBody(snippets, initialIdentity)),
+      : openingBodies(parent, automaticSignatureBody(snippets, initialIdentity), quote),
   );
   const [body, setBody] = useState(opening.current.text); // plain-mode text
   const [htmlBody, setHtmlBody] = useState(opening.current.html); // rich-mode html
@@ -559,6 +600,31 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
   const untouched =
     (richMode ? htmlBody : body).trim() === "" ||
     (richMode ? htmlBody === opening.current.html : body === opening.current.text);
+
+  /**
+   * THE FORMATTED QUOTE, AS THE EDITOR READS IT. The seed string is reader-
+   * sanitised HTML this module has thinned; the editor's schema then drops what it
+   * does not define. Until the first edit the composer would still hold the
+   * SEED, and an autosave or a send with no edit would put that, not the editor's
+   * document, in the draft. So once the editor exists, an untouched formatted
+   * quote is replaced by what the editor made of it, and the opening memory moves
+   * with it (so "untouched" keeps its meaning). Only for a formatted quote, and
+   * only while the body is still exactly the opening one.
+   */
+  const htmlBodyRef = useRef(htmlBody);
+  htmlBodyRef.current = htmlBody;
+  const normaliseQuoteSeed = useCallback(
+    (ed: Editor | null): void => {
+      if (!ed || !quote || resumed) return;
+      if (htmlBodyRef.current !== opening.current.html) return;
+      const norm = editorHtml(ed);
+      if (norm === opening.current.html) return;
+      opening.current = { ...opening.current, html: norm };
+      htmlBodyRef.current = norm;
+      setHtmlBody(norm);
+    },
+    [quote, resumed],
+  );
 
   const [sending, setSending] = useState(false);
   const [sendLaterOpen, setSendLaterOpen] = useState(false);
@@ -592,8 +658,8 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
         size: part.size,
       })),
   );
-  const [inlineImages, setInlineImages] = useState<InlineImage[]>(() =>
-    (resumed?.attachments ?? [])
+  const [inlineImages, setInlineImages] = useState<InlineImage[]>(() => [
+    ...(resumed?.attachments ?? [])
       .filter((part) => part.blobId && part.cid)
       .map((part) => ({
         blobId: part.blobId as BlobId,
@@ -601,7 +667,11 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
         name: part.name ?? "image",
         type: part.type,
       })),
-  );
+    // The pictures the quote kept: the original's own inline pictures, carried by
+    // reference as this message's inline attachments, so they are sent and saved
+    // with the draft (outgoingAttachments sends one only while the body names it).
+    ...(quote?.carried ?? []).map((c) => ({ blobId: c.blobId, cid: c.cid, name: c.name, type: c.type })),
+  ]);
   const [uploading, setUploading] = useState(false);
   /**
    * Parts of the forwarded message this session has RELEASED.
@@ -838,7 +908,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
       (richMode ? htmlBody === opening.current.html : body === opening.current.text);
     if (!isUntouched || resumed) return;
     const nextSig = automaticSignatureBody(snippets, identity);
-    const next = openingBodies(parent, nextSig);
+    const next = openingBodies(parent, nextSig, quote);
     opening.current = next;
     // A MANUAL PICK SURVIVES THIS (#649): reaching this line at all requires
     // `isUntouched`, i.e. the body still equals `opening.current` from before —
@@ -1006,8 +1076,11 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
     }));
     if (!forwarding) return uploads;
     const scan = forwarding.attachmentScan;
+    // A picture the quote carries inline is not listed AGAIN as a file: it would
+    // travel twice, once in the body and once as an attachment.
+    const inQuote = new Set((quote?.carried ?? []).map((c) => c.partId));
     const carried: Tile[] = (forwarding.attachments ?? [])
-      .filter((p) => p.blobId)
+      .filter((p) => p.blobId && !(p.partId !== null && inQuote.has(p.partId)))
       .map((p) => {
         const held = isWithheld(scan, p.partId) && !(p.partId !== null && released.has(p.partId));
         return {
@@ -1022,7 +1095,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
         };
       });
     return [...carried, ...uploads];
-  }, [attached, forwarding, released]);
+  }, [attached, forwarding, released, quote]);
 
   // -- autosave ---------------------------------------------------------------
 
@@ -1646,6 +1719,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
               onImageFile={insertImageUpload}
               onNotice={(message) => pushToast({ kind: "info", message })}
               onBlur={() => void runAutosave(true)}
+              onReady={normaliseQuoteSeed}
               label={t("compose.body")}
             />
           ) : (

@@ -1,0 +1,146 @@
+[
+  {
+    "name": "img onerror",
+    "group": "hostile",
+    "live": true,
+    "html": "<img src=x onerror=\"document.title='pwned'\">"
+  },
+  {
+    "name": "inline img with onerror",
+    "group": "hostile",
+    "live": true,
+    "html": "<img src=\"cid:a@inline.mailroom\" onerror=\"document.title='pwned'\" onload=\"document.title='pwned'\">"
+  },
+  {
+    "name": "svg onload",
+    "group": "hostile",
+    "live": true,
+    "html": "<svg onload=\"document.title='pwned'\"><circle r=1></circle></svg>"
+  },
+  {
+    "name": "javascript: link",
+    "group": "hostile",
+    "live": true,
+    "html": "<a href=\"javascript:document.title='pwned'\" onclick=\"document.title='pwned'\">click me</a>"
+  },
+  {
+    "name": "data:text/html link",
+    "group": "hostile",
+    "live": false,
+    "html": "<a href=\"data:text/html,<script>document.title='pwned'</script>\">data link</a>"
+  },
+  {
+    "name": "iframe",
+    "group": "hostile",
+    "live": true,
+    "html": "<iframe src=\"https://evil.example/frame\" onload=\"document.title='pwned'\"></iframe>"
+  },
+  {
+    "name": "script",
+    "group": "hostile",
+    "live": false,
+    "html": "<script>document.title='pwned'</script><p>after script</p>"
+  },
+  {
+    "name": "style element",
+    "group": "hostile",
+    "live": false,
+    "html": "<style>body{background:url(https://evil.example/css)}</style><p>after style</p>"
+  },
+  {
+    "name": "form with input",
+    "group": "hostile",
+    "live": true,
+    "html": "<form action=\"https://evil.example/post\"><input name=pw value=secret onfocus=\"document.title='pwned'\" autofocus></form>"
+  },
+  {
+    "name": "css url() in style attribute",
+    "group": "hostile",
+    "live": true,
+    "html": "<div style=\"background:url(https://evil.example/x)\" onclick=\"document.title='pwned'\">styled</div>"
+  },
+  {
+    "name": "remote image",
+    "group": "hostile",
+    "live": false,
+    "html": "<p>before</p><img src=\"https://evil.example/t.png\"><p>after</p>"
+  },
+  {
+    "name": "object",
+    "group": "hostile",
+    "live": true,
+    "html": "<object data=\"https://evil.example/o\" onload=\"document.title='pwned'\"></object>"
+  },
+  {
+    "name": "embed",
+    "group": "hostile",
+    "live": true,
+    "html": "<embed src=\"https://evil.example/e\" onload=\"document.title='pwned'\">"
+  },
+  {
+    "name": "meta refresh",
+    "group": "hostile",
+    "live": false,
+    "html": "<meta http-equiv=\"refresh\" content=\"0;url=https://evil.example/r\"><p>after meta</p>"
+  },
+  {
+    "name": "parked image with srcset",
+    "group": "hostile",
+    "live": false,
+    "html": "<p>before</p><img src=\"https://evil.example/t.png\" srcset=\"https://evil.example/t2.png 2x\" alt=\"remote\"><p>after</p>"
+  },
+  {
+    "name": "tracking pixel",
+    "group": "hostile",
+    "live": false,
+    "html": "<p>hello</p><img src=\"https://tracker.example/p.gif\" width=\"1\" height=\"1\">"
+  },
+  {
+    "name": "cid with no matching part",
+    "group": "hostile",
+    "live": true,
+    "html": "<p>pic</p><img src=\"cid:ghost@example.com\" onerror=\"document.title='pwned'\">"
+  },
+  {
+    "name": "javascript: link in a paragraph",
+    "group": "hostile",
+    "live": true,
+    "html": "<p>see <a href=\"javascript:document.title='pwned'\">this</a> now</p>"
+  },
+  {
+    "name": "iframe srcdoc",
+    "group": "hostile",
+    "live": true,
+    "html": "<iframe srcdoc=\"&lt;script&gt;document.title='pwned'&lt;/script&gt;\"></iframe><p>after frame</p>"
+  },
+  {
+    "name": "base href",
+    "group": "hostile",
+    "live": false,
+    "html": "<base href=\"https://evil.example/\"><p><a href=\"relative\">rel</a><img src=\"pic.png\"></p>"
+  },
+  {
+    "name": "style block with import",
+    "group": "hostile",
+    "live": false,
+    "html": "<style>@import url(https://evil.example/x.css); p{color:red}</style><p>after style</p>"
+  },
+  {
+    "name": "newsletter",
+    "group": "layout",
+    "live": false,
+    "html": "<table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"width:600px;margin:0 auto\"><tr><td><table role=\"presentation\" width=\"100%\"><tr><td bgcolor=\"#336699\" style=\"padding:10px\"><h1>Example News</h1><p>Issue 42</p></td></tr></table><table role=\"presentation\" width=\"100%\"><tr><td width=\"400\" valign=\"top\"><h2>Main story</h2><p>The first paragraph of the main story, with a <a href=\"https://example.com/story\">link</a>.</p><p>A second paragraph.</p></td><td width=\"200\" valign=\"top\"><h3>Sidebar</h3><ul><li>One</li><li>Two</li></ul></td></tr></table><table role=\"presentation\" width=\"100%\"><tr><td align=\"center\" style=\"font-size:11px\">You are receiving this because you subscribed. <a href=\"https://example.com/unsub\">Unsubscribe</a></td></tr></table></td></tr></table>"
+  },
+  {
+    "name": "plain data table",
+    "group": "layout",
+    "live": false,
+    "html": "<p>Prices:</p><table border=\"1\"><thead><tr><th>Item</th><th>Price</th></tr></thead><tbody><tr><td>Tea</td><td>3</td></tr><tr><td>Cake</td><td>4</td></tr></tbody></table><p>Thanks</p>"
+  },
+  {
+    "name": "data table inside a layout table",
+    "group": "layout",
+    "live": false,
+    "html": "<table role=\"presentation\" width=\"600\"><tr><td><h2>Report</h2><table><tr><th>Region</th><th>Total</th></tr><tr><td>North</td><td>10</td></tr><tr><td>South</td><td>12</td></tr></table><p>End of report</p></td></tr></table>"
+  }
+]
