@@ -1253,6 +1253,39 @@ const SURFACES = [
     },
   },
   {
+    // THE COMPOSER'S COLOUR PALETTES AND FONT LIST (ADR-051 beta 2). Each is the
+    // formatting bar with one control IN USE: the palette is a row of named
+    // swatches that exists only while open, and the font select is focused (a
+    // native list is drawn by the browser, outside the DOM axe reads). The
+    // plain "compose" surface above has them CLOSED, so on its own it would pass
+    // for a palette that violated every rule.
+    name: "compose-text-colour-palette",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.click('section.compose button[aria-label="Text colour"]');
+        await waitForSelectorD(page, 'section.compose .editor-palette[role="group"] button.editor-swatch', { timeout: 30000 });
+      });
+    },
+  },
+  {
+    name: "compose-highlight-palette",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.click('section.compose button[aria-label="Highlight colour"]');
+        await waitForSelectorD(page, 'section.compose .editor-palette[role="group"] button.editor-swatch', { timeout: 30000 });
+      });
+    },
+  },
+  {
+    name: "compose-font-select-focused",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.focus('section.compose select[aria-label="Font"]');
+        await waitForSelectorD(page, 'section.compose select[aria-label="Font"]:focus', { timeout: 30000 });
+      });
+    },
+  },
+  {
     // A COMPOSER REACHED BY RELOAD (#612). The surface above opens the composer
     // with a keypress on a page whose session is long established — the warm
     // path — and it stayed green for the whole time a RELOAD onto a composer URL
@@ -5575,6 +5608,18 @@ function phoneWidthProbe(limit) {
   return { iw: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, offenders };
 }
 
+/** Opens the composer the way the "compose" surface does, then runs `use` (opens
+ * a palette, focuses a select). One place, so the beta-2 surfaces cannot drift from
+ * the surface they extend. */
+async function openComposeWith(page, use) {
+  await load(page, "#/inbox/review");
+  await waitForDesk(page);
+  await page.keyboard.press("c");
+  await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+  await waitForEditor(page);
+  await use();
+}
+
 /**
  * The composer's editor is its own chunk (ADR-051), fetched after the composer
  * opens. Until it arrives the composer holds a placeholder, and axe run against
@@ -5724,8 +5769,20 @@ async function composerEditorSurfaces(page, cdp) {
     const root = document.querySelector("section.compose .editor-surface");
     const bad = root.querySelectorAll("script, style, iframe, object, embed, form, input, svg, meta, link, img:not(.ProseMirror-separator)");
     const attrs = [];
+    // A style attribute is allowed on a span or a paragraph, and only as the editor
+    // writes it: a colour, a family or size from the lists, or a margin-left in em.
+    // (Written out here, not read from the app, so a loosened gate cannot loosen
+    // this check with it.)
+    const OWN = /^(?:(?:color|background-color): (?:#[0-9a-f]{6}|rgb\(\d{1,3}, \d{1,3}, \d{1,3}\))|font-family: (?:Arial, Helvetica, sans-serif|Georgia, ["']Times New Roman["'], serif|["']Courier New["'], Courier, monospace|Verdana, Geneva, sans-serif)|font-size: (?:12|18|24)px|margin-left: (?:2|4|6|8|10|12)em)$/;
     root.querySelectorAll("*").forEach((el) => {
-      for (const a of el.attributes) if (a.name.startsWith("on") || (a.name === "style")) attrs.push(el.tagName + "[" + a.name + "]");
+      for (const a of el.attributes) {
+        if (a.name.startsWith("on")) attrs.push(el.tagName + "[" + a.name + "]");
+        else if (a.name === "style" && el.tagName !== "IMG") {
+          const ok = (el.tagName === "SPAN" || el.tagName === "P") &&
+            a.value.split(";").map((d) => d.trim()).filter(Boolean).every((d) => OWN.test(d));
+          if (!ok) attrs.push(el.tagName + "[style=" + a.value + "]");
+        } else if (a.name === "style") attrs.push(el.tagName + "[" + a.name + "]");
+      }
     });
     const hrefs = [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     return {
@@ -5752,6 +5809,59 @@ async function composerEditorSurfaces(page, cdp) {
   if (requested.length) fail("the paste caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
   const afterPaste = await page.evaluate(() => window.__cspViolations.slice());
   if (afterPaste.length) fail("CSP violations after the paste: " + JSON.stringify(afterPaste));
+
+  // ---- pasted STYLES in the real parser (ADR-051 beta 2) -----------------------
+  // Colour, highlight, family, size and indent now travel. A listed value is kept
+  // (so this cannot pass by dropping everything); a url(), a size off the list and a
+  // negative margin are not, and the words stay.
+  await pasteHtml(
+    '<p style="margin-left:4em">indented words</p>' +
+      '<p><span style="color:#336699;background:url(https://' + PAYLOAD_HOST + '/s)">blue words</span> ' +
+      '<span style="font-size:999px;font-family:x;src:url(https://' + PAYLOAD_HOST + '/f)">plain words</span> ' +
+      '<span style="color:expression(window.__pwned=1)">expr words</span></p>' +
+      '<p style="margin-left:-9999px">negative words</p>',
+    "styled fallback",
+  );
+  await sleep(1000);
+  const styled = await page.evaluate(() => {
+    const root = document.querySelector("section.compose .editor-surface");
+    const styles = [...root.querySelectorAll("[style]")].filter((e) => e.tagName !== "IMG").map((e) => e.tagName + ":" + e.getAttribute("style"));
+    return { pwned: window.__pwned === 1, styles, html: root.innerHTML, text: root.textContent };
+  });
+  if (styled.pwned) fail("a pasted style expression RAN");
+  for (const w of ["indented words", "blue words", "plain words", "expr words", "negative words"]) {
+    if (styled.text.indexOf(w) < 0) fail("the pasted styled text was lost: " + w);
+  }
+  if (!styled.styles.some((x) => /^SPAN:color: rgb\(51, 102, 153\)/.test(x))) fail("a listed colour was not kept: " + JSON.stringify(styled.styles));
+  if (!styled.styles.some((x) => /^P:margin-left: 4em/.test(x))) fail("a listed indent was not kept: " + JSON.stringify(styled.styles));
+  if (/url\(|999|expression|-9999|evil\.example|font-family: x/.test(styled.styles.join("|"))) fail("a hostile style value survived the paste: " + JSON.stringify(styled.styles));
+  if (requested.length) fail("the styled paste caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
+
+  // ---- the toolbar applies formatting in a real browser --------------------------
+  // The palette, the selects and the focus handoff all depend on a real selection
+  // and real events, which jsdom only approximates: select the whole body, choose
+  // Red from the palette, a size from the list and a family from the list.
+  await page.evaluate(() => document.querySelector("section.compose .editor-surface").focus());
+  await page.keyboard.down("Control");
+  await page.keyboard.press("a");
+  await page.keyboard.up("Control");
+  await page.click('section.compose button[aria-label="Text colour"]');
+  await waitForSelectorD(page, 'section.compose .editor-palette button[aria-label="Red"]', { timeout: 10000 });
+  await page.click('section.compose .editor-palette button[aria-label="Red"]');
+  await until("the palette closed and focus returned to the body", 10000, () =>
+    page.evaluate(() => !document.querySelector("section.compose .editor-palette") && document.activeElement && document.activeElement.classList.contains("editor-surface")),
+  33);
+  await page.select('section.compose select[aria-label="Font size"]', "18px");
+  await page.select('section.compose select[aria-label="Font"]', "Georgia, 'Times New Roman', serif");
+  const toolbarApplied = await page.evaluate(() => {
+    const root = document.querySelector("section.compose .editor-surface");
+    return [...root.querySelectorAll("span[style]")].map((e) => e.getAttribute("style"));
+  });
+  if (!toolbarApplied.some((x) => /color: (?:rgb\(204, 0, 0\)|#cc0000)/.test(x) && /font-size: 18px/.test(x) && /font-family: Georgia/.test(x))) {
+    fail("the toolbar's colour, size and family did not reach the document: " + JSON.stringify(toolbarApplied));
+  }
+  const afterToolbar = await page.evaluate(() => window.__cspViolations.slice());
+  if (afterToolbar.length) fail("CSP violations after styled paste and toolbar use: " + JSON.stringify(afterToolbar));
 
   // ---- the request listener is live: a picture put into the page must be seen --
   // "No request went to the payload host" is only evidence if this listener would

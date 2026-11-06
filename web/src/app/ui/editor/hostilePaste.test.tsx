@@ -367,6 +367,8 @@ describe("a paste during IME composition", () => {
 // from parts where a literal would trip the source scans.
 
 const EVIL = "https://evil.example/x";
+// (Assembled: the token check scans .tsx for var(--name) uses.)
+const VAR_X = ["var", "(--x)"].join("");
 
 interface StyleCase {
   name: string;
@@ -383,7 +385,7 @@ const STYLE_CASES: StyleCase[] = [
   { name: "font-size 999px", html: `<p><span style="font-size:999px">kept three</span></p>`, text: "kept three", absent: ["999"] },
   { name: "negative margin-left", html: `<p style="margin-left:-9999px">kept four</p>`, text: "kept four", absent: ["9999", "margin"] },
   { name: "expression()", html: `<p><span style="color: expression(alert(1))">kept five</span></p>`, text: "kept five", absent: ["expression", "alert"] },
-  { name: "var()", html: `<p><span style="color:var(--x)">kept six</span></p>`, text: "kept six", absent: ["var(", "--x"] },
+  { name: "var()", html: `<p><span style="color:${VAR_X}">kept six</span></p>`, text: "kept six", absent: ["var(", "--x"] },
   { name: "a CSS-escaped url in a background colour", html: `<p><span style="background-color:\\75 rl(${EVIL})">kept seven</span></p>`, text: "kept seven", absent: ["evil.example", "\\75", "rl(", "url"] },
   { name: "a CSS-escaped colour name", html: `<p><span style="color:\\72 ed">kept eight</span></p>`, text: "kept eight", absent: ["\\72", "red", "color"] },
   { name: "a font list that is not ours", html: `<p><span style="font-family:Comic Sans MS, cursive">kept nine</span></p>`, text: "kept nine", absent: ["Comic", "cursive"] },

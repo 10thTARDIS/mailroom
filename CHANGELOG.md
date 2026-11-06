@@ -9,8 +9,31 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**The second beta of the new composer adds the formatting options the old editor
+never had.** Everything is on the formatting bar, each with a keyboard shortcut
+shown when you hover over its button.
+
 ### What's new
 
+- **Fonts and sizes.** Pick a font (Sans-serif, Serif, Monospace or Wide) and a
+  size (Small, Normal, Large or Huge) for the selected text. Choosing Default font
+  or Normal puts it back.
+- **Text colour and highlight colour.** Two colour buttons open a small palette of
+  named colours (for example Red, Dark blue, Yellow, Light green), each reachable
+  with the arrow keys; Escape closes it, and Remove colour clears the colour.
+  Colours pasted from elsewhere keep their colour.
+- **Strikethrough** (Ctrl+Shift+S), **subscript** (Ctrl+,) and **superscript**
+  (Ctrl+.).
+- **Block quote** (Ctrl+Shift+B), **inline code** (Ctrl+E) and **code block**
+  (Ctrl+Alt+C). Code keeps its line breaks and spacing exactly.
+- **Indent and outdent** (Ctrl+] and Ctrl+[). In a list they move the item one
+  level in or out; in a paragraph or a quote they move the whole paragraph in, up
+  to six levels. Tab still leaves the message body, so the keyboard is never
+  trapped in it.
+- **Undo and redo buttons** (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y). A button is dimmed
+  when there is nothing to undo or redo.
+- **On a narrow screen** the formatting bar scrolls sideways inside itself and
+  the message body keeps its size.
 - **Plain-text messages are formatted so other mail apps can rewrap them.** The
   plain-text version of every message you send (including the plain alternative
   of a formatted message) is now sent in the standard "flowed" form. A long
@@ -29,8 +52,23 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   a signed message signs exactly the text that is sent. Short messages with no
   wrapping are sent as before.
 
+### Safety and behaviour
+
+- **Only the offered fonts, sizes and plain colours are kept.** When you paste
+  text, a font that is not in the list, an unusual size, or anything other than a
+  plain colour (a name like "red" is not kept; a hex or rgb colour is) is left off
+  and the words stay. Styles that try to load something from the web are dropped.
+- **Switching to plain text** turns quotes into lines starting with ">", keeps code
+  exactly, drops strikethrough, colours and fonts, keeps subscript and superscript
+  as ordinary text, and turns paragraph indents into leading spaces.
+- The server still cleans every message again before it is sent; every new
+  format is checked to come through that cleaning intact.
+
 ### Under the hood
 
+- Three small editor packages were added (text style, subscript and superscript),
+  at the same version as the rest of the editor and on the reviewed list.
+- The accessibility checks now also open the colour palette and the font list.
 - **A real third-party mail client now checks the JMAP interface on every
   change.** A new CI check connects with an off-the-shelf JMAP client library
   (the one the aerc mail client is built on), signs in with an API key, and

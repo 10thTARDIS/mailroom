@@ -1550,6 +1550,8 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .editor-tool[data-glyph]::before { content: attr(data-glyph); }
 .editor-tool:hover { background: var(--bg-hover); }
+/* The colour a palette button or swatch shows is set inline, per element. */
+.editor-tool, .editor-swatch { --swatch: transparent; }
 .editor-tool[aria-pressed="true"] { background: var(--bg-hover); border-color: var(--border-strong); }
 .editor-tool[aria-disabled="true"] { opacity: 0.45; cursor: default; }
 .editor-tool[aria-disabled="true"]:hover { background: transparent; }

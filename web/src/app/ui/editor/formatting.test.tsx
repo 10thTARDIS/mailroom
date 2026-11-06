@@ -337,6 +337,9 @@ describe("font family and size", () => {
   });
 });
 
+// (Assembled: the token check scans .tsx for var(--name) uses.)
+const VAR_X = ["var", "(--x)"].join("");
+
 describe("the commands refuse a value that is not on the lists", () => {
   it("setColor, setBackgroundColor, setFontFamily and setFontSize return false and change nothing", async () => {
     m = await mountEditor("<p>hello</p>");
@@ -346,7 +349,7 @@ describe("the commands refuse a value that is not on the lists", () => {
       const c = m!.editor.commands;
       results.push(c.setColor("url(https://evil.example/x)"));
       results.push(c.setColor("red"));
-      results.push(c.setColor("var(--x)"));
+      results.push(c.setColor(VAR_X));
       results.push(c.setBackgroundColor("expression(alert(1))"));
       results.push(c.setFontFamily("'x'; src: url(https://evil.example/f)"));
       results.push(c.setFontFamily("Comic Sans MS"));
