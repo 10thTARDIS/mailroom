@@ -190,7 +190,10 @@ export function buildEditorProps(
       // Tab leaves the editor, as it did when this was a plain contentEditable
       // (operator decision, ADR-051 beta 2): the body never traps the keyboard.
       // The list-item extension would otherwise take Tab to nest an item; nesting
-      // is on Mod-] and Mod-[ and the toolbar instead (./indent.ts). Returning true
+      // is on Mod-] and Mod-[ and the toolbar instead (./indent.ts). In a table the
+      // library would take Tab to the next cell and, at the last one, ADD A ROW; that
+      // binding is removed in ./tables.ts as well, so this guard is not the only thing
+      // between Tab and a trap. Returning true
       // tells ProseMirror not to handle the key; it does NOT cancel it, so the
       // browser moves focus.
       keydown: (_view, event) => event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey,

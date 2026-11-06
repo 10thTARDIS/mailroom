@@ -112,7 +112,9 @@ describe("the toolbar as a widget", () => {
     // Buttons and the two selects are one roving group.
     const tools = Array.from(bar.querySelectorAll<HTMLElement>(".editor-tool"));
     const n = tools.length;
-    expect(n).toBe(21);
+    // 21 through beta 3, plus the nine table controls of beta 4 (insert, six row and
+    // column actions, header row, delete table).
+    expect(n).toBe(30);
     expect(tools.map((b) => b.tabIndex)).toEqual([0, ...Array(n - 1).fill(-1)]);
     tools[0]!.focus();
     await act(async () => {
