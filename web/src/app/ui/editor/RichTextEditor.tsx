@@ -195,6 +195,10 @@ export default function RichTextEditor({
       role: "textbox",
       "aria-multiline": "true",
       "aria-label": label,
+      // A table wider than the body scrolls sideways inside the surface (beta 4);
+      // the surface is the focusable, named scroller, and the page never scrolls
+      // sideways. Declared so the phone-width check treats it as deliberate.
+      "data-scroll-x": "intentional",
     }),
     onUpdate: ({ editor: ed }) => latest.current.onChange(editorHtml(ed)),
     onBlur: () => latest.current.onBlur?.(),
