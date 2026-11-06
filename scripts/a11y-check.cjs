@@ -5815,7 +5815,9 @@ async function composerEditorSurfaces(page, cdp) {
   // (so this cannot pass by dropping everything); a url(), a size off the list and a
   // negative margin are not, and the words stay.
   await pasteHtml(
-    '<p style="margin-left:4em">indented words</p>' +
+    // (A leading plain paragraph: the first block of a paste merges into the
+    // paragraph the cursor is in, and takes that paragraph's attributes, not its own.)
+    '<p>lead words</p><p style="margin-left:4em">indented words</p>' +
       '<p><span style="color:#336699;background:url(https://' + PAYLOAD_HOST + '/s)">blue words</span> ' +
       '<span style="font-size:999px;font-family:x;src:url(https://' + PAYLOAD_HOST + '/f)">plain words</span> ' +
       '<span style="color:expression(window.__pwned=1)">expr words</span></p>' +
