@@ -58,7 +58,10 @@ func identityObject(id store.Identity, props map[string]bool) map[string]any {
 		"replyTo":       nil,
 		"bcc":           nil,
 		"textSignature": "",
-		"htmlSignature": id.SignatureHTML,
+		// Sanitised on the way out as well as in: rows stored before the write
+		// path sanitised them are served clean too (ADR-051; the composer inserts
+		// this HTML into the editor).
+		"htmlSignature": SanitizeOutboundHTML(id.SignatureHTML),
 		"mayDelete":     true,
 		// Mailroom extension (urn:mailroom:compose): which account's SMTP this
 		// identity submits through, and whether it is a catchall wildcard. Both
@@ -329,7 +332,7 @@ func createIdentity(ctx context.Context, tx *store.UserTx, raw json.RawMessage) 
 		row.DisplayName = *c.Name
 	}
 	if c.HTMLSignature != nil {
-		row.SignatureHTML = *c.HTMLSignature
+		row.SignatureHTML = SanitizeOutboundHTML(*c.HTMLSignature)
 	}
 	id, err := tx.CreateIdentity(ctx, row)
 	if err != nil {
@@ -371,7 +374,8 @@ func updateIdentity(ctx context.Context, tx *store.UserTx, id ulid.ULID, patch j
 				return &SetError{Type: setInvalidProps,
 					Description: "htmlSignature must be a string", Properties: []string{"htmlSignature"}}
 			}
-			p.SignatureHTML = &s
+			clean := SanitizeOutboundHTML(s)
+			p.SignatureHTML = &clean
 		case "enabled":
 			var b bool
 			if err := json.Unmarshal(val, &b); err != nil {

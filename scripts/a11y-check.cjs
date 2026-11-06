@@ -5753,6 +5753,25 @@ async function composerEditorSurfaces(page, cdp) {
   const afterPaste = await page.evaluate(() => window.__cspViolations.slice());
   if (afterPaste.length) fail("CSP violations after the paste: " + JSON.stringify(afterPaste));
 
+  // ---- the request listener is live: a picture put into the page must be seen --
+  // "No request went to the payload host" is only evidence if this listener would
+  // have heard one. A remote <img> inserted into the live page is the request a
+  // vulnerable paste would have made.
+  await control("composer-request-listener", async () => {
+    requested.length = 0;
+    await page.evaluate((host) => {
+      const img = document.createElement("img");
+      img.src = "https://" + host + "/control";
+      document.body.appendChild(img);
+    }, PAYLOAD_HOST);
+    await sleep(1000);
+    console.log("composer request control: saw " + JSON.stringify(requested));
+    const heard = requested.length > 0;
+    requested.length = 0;
+    return heard;
+  });
+  await page.evaluate(() => { window.__cspViolations.length = 0; });
+
   // ---- the listener is live: a deliberate violation must be seen -----------
   await control("composer-csp-listener", async () => {
     await page.evaluate(() => {

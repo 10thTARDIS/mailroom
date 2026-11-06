@@ -313,6 +313,7 @@ func TestWebNeverInjectsHTMLIntoOurOwnDOM(t *testing.T) {
 	// node_modules; the library's own DOM handling is covered by the hostile-paste
 	// suite (web/src/app/ui/editor/hostilePaste.test.tsx) and the server's
 	// SanitizeOutboundHTML. See ADR-051 section 4.
+	const hostilePasteControl = "app/ui/editor/hostilePaste.test.tsx"
 	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -333,8 +334,15 @@ func TestWebNeverInjectsHTMLIntoOurOwnDOM(t *testing.T) {
 				continue
 			}
 			for _, bad := range []string{"dangerouslySetInnerHTML", ".innerHTML", ".outerHTML",
-				"insertAdjacentHTML", "document.write"} {
+				"insertAdjacentHTML", "document.write", "createContextualFragment"} {
 				if !strings.Contains(line, bad) {
+					continue
+				}
+				// The ONE exemption: the hostile-paste suite deliberately puts markup
+				// into the live page by this route as a negative control, to prove its
+				// "nothing ran" flag can be tripped at all. Exactly this file, exactly
+				// this token; every other token stays forbidden there.
+				if bad == "createContextualFragment" && rel == filepath.FromSlash(hostilePasteControl) {
 					continue
 				}
 				t.Errorf("web/src/%s uses %s:\n\t%s\n"+

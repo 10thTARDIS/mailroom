@@ -19,6 +19,10 @@ describe("checkBundle", () => {
     ["eval( with a space", "var x = eval ('1')"],
     ["new Function", "var f = new Function('return 1')"],
     ["importScripts", "importScripts('x.js')"],
+    ["Function( as a call", "var f = Function('return 1')"],
+    ["a bracketed eval", "var e = window['eval']('1')"],
+    ["setTimeout with a string", "setTimeout('doIt()', 5)"],
+    ["setInterval with a template string", "setInterval(`x()`, 5)"],
   ] as const) {
     it(`fails on ${what} in the editor chunk`, () => {
       const f = checkBundle([main, { ...editorOk, text: `${editorOk.text};${code}` }]);
@@ -27,7 +31,7 @@ describe("checkBundle", () => {
   }
 
   it("does not mistake a method called eval or a longer name for the global", () => {
-    expect(checkBundle([main, { ...editorOk, text: `${editorOk.text}; a.eval(1); medieval(2); retrieval(3)` }])).toEqual([]);
+    expect(checkBundle([main, { ...editorOk, text: `${editorOk.text}; a.eval(1); medieval(2); retrieval(3); isFunction(4); x.Function(5); setTimeout(fn, 5); setInterval(() => 1, 5)` }])).toEqual([]);
   });
 
   it("fails when there is no editor chunk (not code-split)", () => {

@@ -21,6 +21,12 @@ export const FORBIDDEN: ReadonlyArray<{ name: string; re: RegExp }> = [
   { name: "eval(", re: /(?<![\w$.])eval\s*\(/ },
   { name: "new Function", re: /new\s+Function\b/ },
   { name: "importScripts", re: /\bimportScripts\b/ },
+  // The same capability by other doors: Function called without `new`, eval
+  // reached by a string key, and the string forms of the timers (which compile
+  // their argument).
+  { name: "Function(", re: /(?<![\w$.])Function\s*\(/ },
+  { name: '["eval"]', re: /\[\s*["'`]eval["'`]\s*\]/ },
+  { name: "setTimeout/setInterval with a string", re: /\bset(?:Timeout|Interval)\s*\(\s*["'`]/ },
 ];
 
 /** The marker a ProseMirror-based chunk always carries (class names the library

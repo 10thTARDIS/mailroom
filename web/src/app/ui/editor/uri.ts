@@ -4,28 +4,24 @@
 // §2). These are conveniences for the person typing: the server's
 // SanitizeOutboundHTML is still the boundary and re-decides all of it on send.
 
-/** The URL without the characters a browser ignores inside a scheme: controls,
- * spaces and the Unicode space separators ("java\tscript:" is "javascript:"). */
-function squeeze(url: string): string {
-  let out = "";
-  for (const ch of url) {
-    const c = ch.codePointAt(0) as number;
-    const ignored =
-      c <= 0x20 ||
-      c === 0xa0 ||
-      c === 0x1680 ||
-      c === 0x180e ||
-      (c >= 0x2000 && c <= 0x2029) ||
-      c === 0x205f ||
-      c === 0x3000;
-    if (!ignored) out += ch;
-  }
+/** The URL as a browser's URL parser sees it before it looks for a scheme: leading
+ * and trailing C0 controls and spaces are removed, and tab, LF and CR are removed
+ * everywhere. NOTHING ELSE is: a space or no-break space inside "d a t a:" or
+ * "java script:" means the text has no scheme and resolves as a relative URL, so
+ * it must not be classified as if it had one. */
+function browserView(url: string): string {
+  let out = url.replace(/[\t\n\r]/g, "");
+  let start = 0;
+  let end = out.length;
+  while (start < end && out.charCodeAt(start) <= 0x20) start += 1;
+  while (end > start && out.charCodeAt(end - 1) <= 0x20) end -= 1;
+  out = out.slice(start, end);
   return out;
 }
 
 /** The scheme of a URL, lower-cased, or "" when it has none. */
 function schemeOf(url: string): string {
-  const m = /^([a-z][a-z0-9+.-]*):/i.exec(squeeze(url));
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(browserView(url));
   return m ? (m[1] as string).toLowerCase() : "";
 }
 
@@ -50,11 +46,15 @@ export function linkFromPrompt(answer: string | null): string {
 }
 
 /** An image source the editor keeps on paste: an inline attachment reference
- * (cid:) or inline image bytes (data:image/*). Anything else (https:, http:,
+ * (cid:) or inline raster image bytes (data:image/*). Anything else (https:, http:,
  * blob:, file:, a relative path) would be a remote fetch or a hot-link, and a
- * picture is attached, never linked (ADR-051 §2). */
+ * picture is attached, never linked (ADR-051 §2). SVG is refused too: it is a
+ * document, and the server drops it on send, so keeping it would make the picture
+ * vanish silently later. */
 export function isInlineImageSrc(src: string | null | undefined): boolean {
   if (!src) return false;
-  const compact = squeeze(src).toLowerCase();
-  return compact.startsWith("cid:") || compact.startsWith("data:image/");
+  const v = browserView(src).toLowerCase();
+  if (v.startsWith("cid:")) return true;
+  if (!v.startsWith("data:image/")) return false;
+  return !/^data:image\/svg/.test(v);
 }

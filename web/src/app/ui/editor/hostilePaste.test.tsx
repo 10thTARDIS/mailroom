@@ -22,6 +22,7 @@
 // every safety assertion).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
 import { mountEditor, paste } from "./editorTestkit";
 import type { Mounted } from "./editorTestkit";
 
@@ -85,7 +86,12 @@ const DANGEROUS = "script, style, iframe, object, embed, form, input, textarea, 
 function assertClean(root: ParentNode, where: string): void {
   expect(root.querySelectorAll(DANGEROUS).length, `${where}: dangerous element`).toBe(0);
   for (const el of Array.from(root.querySelectorAll("*"))) {
+    // Links keep only href; pictures only src, alt and the fixed style.
+    const allowed = el.tagName === "A" ? ["href"] : el.tagName === "IMG" ? ["src", "alt", "style", "draggable"] : null;
     for (const attr of Array.from(el.attributes)) {
+      if (allowed && !el.classList.contains("ProseMirror-separator")) {
+        expect(allowed, `${where}: ${el.tagName} carries ${attr.name}`).toContain(attr.name);
+      }
       expect(attr.name.startsWith("on"), `${where}: ${el.tagName} has ${attr.name}`).toBe(false);
       if (attr.name === "style") {
         expect(el.tagName, `${where}: style on ${el.tagName}`).toBe("IMG");
@@ -166,8 +172,7 @@ describe("pasting hostile HTML into the editor", () => {
   it("a remote picture is dropped, the text around it kept, and the user told once", async () => {
     m = await mountEditor("");
     await paste(m, { html: '<p>before</p><img src="https://evil.example/t.png"><img src="http://evil.example/u.png"><p>after</p>' });
-    // The picture's own (now empty) paragraph stays as a blank line.
-    expect(m.html()).toBe("<p>before</p><p><br></p><p>after</p>");
+    expect(m.html()).toBe("<p>before</p><p>after</p>");
     expect(pictures(m)).toHaveLength(0);
     expect(m.notices).toEqual(["Pictures from the web were left out; attach them instead."]);
   });
@@ -200,11 +205,15 @@ describe("pasting hostile HTML into the editor", () => {
   it("an image's own style, width and handler are not kept, only the fixed one", async () => {
     m = await mountEditor("");
     await paste(m, {
-      html: `<img src="cid:a@inline.mailroom" style="position:fixed;background:url(https://evil.example/x)" onclick="${SET}" width="9999">`,
+      html: `<img src="cid:a@inline.mailroom" style="position:fixed;background:url(https://evil.example/x)" onclick="${SET}" width="9999" height="9999" title="hover">`,
     });
     const img = pictures(m)[0] as HTMLImageElement;
     expect(img.getAttribute("style")).toMatch(/^max-width:\s*100%;?$/);
     expect(img.hasAttribute("onclick")).toBe(false);
+    // Size and label attributes are not kept either.
+    expect(img.hasAttribute("width")).toBe(false);
+    expect(img.hasAttribute("height")).toBe(false);
+    expect(img.hasAttribute("title")).toBe(false);
     expect(m.html()).not.toContain("evil.example");
   });
 
@@ -229,5 +238,97 @@ describe("pasting hostile HTML into the editor", () => {
     m = await mountEditor("");
     await paste(m, { html: '<p><a href="javascript:alert(1)">still here</a></p>' });
     expect(m.html()).toBe("<p>still here</p>");
+  });
+});
+
+describe("anchors keep only their href", () => {
+  it("class, target, rel, title and data attributes are dropped on paste", async () => {
+    m = await mountEditor("");
+    await paste(m, {
+      html: '<p><a href="https://example.com/x" class="c" target="_blank" rel="opener" title="t" data-x="1" id="i" style="color:red">link</a></p>',
+    });
+    expect(m.html()).toBe('<p><a href="https://example.com/x">link</a></p>');
+    const a = m.surface.querySelector("a") as HTMLAnchorElement;
+    expect(a.getAttributeNames()).toEqual(["href"]);
+  });
+
+  it("control: the attribute check can fail (a live anchor with a class is rejected)", () => {
+    const box = document.createElement("div");
+    box.appendChild(live(box, '<a href="https://example.com" class="c" target="_blank">x</a>'));
+    expect(() => assertClean(box, "control")).toThrow();
+  });
+});
+
+describe("pictures are refused on every parse path, not only paste", () => {
+  const remote = '<p>t</p><img src="https://evil.example/t.png"><img src="http://evil.example/u.png">';
+
+  it("the seed (a signature or snippet inserted at mount)", async () => {
+    m = await mountEditor(remote);
+    expect(pictures(m)).toHaveLength(0);
+    expect(m.html()).not.toContain("evil.example");
+  });
+
+  it("insertContent with a markup string (a template or signature inserted later)", async () => {
+    m = await mountEditor("<p>draft</p>");
+    await act(async () => {
+      m!.editor.commands.insertContent(remote);
+    });
+    expect(pictures(m)).toHaveLength(0);
+    expect(m.html()).not.toContain("evil.example");
+  });
+
+  it("setContent", async () => {
+    m = await mountEditor("<p>draft</p>");
+    await act(async () => {
+      m!.editor.commands.setContent(remote);
+    });
+    expect(pictures(m)).toHaveLength(0);
+  });
+
+  it("control: an inline picture is still seeded (the rule is not refusing everything)", async () => {
+    m = await mountEditor('<p><img src="cid:a@inline.mailroom"></p>');
+    expect(pictures(m)).toHaveLength(1);
+  });
+});
+
+describe("what counts as an inline picture mirrors the browser's URL parser", () => {
+  const sources: Array<[string, string, number]> = [
+    ["a leading space, which a browser strips", " cid:a@inline.mailroom", 1],
+    ["interior tab/newline, which a browser strips", "ci\td:a@inline.mailroom", 1],
+    ["a space inside the scheme (a relative URL to a browser)", "d a t a:image/png;base64,iVBORw0KGgo=", 0],
+    ["a space inside cid", "c id:a@inline.mailroom", 0],
+    ["a leading no-break space (not stripped by a browser)", "\u00a0cid:a@inline.mailroom", 0],
+    ["SVG data (the server drops it on send)", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=", 0],
+    ["SVG data, mixed case", "DATA:IMAGE/SVG+XML,%3Csvg%3E", 0],
+    ["PNG data", "data:image/png;base64,iVBORw0KGgo=", 1],
+  ];
+  for (const [what, src, want] of sources) {
+    it(`${what}`, async () => {
+      m = await mountEditor("");
+      await paste(m, { html: `<p><img src="${src}"></p>` });
+      expect(pictures(m)).toHaveLength(want);
+      if (want === 0) expect(m.notices).toHaveLength(1);
+    });
+  }
+});
+
+describe("a paste during IME composition", () => {
+  it("is refused (the browser would otherwise paste markup natively into the live surface)", async () => {
+    m = await mountEditor("<p>draft</p>");
+    await act(async () => {
+      m!.surface.dispatchEvent(new Event("compositionstart", { bubbles: true }));
+    });
+    const before = m.html();
+    const ev = await paste(m, { html: `<img src=x onerror="${SET}"><p>pasted</p>`, text: "pasted" });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(m.html()).toBe(before);
+    expect(pwned()).toBe(false);
+  });
+
+  it("control: outside composition the same paste is handled by the editor", async () => {
+    m = await mountEditor("<p>draft</p>");
+    const ev = await paste(m, { html: "<p>pasted</p>", text: "pasted" });
+    expect(m.html()).toContain("pasted");
+    expect(ev.defaultPrevented).toBe(true); // ProseMirror cancelled the native paste itself
   });
 });

@@ -40,6 +40,9 @@ has a steadier shape: it fills the window and scrolls inside itself.
   itself offers is kept; scripts, forms, embedded frames, styles and event
   handlers in pasted content are dropped before they reach the page, and the
   server still cleans every message again before it is sent.
+- **Signatures and templates are cleaned too.** The HTML of a saved signature or
+  template is now cleaned by the server when it is saved and when it is read, and
+  the editor leaves out web pictures from anything inserted, not only from pastes.
 - Tab leaves the message body as before, and Ctrl+Enter still sends.
 
 ### Under the hood

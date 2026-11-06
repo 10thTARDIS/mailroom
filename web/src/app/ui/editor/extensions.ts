@@ -12,8 +12,8 @@ import { FileHandler } from "@tiptap/extension-file-handler";
 import Image from "@tiptap/extension-image";
 import StarterKit from "@tiptap/starter-kit";
 import type { EditorProps } from "@tiptap/pm/view";
-import { dropRemoteImages } from "./paste";
-import { isAllowedLinkUri } from "./uri";
+import { countDroppedImages } from "./paste";
+import { isAllowedLinkUri, isInlineImageSrc } from "./uri";
 
 /** The only inline style an image carries. It is a constant, never read from
  * pasted markup, so a hostile `style` on an `<img>` goes nowhere. */
@@ -30,9 +30,33 @@ export interface EditorHooks {
   remoteImagesDropped: (count: number) => void;
 }
 
+/** StarterKit with the Link mark cut down to `href`. A pasted anchor's class,
+ * target, rel and title are not parsed (so they cannot be kept) and not rendered:
+ * the server decides rel and target when the message is sent. Done by wrapping the
+ * kit's own link extension, which avoids depending on its package directly. */
+const Kit = StarterKit.extend({
+  addExtensions() {
+    return (this.parent?.() ?? []).map((ext) =>
+      ext.name === "link"
+        ? ext.extend({
+            addAttributes() {
+              return {
+                href: {
+                  default: null,
+                  parseHTML: (el: HTMLElement) => el.getAttribute("href"),
+                  renderHTML: (attrs: Record<string, unknown>) => (attrs["href"] ? { href: attrs["href"] } : {}),
+                },
+              };
+            },
+          })
+        : ext,
+    );
+  },
+});
+
 export function buildExtensions(hooks: EditorHooks) {
   return [
-    StarterKit.configure({
+    Kit.configure({
       heading: false,
       code: false,
       codeBlock: false,
@@ -47,15 +71,31 @@ export function buildExtensions(hooks: EditorHooks) {
         linkOnPaste: false,
         openOnClick: false,
         isAllowedUri: (url) => isAllowedLinkUri(url),
-        // Bare anchors, as the old editor made: rel and target are applied when
-        // the message is sent (the server decides them).
-        HTMLAttributes: { target: null, rel: null },
+        // Only href is kept (see Kit above); nothing else is rendered either, so
+        // the library's default target and rel are switched off. The server
+        // decides rel and target when the message is sent.
+        HTMLAttributes: { target: null, rel: null, class: null },
       },
     }),
     Image.extend({
+      // EVERY parse path (paste, drop, the seed, insertContent) goes through this
+      // rule, so a picture that is not inline is refused wherever it came from, not
+      // only on paste. The server's sanitiser strips them on send as well.
+      parseHTML() {
+        return [
+          {
+            tag: "img[src]",
+            getAttrs: (dom) => (isInlineImageSrc((dom as HTMLElement).getAttribute("src")) ? null : false),
+          },
+        ];
+      },
+      // Only src, alt and the fixed style. width, height and title are not kept
+      // (title is hover text, not an alternative to alt), so pasted markup cannot
+      // size or label a picture.
       addAttributes() {
         return {
-          ...this.parent?.(),
+          src: { default: null },
+          alt: { default: null },
           style: {
             default: IMAGE_STYLE,
             parseHTML: () => IMAGE_STYLE,
@@ -98,15 +138,24 @@ export function buildEditorProps(
 ): EditorProps {
   return {
     attributes,
-    // Rich paste keeps formatting the schema knows and drops the rest; the one
-    // thing it also drops is a picture that is not inline (ADR-051 §4). Mod-Shift-V
-    // is ProseMirror's own "paste as plain text".
-    transformPasted: (slice) => {
-      const { slice: kept, dropped } = dropRemoteImages(slice);
+    // Rich paste keeps formatting the schema knows and drops the rest. Pictures
+    // that are not inline are refused by the Image parse rule; this only counts
+    // them in the pasted markup (parsed in an inert document) so the user is told.
+    // Mod-Shift-V is ProseMirror's own "paste as plain text".
+    transformPastedHTML: (html) => {
+      const dropped = countDroppedImages(html);
       if (dropped > 0) hooks.remoteImagesDropped(dropped);
-      return kept;
+      return html;
     },
     handleDOMEvents: {
+      // A paste during IME composition is not handled by ProseMirror (it returns
+      // early while composing), so the browser would paste natively, as markup,
+      // into the live surface. Refuse it.
+      paste: (view, event) => {
+        if (!view.composing) return false;
+        event.preventDefault();
+        return true;
+      },
       // Tab leaves the editor, as it did when this was a plain contentEditable.
       // (The list-item extension would otherwise take Tab to indent; indenting
       // arrives with the new formatting in beta 2.) Returning true tells

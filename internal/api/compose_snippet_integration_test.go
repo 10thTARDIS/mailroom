@@ -22,6 +22,7 @@ package api
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -280,4 +281,42 @@ func TestComposeSnippetDuplicateNameDoesNotPoisonTheBatch(t *testing.T) {
 	if _, ok := res["notUpdated"].(map[string]any)[thirdID]; !ok {
 		t.Errorf("renaming onto a taken name was not refused per-object: %#v", res)
 	}
+}
+
+// HTML a snippet or an identity signature carries is inserted into the composer
+// (ADR-051), so it is sanitised like a draft body, both when it is written and when
+// it is read: a row stored before writes were sanitised must not be served raw.
+const hostileSigHTML = `<p>hi <b>there</b></p><img src="https://evil.example/t.png" onerror="alert(1)"><script>alert(2)</script>`
+
+func assertSanitisedSignature(t *testing.T, what, got string) {
+	t.Helper()
+	for _, bad := range []string{"<script", "onerror", "evil.example", "alert("} {
+		if strings.Contains(got, bad) {
+			t.Errorf("%s still contains %q: %s", what, bad, got)
+		}
+	}
+	if !strings.Contains(got, "<b>there</b>") {
+		t.Errorf("%s lost its ordinary formatting: %s", what, got)
+	}
+}
+
+func TestComposeSnippetHTMLIsSanitised(t *testing.T) {
+	h := newAPIHarness(t)
+	a, _ := seedTwo(t, h.super)
+	res := call(t, h.api.composeSnippetSet, a.UserID, map[string]any{
+		"create": map[string]any{"s1": map[string]any{"kind": "template", "name": "t", "bodyText": "x", "bodyHtml": hostileSigHTML}},
+	})
+	created := snippetFromSet(t, res, "created", "s1")
+	id, _ := created["id"].(string)
+	assertSanitisedSignature(t, "create response", created["bodyHtml"].(string))
+
+	// Legacy row: written straight to the table, as a pre-fix version stored it.
+	if _, err := h.super.Exec(context.Background(),
+		`UPDATE app.compose_snippets SET body_html = $1 WHERE id = $2`, hostileSigHTML, id); err != nil {
+		t.Fatalf("seed raw row: %v", err)
+	}
+	got := call(t, h.api.composeSnippetGet, a.UserID, map[string]any{"ids": []string{id}})
+	list, _ := got["list"].([]any)
+	obj, _ := list[0].(map[string]any)
+	assertSanitisedSignature(t, "get of a legacy row", obj["bodyHtml"].(string))
 }

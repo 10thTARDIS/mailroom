@@ -37,7 +37,7 @@ func composeSnippetObject(s store.ComposeSnippet) map[string]any {
 		"kind":       string(s.Kind),
 		"identityId": identity,
 		"name":       s.Name,
-		"bodyHtml":   s.BodyHTML,
+		"bodyHtml":   SanitizeOutboundHTML(s.BodyHTML), // also for rows stored before writes were sanitised
 		"bodyText":   s.BodyText,
 		"isDefault":  s.IsDefault,
 	}
@@ -123,7 +123,7 @@ func (w composeSnippetWrite) toStore() (store.ComposeSnippet, *SetError) {
 		s.Name = *w.Name
 	}
 	if w.BodyHTML != nil {
-		s.BodyHTML = *w.BodyHTML
+		s.BodyHTML = SanitizeOutboundHTML(*w.BodyHTML)
 	}
 	if w.BodyText != nil {
 		s.BodyText = *w.BodyText
