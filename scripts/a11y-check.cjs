@@ -5947,22 +5947,37 @@ async function composerEditorSurfaces(page, cdp) {
   await waitForSelectorD(page, "section.compose .editor-surface table th", { timeout: 10000 });
   expectControls(await controlState(), true, false, "inside a table");
 
+  // (Tiptap writes a style as the browser's own "prop: value;" text, so the fixed
+  // #999 reads back as rgb(153, 153, 153): the same colour. Compared declaration by
+  // declaration, with the colour in that form.)
   const written = await page.evaluate(() => {
     const t = document.querySelector("section.compose .editor-surface table");
     const cells = [...t.querySelectorAll("td, th")];
+    const decls = (el) => {
+      const out = {};
+      for (const d of (el.getAttribute("style") || "").split(";")) {
+        const i = d.indexOf(":");
+        if (i > 0) out[d.slice(0, i).trim()] = d.slice(i + 1).trim();
+      }
+      return JSON.stringify(Object.keys(out).sort().map((k) => k + "=" + out[k]));
+    };
     return {
-      table: t.getAttribute("style"),
+      table: decls(t),
       tableAttrs: t.getAttributeNames(),
-      th: [...new Set(cells.filter((c) => c.tagName === "TH").map((c) => c.getAttribute("style")))],
-      td: [...new Set(cells.filter((c) => c.tagName === "TD").map((c) => c.getAttribute("style")))],
+      th: [...new Set(cells.filter((c) => c.tagName === "TH").map(decls))],
+      td: [...new Set(cells.filter((c) => c.tagName === "TD").map(decls))],
+      cellAttrs: [...new Set(cells.map((c) => c.tagName + ":" + c.getAttributeNames().sort().join(",")))].sort(),
       scopes: [...new Set(cells.filter((c) => c.tagName === "TH").map((c) => c.getAttribute("scope")))],
       parts: t.querySelectorAll("colgroup, col, thead").length,
       counts: [t.rows.length, t.rows[0].cells.length, cells.length],
     };
   });
-  if (written.table !== "border-collapse:collapse" || written.tableAttrs.join() !== "style") fail("the table's written form: " + JSON.stringify(written));
-  if (written.th.join("|") !== "border:1px solid #999;padding:4px 8px;text-align:left;font-weight:bold" || written.scopes.join() !== "col") fail("the header cells' written form: " + JSON.stringify(written));
-  if (written.td.join("|") !== "border:1px solid #999;padding:4px 8px" || written.parts !== 0) fail("the body cells' written form: " + JSON.stringify(written));
+  const want = (o) => JSON.stringify(Object.keys(o).sort().map((k) => k + "=" + o[k]));
+  const CELL = { border: "1px solid rgb(153, 153, 153)", padding: "4px 8px" };
+  if (written.table !== want({ "border-collapse": "collapse" }) || written.tableAttrs.join() !== "style") fail("the table's written form: " + JSON.stringify(written));
+  if (written.th.join("|") !== want({ ...CELL, "text-align": "left", "font-weight": "bold" }) || written.scopes.join() !== "col") fail("the header cells' written form: " + JSON.stringify(written));
+  if (written.td.join("|") !== want(CELL) || written.parts !== 0) fail("the body cells' written form: " + JSON.stringify(written));
+  if (written.cellAttrs.join() !== "TD:style,TH:scope,style") fail("a cell carries attributes beyond style (and scope on a header): " + JSON.stringify(written.cellAttrs));
   if (written.counts.join() !== "3,3,9") fail("Insert table did not make a 3 by 3 table: " + JSON.stringify(written.counts));
   const inFirst = await caretCell(page);
   if (!inFirst || inFirst.join() !== "0,0") fail("the cursor is not in the first cell after Insert table: " + JSON.stringify(inFirst));
