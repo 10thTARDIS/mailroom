@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-The message editor has a new engine underneath. Everything you could do before
+## [1.101.0-beta.1] — 2026-11-06
+
+**The first beta of the new composer:** the message editor has a new engine underneath. Everything you could do before
 (bold, italic, underline, bulleted and numbered lists, links, pictures in the
 text) works as it did, and pasting now keeps formatting. The message body also
 has a steadier shape: it fills the window and scrolls inside itself.
