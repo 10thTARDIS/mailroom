@@ -1477,6 +1477,15 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
             ? t("compose.draftTitle")
             : t("compose.title");
 
+  const saveText =
+    saveState.kind === "saving"
+      ? t("compose.saving")
+      : saveState.kind === "saved"
+        ? t("compose.saved")
+        : saveState.kind === "failed"
+          ? t("compose.notSaved", { reason: saveState.reason })
+          : t("compose.notSavedYet");
+
   return (
     <section
       className={`compose compose-${placement}`}
@@ -1785,14 +1794,8 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
           {/* data-state is the same fact as the words, for a reader that cannot
               read them: scripts/a11y-check.cjs waits on it before Discard, since a
               Discard pressed mid-save cannot destroy the draft that save creates. */}
-          <span className="compose-save-state" data-state={saveState.kind}>
-            {saveState.kind === "saving"
-              ? t("compose.saving")
-              : saveState.kind === "saved"
-                ? t("compose.saved")
-                : saveState.kind === "failed"
-                  ? t("compose.notSaved", { reason: saveState.reason })
-                  : t("compose.notSavedYet")}
+          <span className="compose-save-state" data-state={saveState.kind} title={saveText}>
+            {saveText}
           </span>
           <button
             type="button"

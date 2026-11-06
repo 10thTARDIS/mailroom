@@ -5910,6 +5910,11 @@ async function composerEditorSurfaces(page, cdp) {
       const submit = document.querySelector('section.compose button[type="submit"]');
       const cr = r(compose), sr = r(surface), tr = r(toolbar), br = r(submit);
       const cs = getComputedStyle(surface);
+      // What sits under the body, measured so a change in the body's height can be
+      // traced to the thing that moved (the save-state line wrapping was one).
+      const actions = r(document.querySelector("section.compose .compose-actions"));
+      const state = document.querySelector("section.compose .compose-save-state");
+      const stateBox = r(state);
       const hit = (el) => {
         const b = r(el);
         const x = b.left + b.width / 2, y = b.top + b.height / 2;
@@ -5918,6 +5923,9 @@ async function composerEditorSurfaces(page, cdp) {
       };
       return {
         compose: cr && cr.height,
+        actionsH: actions && actions.height,
+        stateH: stateBox && stateBox.height,
+        stateText: state && state.textContent,
         surfaceH: sr && sr.height,
         scrollH: surface.scrollHeight,
         clientH: surface.clientHeight,
@@ -5929,7 +5937,37 @@ async function composerEditorSurfaces(page, cdp) {
         view: window.innerWidth + "x" + window.innerHeight,
       };
     });
+  // THE LINE UNDER THE BODY MUST NOT CHANGE THE BODY (#83). The autosave line's
+  // text changes with the save state, and at a phone's width a longer text used to
+  // wrap onto a second line, make the action row taller and take the difference
+  // from the body: a 42 px shrink that showed up only when a save finished between
+  // two measurements, so it passed or failed with the timing. The text is set to
+  // each state's words directly (the span's one text node, so React's own updates
+  // still apply), and the body and the row must keep their heights across all of
+  // them. Returns the largest change seen.
+  const statusSpread = async () =>
+    page.evaluate(() => {
+      const state = document.querySelector("section.compose .compose-save-state");
+      const surface = document.querySelector("section.compose .editor-surface, section.compose textarea.editor-plain");
+      const actions = document.querySelector("section.compose .compose-actions");
+      const node = state.firstChild;
+      const original = node.nodeValue;
+      const texts = [original, "Not saved yet", "Saving…", "Saved a moment ago", "Not saved · " + "the server did not answer in time ".repeat(3)];
+      const surfaceHs = [], actionHs = [];
+      for (const t of texts) {
+        node.nodeValue = t;
+        surfaceHs.push(surface.getBoundingClientRect().height);
+        actionHs.push(actions.getBoundingClientRect().height);
+      }
+      node.nodeValue = original;
+      const spread = (a) => Math.max(...a) - Math.min(...a);
+      return { surface: spread(surfaceHs), actions: spread(actionHs), surfaceHs, actionHs };
+    });
   const bodyCheck = async (label) => {
+    const steady = await statusSpread();
+    if (steady.surface > 1 || steady.actions > 1) {
+      fail(label + " (" + (await page.evaluate(() => window.innerWidth + "x" + window.innerHeight)) + "): the save-state text changes the layout under the body: " + JSON.stringify(steady));
+    }
     const before = await measure();
     // Put 150 lines in: rich by pasting HTML, plain by setting the value through
     // the native setter and an input event, as typing would.
@@ -5947,7 +5985,9 @@ async function composerEditorSurfaces(page, cdp) {
     const after = await measure();
     const where = label + " (" + after.view + ")";
     if (Math.abs(after.surfaceH - before.surfaceH) > 1 || Math.abs(after.compose - before.compose) > 1) {
-      fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose + ")");
+      fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose +
+        "; action row " + before.actionsH + " -> " + after.actionsH + ", save line " + before.stateH + " -> " + after.stateH +
+        " [" + before.stateText + " -> " + after.stateText + "])");
     }
     if (!(after.scrollH > after.clientH + 20)) fail(where + ": the long body does not scroll inside itself (scrollH=" + after.scrollH + " clientH=" + after.clientH + ")");
     if (after.overflowY !== "auto") fail(where + ": the body's overflow-y is " + after.overflowY);
@@ -6020,6 +6060,24 @@ async function composerEditorSurfaces(page, cdp) {
     const after = await measure();
     console.log("composer layout control: surface " + before.surfaceH + " -> " + after.surfaceH);
     return Math.abs(after.surfaceH - before.surfaceH) > 50;
+  });
+
+  // The stability check above can fail: with the status line allowed to wrap
+  // (the rule it replaced, forced narrow so the effect is certain), changing its
+  // text changes the row's height, and the check must see it.
+  await control("composer-status-wrap", async () => {
+    const viewport = page.viewport();
+    await page.setViewport({ width: 360, height: 740, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+    await openDraft();
+    await page.evaluate(() => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync("section.compose .compose-save-state { flex: 0 0 100% !important; overflow: visible !important; white-space: normal !important; text-overflow: clip !important; max-width: 7ch !important; }");
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    });
+    const spread = await statusSpread();
+    console.log("composer status control: " + JSON.stringify(spread));
+    await page.setViewport(viewport);
+    return spread.actions > 1;
   });
 
   // ---- leave nothing behind: discard the fixture draft ----------------------

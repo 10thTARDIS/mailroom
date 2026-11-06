@@ -509,9 +509,33 @@
    as muted text and pushes Discard to the far end — where a destructive action
    belongs, away from Send. */
 .compose-save-state {
-  margin-inline-start: auto;
   color: var(--fg-muted);
   font-size: 0.8571rem;
+}
+
+/* ...and it must never change the height of what sits under the body (#83: the
+   body is a fixed size, so anything below it that grows takes the difference from
+   the body). Its text changes with the save state ("Not saved yet", "Saving…",
+   "Saved a moment ago", "Not saved · <reason>"); a line that wraps at a phone's
+   width made the row taller by a line when the longer text arrived, 500 ms after
+   a keystroke. So it is ONE line that is cut with an ellipsis rather than wrapped,
+   and its width does not depend on its text: it takes the space left in the row
+   (a flex-basis of zero, so it never decides where the row breaks). At a phone's
+   width it has the row below the buttons to itself. */
+.compose-save-state {
+  flex: 1 1 0;
+  min-width: 4rem;
+  overflow: hidden;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .compose-save-state {
+    flex: 1 0 100%;
+    order: 2;
+    text-align: start;
+  }
 }
 
 /* ---- the Outbox -------------------------------------------------------- */
