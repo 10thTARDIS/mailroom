@@ -276,6 +276,18 @@ describe("pictures from the original", () => {
       ...over,
     });
 
+  it("an inline picture listed in htmlBody (RFC 8621: not in attachments) is carried too", async () => {
+    const parent = withCid({
+      attachments: [],
+      htmlBody: [htmlPart, part({ partId: "i", blobId: "BI", type: "image/png", name: "logo.png", cid: "logo@example.com", size: 500, disposition: "inline" })],
+    });
+    await open("reply", parent);
+    const { attachments } = await sent();
+    expect(attachments).toEqual([
+      { blobId: "BI", type: "image/png", name: "logo.png", cid: "logo@example.com", disposition: "inline" },
+    ]);
+  });
+
   it("a cid: picture the original lists is carried as the reply's own inline attachment", async () => {
     await open("reply", withCid());
     const { html, attachments } = await sent();

@@ -288,7 +288,9 @@ export function formattedQuoteOf(parent: EffectiveEmail | null): { html: string;
   const q = formatQuote({
     html,
     truncated: htmlBodyTruncated(parent),
-    parts: parent.attachments ?? [],
+    // An inline picture is listed in htmlBody (RFC 8621 §4.1.4), not in attachments;
+    // the reading pane resolves a cid: against both, and so does the quote.
+    parts: [...(parent.htmlBody ?? []), ...(parent.attachments ?? [])],
     withheld: (partId) => isWithheld(parent.attachmentScan, partId),
     canCarry: true,
     notes: { picture: t("compose.quotePictureOmitted"), rest: t("compose.quoteRestOmitted") },

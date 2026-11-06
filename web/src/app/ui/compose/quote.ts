@@ -151,7 +151,14 @@ function cidOf(src: string): string {
 }
 
 function plainCid(cid: string | null): string {
-  return (cid ?? "").trim().replace(/^<|>$/g, "");
+  return (cid ?? "").trim().replace(/^<|>$/g, "").trim();
+}
+
+/** The key a Content-ID is matched on: RFC 2392 names it without the brackets, and
+ * the reader (./../inlineImages.ts normalizeCid) compares it case-insensitively, so
+ * the quote and the reading pane cannot disagree about which part a `cid:` names. */
+function cidKey(cid: string | null): string {
+  return plainCid(cid).toLowerCase();
 }
 
 interface Ctx {
@@ -234,25 +241,27 @@ function stripImage(img: Element): void {
 
 function keepCid(ctx: Ctx, img: Element, cid: string): boolean {
   if (!ctx.input.canCarry || cid === "") return false;
-  const already = ctx.carried.find((c) => c.cid === cid);
-  const part = ctx.input.parts.find((p) => plainCid(p.cid) === cid && p.blobId);
+  const key = cidKey(cid);
+  const part = ctx.input.parts.find((p) => cidKey(p.cid) === key && p.blobId);
   if (!part || !part.blobId) return false;
   const type = part.type.toLowerCase();
   if (!type.startsWith("image/") || type.startsWith("image/svg")) return false;
   if (ctx.input.withheld(part.partId)) return false;
-  if (!already) {
+  // The reply names the picture by the part's own Content-ID.
+  const own = plainCid(part.cid);
+  if (!ctx.carried.some((c) => cidKey(c.cid) === key)) {
     if (ctx.carriedBytes + part.size > QUOTE_PICTURE_BYTE_CAP) return false;
     ctx.carriedBytes += part.size;
     ctx.carried.push({
       blobId: part.blobId,
-      cid,
+      cid: own,
       name: part.name ?? "image",
       type: part.type,
       partId: part.partId,
     });
   }
   stripImage(img);
-  img.setAttribute("src", `cid:${cid}`);
+  img.setAttribute("src", `cid:${own}`);
   return true;
 }
 
@@ -391,8 +400,8 @@ export function formatQuote(input: QuoteInput): Quote {
   }
 
   // A picture whose block was cut is no longer in the document: do not carry it.
-  const inDoc = new Set(Array.from(root.querySelectorAll("img")).map((i) => cidOf(i.getAttribute("src") ?? "")));
-  const carried = ctx.carried.filter((c) => inDoc.has(c.cid));
+  const inDoc = new Set(Array.from(root.querySelectorAll("img")).map((i) => cidKey(cidOf(i.getAttribute("src") ?? ""))));
+  const carried = ctx.carried.filter((c) => inDoc.has(cidKey(c.cid)));
 
   const ser = new XMLSerializer();
   const html = Array.from(root.childNodes)

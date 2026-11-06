@@ -267,6 +267,7 @@ const tally = {
   phoneWidth: 0,
   phoneMenus: 0,
   composerEditor: 0,
+  quote: 0,
   keys: 0,
   contacts: 0,
   apiKeys: 0,
@@ -1295,6 +1296,28 @@ const SURFACES = [
       await openComposeWith(page, async () => {
         await insertTableWithText(page, [["Item", "Qty"], ["Apple", "3"]]);
       });
+    },
+  },
+  {
+    // A REPLY QUOTING A REAL ESP NEWSLETTER WITH ITS FORMATTING (ADR-051 beta 5,
+    // #92). The fixture newsletter is 640 px of nested presentation tables, a
+    // remote logo, a 1x1 tracking pixel and an inline hero picture, which is the
+    // shape of mail a reply is most often made to. The plain "compose" surface
+    // has an empty body, so on its own it would pass for a quote that violated
+    // every rule. Not typed in and not saved (a draft would thread onto the
+    // newsletter and every later surface would measure two messages): the save
+    // is checked by quotedReplyCarry, last.
+    name: "compose-reply-quoted-newsletter",
+    async open(page) {
+      await load(page, "#/inbox/review?compose=reply:" + FIX.newsletter.id);
+      await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+      await waitForEditor(page);
+      await waitForQuote(page);
+    },
+    async after(page) {
+      const bad = await quoteChecks(page, "section.compose .editor-surface");
+      if (bad.length) throw new Fail(33, "COMPOSER quote of the newsletter: " + bad.join("; "));
+      tally.quote += 1;
     },
   },
   {
@@ -5627,6 +5650,210 @@ function phoneWidthProbe(limit) {
   return { iw: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, offenders };
 }
 
+/**
+ * THE QUOTE OF THE FIXTURE NEWSLETTER, waited for and checked (ADR-051 beta 5).
+ * The reply composer has no new control; what is new is the document, so what is
+ * measured is the document: the original's headings and words are there, inside a
+ * blockquote; no layout table was left behind (every table in the fixture is
+ * presentational); the remote logo is a note and not a picture, and the tracking
+ * pixel is nothing; the hero, which the message itself carries, is kept; and
+ * nothing in the surface points at the newsletter's hosts.
+ */
+const QUOTE_HOST = "theatre.example.com";
+async function waitForQuote(page) {
+  await until("the reply's quote of the newsletter is in the editor", 30000, () =>
+    page.evaluate(() => {
+      const el = document.querySelector("section.compose .editor-surface blockquote");
+      return !!el && el.textContent.indexOf("Six productions") >= 0;
+    }),
+  33);
+}
+async function quoteChecks(page, rootSelector) {
+  return page.evaluate((root, host) => {
+    const bad = [];
+    const el = document.querySelector(root);
+    if (!el) return ["no " + root];
+    const q = el.querySelector("blockquote");
+    if (!q) return ["the reply has no blockquote"];
+    const text = q.textContent;
+    for (const want of ["Six productions", "October", "November", "Choose your seats", "[picture not included]"]) {
+      if (text.indexOf(want) < 0) bad.push("the quote lacks " + JSON.stringify(want));
+    }
+    if (el.querySelector("table")) bad.push("a layout table was left in the quote");
+    const imgs = [...el.querySelectorAll("img:not(.ProseMirror-separator)")];
+    const srcs = imgs.map((i) => i.getAttribute("src") || "");
+    if (!srcs.some((x) => x.indexOf("cid:hero-autumn") === 0)) bad.push("the message's own hero picture was not kept (" + JSON.stringify(srcs) + ")");
+    for (const x of srcs) if (!/^cid:/i.test(x)) bad.push("a picture that is not the message's own: " + x.slice(0, 80));
+    const markup = new XMLSerializer().serializeToString(el);
+    if (markup.indexOf(host) >= 0 && !/href="https:\/\/news\.theatre/.test(markup)) bad.push("the surface names " + host + " somewhere other than a link");
+    if (/data-mailroom|\/jmap\/proxy\//.test(markup)) bad.push("a parked or proxied picture reached the editor");
+    for (const e of el.querySelectorAll("*")) {
+      for (const a of e.attributes) {
+        if (/^on/i.test(a.name)) bad.push("handler attribute " + a.name);
+        if ((a.name === "src" || a.name === "href") && /^javascript:/i.test(a.value)) bad.push("javascript: URL");
+      }
+    }
+    return bad;
+  }, rootSelector, QUOTE_HOST);
+}
+
+/**
+ * A REPLY TO THE NEWSLETTER, SAVED (ADR-051 beta 5, #92), against the real server.
+ * What jsdom cannot say: that the server ACCEPTS the original's own inline picture
+ * as an attachment of the reply (a blob of another message of the same account),
+ * and that what is saved is the formatted quote with nothing from the web in it.
+ *
+ *   1. open the reply, wait for the quote, with a CSP listener and a request
+ *      listener (the newsletter's host) armed before the page loads;
+ *   2. type one character, and require the first autosave to land;
+ *   3. read what was sent and what came back: the create names the hero as an
+ *      INLINE attachment with its cid, the server created it (no notCreated), and
+ *      the draft read back lists that part; the saved HTML holds the quote's text
+ *      and no table, no remote picture, no proxy path;
+ *   4. discard it and wait for the destroy, so nothing later sees the draft;
+ *   5. the checks above can fail: the same function on a planted document, and a
+ *      request to the newsletter's host put into the page, are both seen.
+ *
+ * Last in the run, because a draft in the newsletter's thread would change what
+ * every later surface measures; it is discarded before anything else runs.
+ */
+async function quotedReplyCarry(page) {
+  const fail = (what) => {
+    throw new Fail(33, "COMPOSER quote " + what);
+  };
+  const requested = [];
+  const onRequest = (req) => {
+    if (req.url().indexOf(QUOTE_HOST) >= 0) requested.push(req.url());
+  };
+  page.on("request", onRequest);
+  await page.evaluateOnNewDocument(() => {
+    window.__cspQuote = [];
+    document.addEventListener("securitypolicyviolation", (e) => {
+      window.__cspQuote.push(e.effectiveDirective + " " + e.blockedURI + " " + e.sourceFile);
+    });
+  });
+  try {
+    await load(page, "#/inbox/review?compose=reply:" + FIX.newsletter.id);
+    await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+    await waitForEditor(page);
+    await waitForQuote(page);
+    const bad = await quoteChecks(page, "section.compose .editor-surface");
+    if (bad.length) fail("the reply's quote: " + bad.join("; "));
+
+    const saved = page.waitForResponse(
+      (r) => r.request().method() === "POST" && /"Email\/set"/.test(r.request().postData() || "") && /"create"/.test(r.request().postData() || ""),
+      { timeout: 30000 },
+    );
+    await page.click("section.compose .editor-surface");
+    await page.keyboard.type("x");
+    const res = await saved;
+    const sent = JSON.parse(res.request().postData() || "{}");
+    const call = (sent.methodCalls || []).find((c) => c[0] === "Email/set" && c[1] && c[1].create);
+    const created = call ? Object.values(call[1].create)[0] : null;
+    if (!created) fail("the autosave carried no create: " + (res.request().postData() || "").slice(0, 300));
+    const attachments = created.attachments || [];
+    const hero = attachments.find((a) => a.cid && a.cid.indexOf("hero-autumn@") === 0);
+    if (!hero || hero.disposition !== "inline" || !hero.blobId) {
+      fail("the draft does not carry the hero as an inline attachment: " + JSON.stringify(attachments));
+    }
+    if (attachments.length !== 1) fail("the draft carries more than the hero: " + JSON.stringify(attachments));
+    const answer = await res.json();
+    const set = (answer.methodResponses || []).find((r) => r[0] === "Email/set");
+    const made = set && set[1] && set[1].created ? Object.values(set[1].created)[0] : null;
+    if (!made || (set[1].notCreated && Object.keys(set[1].notCreated).length)) {
+      fail("the server did not accept the original's picture as an attachment: " + JSON.stringify(set && set[1] && set[1].notCreated));
+    }
+    const htmlPart = Object.values(created.bodyValues || {}).map((v) => v.value).find((v) => /<blockquote/.test(v)) || "";
+    for (const [name, re] of [
+      ["a table", /<table/i],
+      ["a proxy path", /\/jmap\/proxy\//],
+      ["a parked picture", /data-mailroom/],
+      ["a remote picture", /<img[^>]+src="https?:/i],
+      ["an xmlns attribute", /xmlns/],
+    ]) {
+      if (re.test(htmlPart)) fail("the saved HTML holds " + name + ": " + htmlPart.slice(0, 200));
+    }
+    if (htmlPart.indexOf("Six productions") < 0) fail("the saved HTML lost the quote: " + htmlPart.slice(0, 200));
+    // What the server stored: read it back.
+    const back = await page.evaluate(async (id) => {
+      const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
+      const accountId = Object.values(sess.primaryAccounts)[0];
+      const r = await fetch(sess.apiUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+          methodCalls: [["Email/get", { accountId, ids: [id], properties: ["attachments"] }, "g"]],
+        }),
+      });
+      const b = await r.json();
+      return b.methodResponses[0][1].list[0] || null;
+    }, made.id);
+    const stored = ((back && back.attachments) || []).find((a) => a.cid && a.cid.indexOf("hero-autumn@") === 0);
+    if (!stored || stored.disposition !== "inline") fail("the stored draft does not list the hero as inline: " + JSON.stringify(back));
+
+    const csp = await page.evaluate(() => window.__cspQuote.slice());
+    if (csp.length) fail("CSP violations: " + JSON.stringify(csp));
+    if (requested.length) fail("a request went to " + QUOTE_HOST + ": " + requested.join(", "));
+
+    // Discard it, and wait for the destroy itself.
+    const destroyed = page.waitForResponse(
+      (r) => r.request().method() === "POST" && (r.request().postData() || "").indexOf('"destroy"') >= 0,
+      { timeout: 30000 },
+    );
+    await page.click("section.compose button.compose-discard");
+    const d = await destroyed;
+    if (!d.ok()) fail("discarding the reply: HTTP " + d.status());
+    await until("the composer has closed", 30000, () => page.evaluate(() => !document.querySelector("section.compose")), 33);
+
+    // ---- the checks can fail -------------------------------------------------
+    await control("composer-quote-check", async () => {
+      await page.evaluate(() => {
+        const box = document.createElement("div");
+        box.id = "__quoteControl";
+        const q = document.createElement("blockquote");
+        q.appendChild(document.createElement("table"));
+        const img = document.createElement("img");
+        img.setAttribute("src", "https://t.news.theatre.example.com/open/x.gif");
+        q.appendChild(img);
+        q.appendChild(document.createTextNode("Six productions"));
+        box.appendChild(q);
+        document.body.appendChild(box);
+      });
+      const found = await quoteChecks(page, "#__quoteControl");
+      await page.evaluate(() => document.getElementById("__quoteControl").remove());
+      console.log("composer quote control: " + found.length + " finding(s)");
+      return found.some((f) => /layout table/.test(f)) && found.some((f) => /not the message's own/.test(f)) && found.some((f) => /lacks/.test(f));
+    });
+    await control("composer-quote-request-listener", async () => {
+      requested.length = 0;
+      await page.evaluate((host) => {
+        const img = document.createElement("img");
+        img.src = "https://t.news." + host + "/control.gif";
+        document.body.appendChild(img);
+      }, QUOTE_HOST);
+      await sleep(1000);
+      const heard = requested.length > 0;
+      requested.length = 0;
+      return heard;
+    });
+    await control("composer-quote-csp-listener", async () => {
+      await page.evaluate(() => {
+        const sc = document.createElement("script");
+        sc.textContent = "window.__quoteRan = 1";
+        document.body.appendChild(sc);
+      });
+      await sleep(300);
+      const seen = await page.evaluate(() => ({ v: window.__cspQuote.slice(), ran: window.__quoteRan === 1 }));
+      return seen.v.length > 0 && /script-src/.test(seen.v[0]) && !seen.ran;
+    });
+    tally.quote += 1;
+  } finally {
+    page.off("request", onRequest);
+  }
+}
+
 /** Opens the composer the way the "compose" surface does, then runs `use` (opens
  * a palette, focuses a select). One place, so the beta-2 surfaces cannot drift from
  * the surface they extend. */
@@ -6360,6 +6587,17 @@ async function phoneWidthSurfaces(page, contactIds) {
       name: "compose",
       hash: "#/inbox/review?compose=new",
       ready: (p) => waitForSelectorD(p, 'section.compose[role="dialog"]', { timeout: 30000 }),
+    },
+    // A reply quoting the wide newsletter (ADR-051 beta 5): the quote is the
+    // newsletter flattened to paragraphs, so it must fit the phone like any text.
+    {
+      name: "compose-reply-newsletter",
+      hash: "#/inbox/review?compose=reply:" + FIX.newsletter.id,
+      ready: async (p) => {
+        await waitForSelectorD(p, 'section.compose[role="dialog"]', { timeout: 30000 });
+        await waitForEditor(p);
+        await waitForQuote(p);
+      },
     },
     // A table wider than the phone (ADR-051 beta 4): its cells hold unbreakable
     // words, so the table is wider than the body. It must scroll sideways INSIDE
@@ -7297,6 +7535,11 @@ async function main() {
     // ---- the negative controls ------------------------------------------
     await negativeControls(page, cdp);
 
+    // A reply to the newsletter, saved: the server takes the original's own
+    // picture, nothing from the web is in the draft (ADR-051 beta 5). Discards
+    // its draft before anything else runs.
+    await quotedReplyCarry(page);
+
     // ---- the docked split (#617), LAST: it changes the synced split --------
     await chooseTheme(page, THEMES[0]);
     await dockedSplitCheck(page);
@@ -7380,6 +7623,8 @@ async function main() {
         (tally.oauth ? "ok" : "NOT-RUN") +
         " composer_editor=" +
         (tally.composerEditor ? "ok" : "NOT-RUN") +
+        " composer_quote=" +
+        (tally.quote >= 3 ? "ok" : "NOT-RUN") +
         " axe_version=" +
         axeVersion +
         " NOT_CHECKED=held-attachment-panel,message-body-iframe,at-phrasing",

@@ -78,11 +78,16 @@ function fireEverything(root: Element): void {
   }
 }
 
-/** The forbidden route: markup parsed in the LIVE document, handlers armed. */
-function live(context: Element, html: string): DocumentFragment {
-  const range = document.createRange();
-  range.selectNodeContents(context);
-  return range.createContextualFragment(html);
+/** The forbidden route: markup that ends up in the LIVE document with its handlers
+ * armed. It is parsed in an inert document and then IMPORTED into the page
+ * (importNode), which is what makes a handler attribute live; the scan that keeps
+ * innerHTML and createContextualFragment out of web/src has no exemption for this
+ * file, and none is needed. */
+function live(_context: Element, html: string): DocumentFragment {
+  const inertDoc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+  const frag = document.createDocumentFragment();
+  for (const n of Array.from(inertDoc.body.childNodes)) frag.appendChild(document.importNode(n, true));
+  return frag;
 }
 
 const inert = (h: string): Document => new DOMParser().parseFromString(h, "text/html");

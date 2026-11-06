@@ -126,6 +126,12 @@ describe("pictures", () => {
       expect(q.carried.map((c) => c.cid)).toEqual(["a@example.com"]);
     });
 
+    it("matches case-insensitively, as the reading pane does, and names the picture by the part's own id", () => {
+      const q = quote('<p><img src="cid:LOGO@Example.com"></p>', { parts: [part()] });
+      expect(q.carried.map((c) => c.cid)).toEqual(["logo@example.com"]);
+      expect(dom(q.html).querySelector("img")?.getAttribute("src")).toBe("cid:logo@example.com");
+    });
+
     it("is carried once however often it is used", () => {
       const q = quote(`${html}${html}`, { parts: [part()] });
       expect(q.carried).toHaveLength(1);
@@ -220,7 +226,8 @@ describe("layout tables are flattened, data tables kept", () => {
 
   it("loose text in a layout cell becomes a paragraph; whitespace-only cells vanish", () => {
     const q = quote("<table><tr><td>Hello <b>there</b></td></tr><tr><td> </td></tr></table>");
-    expect(Array.from(dom(q.html).body.children).map((e) => e.outerHTML.replace(/ xmlns="[^"]*"/g, ""))).toEqual([
+    const ser = new XMLSerializer();
+    expect(Array.from(dom(q.html).body.children).map((e) => ser.serializeToString(e).replace(/ xmlns="[^"]*"/g, ""))).toEqual([
       "<p>Hello <b>there</b></p>",
     ]);
   });
