@@ -109,21 +109,23 @@ describe("the toolbar as a widget", () => {
     m = await mountEditor("");
     const bar = m.host.querySelector('[role="toolbar"]') as HTMLElement;
     expect(bar.getAttribute("aria-label")).toBe("Text formatting");
-    const tools = Array.from(bar.querySelectorAll<HTMLButtonElement>("button"));
-    expect(tools).toHaveLength(7);
-    expect(tools.map((b) => b.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+    // Buttons and the two selects are one roving group.
+    const tools = Array.from(bar.querySelectorAll<HTMLElement>(".editor-tool"));
+    const n = tools.length;
+    expect(n).toBe(21);
+    expect(tools.map((b) => b.tabIndex)).toEqual([0, ...Array(n - 1).fill(-1)]);
     tools[0]!.focus();
     await act(async () => {
       tools[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
     });
-    expect(tools.map((b) => b.tabIndex)).toEqual([-1, 0, -1, -1, -1, -1, -1]);
+    expect(tools.map((b) => b.tabIndex)).toEqual([-1, 0, ...Array(n - 2).fill(-1)]);
     expect(document.activeElement).toBe(tools[1]);
     await act(async () => {
       tools[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
     });
-    expect(document.activeElement).toBe(tools[6]);
+    expect(document.activeElement).toBe(tools[n - 1]);
     await act(async () => {
-      tools[6]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+      tools[n - 1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
     });
     expect(document.activeElement).toBe(tools[0]); // wraps
   });

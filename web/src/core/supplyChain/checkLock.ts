@@ -15,10 +15,14 @@
 //
 // Pure functions over the parsed lockfile, so the test can feed them violations.
 
-/** `@tiptap/*` packages the build may contain. Beta 1 uses core, pm, react,
- * starter-kit, extension-image and extension-file-handler directly; the rest are
- * what starter-kit and react bring with them. Betas 2 and 3 add their packages
- * (table, text-style, highlight, ...) here when they land. */
+/** `@tiptap/*` packages the build may contain. Used directly: core, pm, react,
+ * starter-kit, extension-image and extension-file-handler (beta 1), and, from
+ * beta 2, extension-text-style (colour, background colour, font family and size;
+ * background colour is used instead of extension-highlight, which would add a
+ * package and write `<mark>` where mail clients expect a styled span),
+ * extension-subscript and extension-superscript (the `<sub>` and `<sup>` marks).
+ * The rest are what starter-kit and react bring with them. Beta 3 adds its table
+ * package here when it lands. */
 export const ALLOWED_TIPTAP: readonly string[] = [
   "@tiptap/core",
   "@tiptap/pm",
@@ -48,6 +52,8 @@ export const ALLOWED_TIPTAP: readonly string[] = [
   "@tiptap/extension-ordered-list",
   "@tiptap/extension-paragraph",
   "@tiptap/extension-strike",
+  "@tiptap/extension-subscript",
+  "@tiptap/extension-superscript",
   "@tiptap/extension-text",
   "@tiptap/extension-text-style",
   "@tiptap/extension-underline",

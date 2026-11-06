@@ -82,6 +82,28 @@ const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 30));
 
 const DANGEROUS = "script, style, iframe, object, embed, form, input, textarea, select, button, svg, math, meta, link, base, frame, video, audio, source";
 
+const OWN_DECLARATIONS: Record<string, RegExp> = {
+  color: /^(#[0-9a-f]{6}|rgb\(\d{1,3}, \d{1,3}, \d{1,3}\))$/,
+  "background-color": /^(#[0-9a-f]{6}|rgb\(\d{1,3}, \d{1,3}, \d{1,3}\))$/,
+  "font-family": /^(Arial, Helvetica, sans-serif|Georgia, ["']Times New Roman["'], serif|["']Courier New["'], Courier, monospace|Verdana, Geneva, sans-serif)$/,
+  "font-size": /^(12|18|24)px$/,
+  "margin-left": /^(2|4|6|8|10|12)em$/,
+};
+
+/** A style attribute on a span or paragraph holds only the editor's own
+ * declarations, each with a value from its list or canonical form. */
+function assertOwnStyle(el: Element, value: string, where: string): void {
+  expect(["SPAN", "P"], `${where}: style on ${el.tagName}`).toContain(el.tagName);
+  for (const decl of value.split(";").map((d) => d.trim()).filter(Boolean)) {
+    const i = decl.indexOf(":");
+    const prop = decl.slice(0, i).trim();
+    const val = decl.slice(i + 1).trim();
+    const re = OWN_DECLARATIONS[prop];
+    expect(re, `${where}: style property ${prop}`).toBeDefined();
+    expect(val, `${where}: ${prop} value`).toMatch(re!);
+  }
+}
+
 /** Everything that must not be in a document the editor produced. */
 function assertClean(root: ParentNode, where: string): void {
   expect(root.querySelectorAll(DANGEROUS).length, `${where}: dangerous element`).toBe(0);
@@ -94,8 +116,11 @@ function assertClean(root: ParentNode, where: string): void {
       }
       expect(attr.name.startsWith("on"), `${where}: ${el.tagName} has ${attr.name}`).toBe(false);
       if (attr.name === "style") {
-        expect(el.tagName, `${where}: style on ${el.tagName}`).toBe("IMG");
-        expect(attr.value).toMatch(/^max-width:\s*100%;?$/);
+        // Images carry the fixed one; spans and paragraphs only the style marks'
+        // own declarations, each in a form written out here independently of the
+        // production gate (so loosening the gate cannot loosen this check too).
+        if (el.tagName === "IMG") expect(attr.value).toMatch(/^max-width:\s*100%;?$/);
+        else assertOwnStyle(el, attr.value, where);
       }
       if (attr.name === "href") {
         expect(attr.value, `${where}: href`).toMatch(/^(https?:|mailto:)/i);
@@ -330,5 +355,118 @@ describe("a paste during IME composition", () => {
     const ev = await paste(m, { html: "<p>pasted</p>", text: "pasted" });
     expect(m.html()).toContain("pasted");
     expect(ev.defaultPrevented).toBe(true); // ProseMirror cancelled the native paste itself
+  });
+});
+
+// ---- pasted styles (ADR-051 beta 2) ---------------------------------------
+//
+// Colour, highlight, font family, font size and indent are values copied from
+// markup the user pasted. Each hostile one must leave the TEXT and lose the VALUE:
+// absent from getHTML(), absent from the live DOM's style attributes, and the
+// mark not applied at all (no empty span, no stray style). The values are built
+// from parts where a literal would trip the source scans.
+
+const EVIL = "https://evil.example/x";
+// (Assembled: the token check scans .tsx for var(--name) uses.)
+const VAR_X = ["var", "(--x)"].join("");
+
+interface StyleCase {
+  name: string;
+  html: string;
+  /** Text that must survive. */
+  text: string;
+  /** Substrings that must be in neither getHTML() nor any live style attribute. */
+  absent: string[];
+}
+
+const STYLE_CASES: StyleCase[] = [
+  { name: "url() in background, with a named colour", html: `<p><span style="color:red;background:url(${EVIL})">kept one</span></p>`, text: "kept one", absent: ["evil.example", "url(", "red", "background"] },
+  { name: "src: url() beside a font-family not on the list", html: `<p><span style="font-family:'x';src:url(${EVIL})">kept two</span></p>`, text: "kept two", absent: ["evil.example", "url(", "src", "'x'"] },
+  { name: "font-size 999px", html: `<p><span style="font-size:999px">kept three</span></p>`, text: "kept three", absent: ["999"] },
+  { name: "negative margin-left", html: `<p style="margin-left:-9999px">kept four</p>`, text: "kept four", absent: ["9999", "margin"] },
+  { name: "expression()", html: `<p><span style="color: expression(alert(1))">kept five</span></p>`, text: "kept five", absent: ["expression", "alert"] },
+  { name: "var()", html: `<p><span style="color:${VAR_X}">kept six</span></p>`, text: "kept six", absent: ["var(", "--x"] },
+  { name: "a CSS-escaped url in a background colour", html: `<p><span style="background-color:\\75 rl(${EVIL})">kept seven</span></p>`, text: "kept seven", absent: ["evil.example", "\\75", "rl(", "url"] },
+  { name: "a CSS-escaped colour name", html: `<p><span style="color:\\72 ed">kept eight</span></p>`, text: "kept eight", absent: ["\\72", "red", "color"] },
+  { name: "a font list that is not ours", html: `<p><span style="font-family:Comic Sans MS, cursive">kept nine</span></p>`, text: "kept nine", absent: ["Comic", "cursive"] },
+  { name: "!important", html: `<p><span style="color:#336699 !important">kept ten</span></p>`, text: "kept ten", absent: ["important", "336699", "51, 102, 153"] },
+  { name: "a comment inside a value", html: `<p><span style="color:#33/**/6699">kept eleven</span></p>`, text: "kept eleven", absent: ["/*", "6699", "51, 102, 153"] },
+  { name: "@import in the declaration list", html: `<p><span style="@import url('${EVIL}');font-size:24px">kept twelve</span></p>`, text: "kept twelve", absent: ["evil.example", "@import", "url("] },
+  { name: "odd units (em, rem, calc)", html: `<p><span style="font-size:1.5em">a</span><span style="font-size:calc(10px + 2px)">b</span><span style="font-size:2rem">c</span> kept thirteen</p>`, text: "kept thirteen", absent: ["1.5em", "calc", "2rem"] },
+  { name: "rgba and hsl colours (not canonical)", html: `<p><span style="color:rgba(1,2,3,0.5)">a</span><span style="color:hsl(0,0%,0%)">b</span> kept fourteen</p>`, text: "kept fourteen", absent: ["rgba", "hsl"] },
+  { name: "properties the editor has no mark for (position, display)", html: `<div style="position:fixed;display:none;margin-left:2em;top:0">kept fifteen</div>`, text: "kept fifteen", absent: ["position", "display", "top"] },
+  { name: "a style on a list item and a quote", html: `<ul><li style="background:url(${EVIL})"><p>kept sixteen</p></li></ul><blockquote style="color:red;background:url(${EVIL})">kept seventeen</blockquote>`, text: "kept seventeen", absent: ["evil.example", "url("] },
+  { name: "margin-left written as a shorthand with a url", html: `<p style="margin:0 0 0 2em;background:url(${EVIL})">kept eighteen</p>`, text: "kept eighteen", absent: ["evil.example", "url(", "margin"] },
+];
+
+describe("hostile styles in pasted HTML: the value goes, the text stays", () => {
+  for (const c of STYLE_CASES) {
+    it(`${c.name}`, async () => {
+      m = await mountEditor("<p>draft</p>");
+      await paste(m, { html: c.html, text: c.text });
+      fireEverything(m.surface);
+      await settle();
+
+      expect(pwned()).toBe(false);
+      expect(m.surface.textContent, "the text survived").toContain(c.text);
+      assertClean(m.surface, "live editor");
+      assertClean(inert(m.html()).body, "getHTML");
+
+      // Absent from the serialized document AND from every live style attribute.
+      const html = m.html();
+      const liveStyles = Array.from(m.surface.querySelectorAll("[style]")).map((e) => e.getAttribute("style") ?? "");
+      for (const bad of c.absent) {
+        expect(html, `getHTML holds ${bad}`).not.toContain(bad);
+        for (const st of liveStyles) expect(st, `a live style holds ${bad}`).not.toContain(bad);
+      }
+      // The mark was NOT applied: no style attribute anywhere except where a
+      // listed value was also pasted (those cases are marked by their own tests).
+      if (!/font-size:24px|margin-left:2em/.test(c.html)) {
+        expect(liveStyles, "no style attribute at all").toEqual([]);
+        expect(html).not.toContain("style=");
+      }
+      expect(html).not.toMatch(/<span>/); // and no empty span left behind
+    });
+  }
+
+  it("control: a listed value pasted beside a hostile one is kept (the suite is not passing because everything is dropped)", async () => {
+    m = await mountEditor("");
+    await paste(m, {
+      html: `<p><span style="color:#336699;background:url(${EVIL});font-size:18px;font-family:Verdana, Geneva, sans-serif">kept</span></p><p style="margin-left:4em">indented</p>`,
+    });
+    const html = m.html();
+    expect(html).toContain("51, 102, 153");
+    expect(html).toContain("18px");
+    expect(html).toContain("Verdana, Geneva, sans-serif");
+    expect(html).toContain("margin-left: 4em");
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("url(");
+    assertClean(m.surface, "live editor");
+  });
+
+  it("the style check can fail (negative control): a live span with a url background, a named colour or a foreign property is rejected", () => {
+    for (const style of [`background:url(${EVIL})`, "color:red", "position:fixed", "font-size:999px", "margin-left:-9999px", "font-family:x"]) {
+      const box = document.createElement("div");
+      box.appendChild(live(box, `<span style="${style}">x</span>`));
+      expect(() => assertClean(box, "control"), style).toThrow();
+    }
+    // ...and accepts our own forms.
+    const ok = document.createElement("div");
+    ok.appendChild(live(ok, `<span style="color: rgb(1, 2, 3); font-size: 18px">x</span><p style="margin-left: 4em">y</p>`));
+    expect(() => assertClean(ok, "control")).not.toThrow();
+  });
+
+  it("insertContent, setContent and the seed apply the same gate as paste", async () => {
+    const hostile = `<p><span style="color:red;background:url(${EVIL});font-size:999px">t</span></p>`;
+    m = await mountEditor(hostile);
+    expect(m.html()).toBe("<p>t</p>");
+    await act(async () => {
+      m!.editor.commands.insertContent(hostile);
+    });
+    expect(m.html()).not.toMatch(/evil|url\(|999|style/);
+    await act(async () => {
+      m!.editor.commands.setContent(hostile);
+    });
+    expect(m.html()).toBe("<p>t</p>");
   });
 });

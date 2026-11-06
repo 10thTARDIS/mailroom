@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// The editor's schema and behaviour (ADR-051). Beta 1 keeps exactly the features
+// The editor's schema and behaviour (ADR-051). Beta 1 kept exactly the features
 // the execCommand editor had (bold, italic, underline, two kinds of list, links,
-// inline pictures) plus the block quote a reply quote needs; everything else
-// StarterKit ships is switched off, so the schema, and therefore what a paste can
-// become, is no wider than what the toolbar offers. Beta 2 turns more on.
+// inline pictures) plus the block quote a reply quote needs. Beta 2 adds the new
+// formatting: strike-through, subscript, superscript, inline code, code blocks,
+// text and highlight colour, font family and size (each only from the fixed
+// lists in ./styleValues.ts) and paragraph indentation. Everything else
+// StarterKit ships stays switched off (headings, rules, gap cursor), so the schema,
+// and therefore what a paste can become, is no wider than what the toolbar offers.
 
 import { Extension } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import Image from "@tiptap/extension-image";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
 import StarterKit from "@tiptap/starter-kit";
 import type { EditorProps } from "@tiptap/pm/view";
+import { Indent } from "./indent";
 import { countDroppedImages } from "./paste";
+import { TEXT_STYLE_EXTENSIONS } from "./textStyles";
 import { isAllowedLinkUri, isInlineImageSrc } from "./uri";
 
 /** The only inline style an image carries. It is a constant, never read from
@@ -58,9 +65,10 @@ export function buildExtensions(hooks: EditorHooks) {
   return [
     Kit.configure({
       heading: false,
-      code: false,
-      codeBlock: false,
-      strike: false,
+      // A code block keeps its text and nothing else: no `language-` class is
+      // read from pasted markup or written back (the output is inline styles
+      // only, no classes).
+      codeBlock: { languageClassPrefix: null },
       horizontalRule: false,
       gapcursor: false,
       trailingNode: false,
@@ -77,6 +85,10 @@ export function buildExtensions(hooks: EditorHooks) {
         HTMLAttributes: { target: null, rel: null, class: null },
       },
     }),
+    Subscript,
+    Superscript,
+    ...TEXT_STYLE_EXTENSIONS,
+    Indent,
     Image.extend({
       // EVERY parse path (paste, drop, the seed, insertContent) goes through this
       // rule, so a picture that is not inline is refused wherever it came from, not
@@ -156,11 +168,12 @@ export function buildEditorProps(
         event.preventDefault();
         return true;
       },
-      // Tab leaves the editor, as it did when this was a plain contentEditable.
-      // (The list-item extension would otherwise take Tab to indent; indenting
-      // arrives with the new formatting in beta 2.) Returning true tells
-      // ProseMirror not to handle the key; it does NOT cancel it, so the browser
-      // moves focus.
+      // Tab leaves the editor, as it did when this was a plain contentEditable
+      // (operator decision, ADR-051 beta 2): the body never traps the keyboard.
+      // The list-item extension would otherwise take Tab to nest an item; nesting
+      // is on Mod-] and Mod-[ and the toolbar instead (./indent.ts). Returning true
+      // tells ProseMirror not to handle the key; it does NOT cancel it, so the
+      // browser moves focus.
       keydown: (_view, event) => event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey,
     },
   };

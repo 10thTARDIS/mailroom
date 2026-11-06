@@ -1,0 +1,245 @@
+[
+  {
+    "name": "strike-through",
+    "html": "<p><s>sample</s></p>",
+    "expect": [
+      {
+        "tag": "s"
+      }
+    ]
+  },
+  {
+    "name": "subscript",
+    "html": "<p><sub>sample</sub></p>",
+    "expect": [
+      {
+        "tag": "sub"
+      }
+    ]
+  },
+  {
+    "name": "superscript",
+    "html": "<p><sup>sample</sup></p>",
+    "expect": [
+      {
+        "tag": "sup"
+      }
+    ]
+  },
+  {
+    "name": "inline code",
+    "html": "<p><code>sample</code></p>",
+    "expect": [
+      {
+        "tag": "code"
+      }
+    ]
+  },
+  {
+    "name": "code block",
+    "html": "<pre><code>line one</code></pre>",
+    "expect": [
+      {
+        "tag": "code",
+        "within": "pre"
+      }
+    ]
+  },
+  {
+    "name": "block quote",
+    "html": "<blockquote><p>sample</p></blockquote>",
+    "expect": [
+      {
+        "tag": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "text colour",
+    "html": "<p><span style=\"color: rgb(204, 0, 0);\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(204, 0, 0)"
+        }
+      }
+    ]
+  },
+  {
+    "name": "highlight colour",
+    "html": "<p><span style=\"background-color: rgb(255, 255, 0);\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "background-color": "rgb(255, 255, 0)"
+        }
+      }
+    ]
+  },
+  {
+    "name": "font Sans-serif",
+    "html": "<p><span style=\"font-family: Arial, Helvetica, sans-serif;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Arial, Helvetica, sans-serif"
+        }
+      }
+    ]
+  },
+  {
+    "name": "font Serif",
+    "html": "<p><span style=\"font-family: Georgia, &quot;Times New Roman&quot;, serif;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Georgia, \"Times New Roman\", serif"
+        }
+      }
+    ]
+  },
+  {
+    "name": "font Monospace",
+    "html": "<p><span style=\"font-family: &quot;Courier New&quot;, Courier, monospace;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "\"Courier New\", Courier, monospace"
+        }
+      }
+    ]
+  },
+  {
+    "name": "font Wide",
+    "html": "<p><span style=\"font-family: Verdana, Geneva, sans-serif;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Verdana, Geneva, sans-serif"
+        }
+      }
+    ]
+  },
+  {
+    "name": "size Small",
+    "html": "<p><span style=\"font-size: 12px;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "12px"
+        }
+      }
+    ]
+  },
+  {
+    "name": "size Large",
+    "html": "<p><span style=\"font-size: 18px;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "18px"
+        }
+      }
+    ]
+  },
+  {
+    "name": "size Huge",
+    "html": "<p><span style=\"font-size: 24px;\">sample</span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "24px"
+        }
+      }
+    ]
+  },
+  {
+    "name": "paragraph indent, two levels",
+    "html": "<p style=\"margin-left: 4em;\">sample</p>",
+    "expect": [
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "4em"
+        }
+      }
+    ]
+  },
+  {
+    "name": "deepest paragraph indent",
+    "html": "<p style=\"margin-left: 12em;\">sample</p>",
+    "expect": [
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "12em"
+        }
+      }
+    ]
+  },
+  {
+    "name": "nested list",
+    "html": "<ul><li><p>one</p><ul><li><p>two</p></li></ul></li></ul>",
+    "expect": [
+      {
+        "tag": "ul",
+        "within": "li"
+      }
+    ]
+  },
+  {
+    "name": "everything on one span, indent and strike on its paragraph",
+    "html": "<p style=\"margin-left: 2em;\"><span style=\"color: rgb(11, 46, 107); background-color: rgb(182, 215, 168); font-family: Verdana, Geneva, sans-serif; font-size: 18px;\"><s>sample</s></span></p>",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(11, 46, 107)",
+          "background-color": "rgb(182, 215, 168)",
+          "font-family": "Verdana, Geneva, sans-serif",
+          "font-size": "18px"
+        }
+      },
+      {
+        "tag": "s"
+      },
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "2em"
+        }
+      }
+    ]
+  },
+  {
+    "name": "a quote holding an indented, coloured paragraph",
+    "html": "<blockquote><p style=\"margin-left: 2em;\"><span style=\"color: rgb(103, 78, 167);\">quoted</span></p></blockquote>",
+    "expect": [
+      {
+        "tag": "blockquote"
+      },
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "2em"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(103, 78, 167)"
+        }
+      }
+    ]
+  }
+]

@@ -1253,6 +1253,39 @@ const SURFACES = [
     },
   },
   {
+    // THE COMPOSER'S COLOUR PALETTES AND FONT LIST (ADR-051 beta 2). Each is the
+    // formatting bar with one control IN USE: the palette is a row of named
+    // swatches that exists only while open, and the font select is focused (a
+    // native list is drawn by the browser, outside the DOM axe reads). The
+    // plain "compose" surface above has them CLOSED, so on its own it would pass
+    // for a palette that violated every rule.
+    name: "compose-text-colour-palette",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.click('section.compose button[aria-label="Text colour"]');
+        await waitForSelectorD(page, 'section.compose .editor-palette[role="group"] button.editor-swatch', { timeout: 30000 });
+      });
+    },
+  },
+  {
+    name: "compose-highlight-palette",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.click('section.compose button[aria-label="Highlight colour"]');
+        await waitForSelectorD(page, 'section.compose .editor-palette[role="group"] button.editor-swatch', { timeout: 30000 });
+      });
+    },
+  },
+  {
+    name: "compose-font-select-focused",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await page.focus('section.compose select[aria-label="Font"]');
+        await waitForSelectorD(page, 'section.compose select[aria-label="Font"]:focus', { timeout: 30000 });
+      });
+    },
+  },
+  {
     // A COMPOSER REACHED BY RELOAD (#612). The surface above opens the composer
     // with a keypress on a page whose session is long established — the warm
     // path — and it stayed green for the whole time a RELOAD onto a composer URL
@@ -5520,9 +5553,16 @@ function phoneWidthProbe(limit) {
   //     non-empty aria-label): a screen-reader user must know what the block is
   //     before they reach it.
   // The OUTSIDE check is NOT waived: the box itself must still fit the screen.
+  //   * A TOOLBAR (role="toolbar", the composer's formatting bar, ADR-051) is the
+  //     one other shape: it scrolls sideways at a phone's width on purpose, and its
+  //     keyboard route is its own items, not a tab stop of the container (which
+  //     would be a second stop in front of the roving one). So instead of its own
+  //     tabindex it must hold the roving stop (a descendant with tabindex 0), and
+  //     it must be named like the rest.
   const intentionalScroller = (el) => {
     if (el.getAttribute("data-scroll-x") !== "intentional") return false;
-    if (!(el.tabIndex >= 0)) return false;
+    const toolbar = el.getAttribute("role") === "toolbar" && !!el.querySelector('[tabindex="0"]');
+    if (!(el.tabIndex >= 0) && !toolbar) return false;
     const labelledby = el.getAttribute("aria-labelledby");
     if (labelledby) {
       const named = labelledby
@@ -5573,6 +5613,18 @@ function phoneWidthProbe(limit) {
     offenders.push(describe(el, "OUTSIDE"));
   }
   return { iw: window.innerWidth, scrollWidth: document.documentElement.scrollWidth, offenders };
+}
+
+/** Opens the composer the way the "compose" surface does, then runs `use` (opens
+ * a palette, focuses a select). One place, so the beta-2 surfaces cannot drift from
+ * the surface they extend. */
+async function openComposeWith(page, use) {
+  await load(page, "#/inbox/review");
+  await waitForDesk(page);
+  await page.keyboard.press("c");
+  await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+  await waitForEditor(page);
+  await use();
 }
 
 /**
@@ -5724,8 +5776,20 @@ async function composerEditorSurfaces(page, cdp) {
     const root = document.querySelector("section.compose .editor-surface");
     const bad = root.querySelectorAll("script, style, iframe, object, embed, form, input, svg, meta, link, img:not(.ProseMirror-separator)");
     const attrs = [];
+    // A style attribute is allowed on a span or a paragraph, and only as the editor
+    // writes it: a colour, a family or size from the lists, or a margin-left in em.
+    // (Written out here, not read from the app, so a loosened gate cannot loosen
+    // this check with it.)
+    const OWN = /^(?:(?:color|background-color): (?:#[0-9a-f]{6}|rgb\(\d{1,3}, \d{1,3}, \d{1,3}\))|font-family: (?:Arial, Helvetica, sans-serif|Georgia, ["']Times New Roman["'], serif|["']Courier New["'], Courier, monospace|Verdana, Geneva, sans-serif)|font-size: (?:12|18|24)px|margin-left: (?:2|4|6|8|10|12)em)$/;
     root.querySelectorAll("*").forEach((el) => {
-      for (const a of el.attributes) if (a.name.startsWith("on") || (a.name === "style")) attrs.push(el.tagName + "[" + a.name + "]");
+      for (const a of el.attributes) {
+        if (a.name.startsWith("on")) attrs.push(el.tagName + "[" + a.name + "]");
+        else if (a.name === "style" && el.tagName !== "IMG") {
+          const ok = (el.tagName === "SPAN" || el.tagName === "P") &&
+            a.value.split(";").map((d) => d.trim()).filter(Boolean).every((d) => OWN.test(d));
+          if (!ok) attrs.push(el.tagName + "[style=" + a.value + "]");
+        } else if (a.name === "style") attrs.push(el.tagName + "[" + a.name + "]");
+      }
     });
     const hrefs = [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"));
     return {
@@ -5752,6 +5816,61 @@ async function composerEditorSurfaces(page, cdp) {
   if (requested.length) fail("the paste caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
   const afterPaste = await page.evaluate(() => window.__cspViolations.slice());
   if (afterPaste.length) fail("CSP violations after the paste: " + JSON.stringify(afterPaste));
+
+  // ---- pasted STYLES in the real parser (ADR-051 beta 2) -----------------------
+  // Colour, highlight, family, size and indent now travel. A listed value is kept
+  // (so this cannot pass by dropping everything); a url(), a size off the list and a
+  // negative margin are not, and the words stay.
+  await pasteHtml(
+    // (A leading plain paragraph: the first block of a paste merges into the
+    // paragraph the cursor is in, and takes that paragraph's attributes, not its own.)
+    '<p>lead words</p><p style="margin-left:4em">indented words</p>' +
+      '<p><span style="color:#336699;background:url(https://' + PAYLOAD_HOST + '/s)">blue words</span> ' +
+      '<span style="font-size:999px;font-family:x;src:url(https://' + PAYLOAD_HOST + '/f)">plain words</span> ' +
+      '<span style="color:expression(window.__pwned=1)">expr words</span></p>' +
+      '<p style="margin-left:-9999px">negative words</p>',
+    "styled fallback",
+  );
+  await sleep(1000);
+  const styled = await page.evaluate(() => {
+    const root = document.querySelector("section.compose .editor-surface");
+    const styles = [...root.querySelectorAll("[style]")].filter((e) => e.tagName !== "IMG").map((e) => e.tagName + ":" + e.getAttribute("style"));
+    return { pwned: window.__pwned === 1, styles, html: root.innerHTML, text: root.textContent };
+  });
+  if (styled.pwned) fail("a pasted style expression RAN");
+  for (const w of ["indented words", "blue words", "plain words", "expr words", "negative words"]) {
+    if (styled.text.indexOf(w) < 0) fail("the pasted styled text was lost: " + w);
+  }
+  if (!styled.styles.some((x) => /^SPAN:color: rgb\(51, 102, 153\)/.test(x))) fail("a listed colour was not kept: " + JSON.stringify(styled.styles));
+  if (!styled.styles.some((x) => /^P:margin-left: 4em/.test(x))) fail("a listed indent was not kept: " + JSON.stringify(styled.styles));
+  if (/url\(|999|expression|-9999|evil\.example|font-family: x/.test(styled.styles.join("|"))) fail("a hostile style value survived the paste: " + JSON.stringify(styled.styles));
+  if (requested.length) fail("the styled paste caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
+
+  // ---- the toolbar applies formatting in a real browser --------------------------
+  // The palette, the selects and the focus handoff all depend on a real selection
+  // and real events, which jsdom only approximates: select the whole body, choose
+  // Red from the palette, a size from the list and a family from the list.
+  await page.evaluate(() => document.querySelector("section.compose .editor-surface").focus());
+  await page.keyboard.down("Control");
+  await page.keyboard.press("a");
+  await page.keyboard.up("Control");
+  await page.click('section.compose button[aria-label="Text colour"]');
+  await waitForSelectorD(page, 'section.compose .editor-palette button[aria-label="Red"]', { timeout: 10000 });
+  await page.click('section.compose .editor-palette button[aria-label="Red"]');
+  await until("the palette closed and focus returned to the body", 10000, () =>
+    page.evaluate(() => !document.querySelector("section.compose .editor-palette") && document.activeElement && document.activeElement.classList.contains("editor-surface")),
+  33);
+  await page.select('section.compose select[aria-label="Font size"]', "18px");
+  await page.select('section.compose select[aria-label="Font"]', "Georgia, 'Times New Roman', serif");
+  const toolbarApplied = await page.evaluate(() => {
+    const root = document.querySelector("section.compose .editor-surface");
+    return [...root.querySelectorAll("span[style]")].map((e) => e.getAttribute("style"));
+  });
+  if (!toolbarApplied.some((x) => /color: (?:rgb\(204, 0, 0\)|#cc0000)/.test(x) && /font-size: 18px/.test(x) && /font-family: Georgia/.test(x))) {
+    fail("the toolbar's colour, size and family did not reach the document: " + JSON.stringify(toolbarApplied));
+  }
+  const afterToolbar = await page.evaluate(() => window.__cspViolations.slice());
+  if (afterToolbar.length) fail("CSP violations after styled paste and toolbar use: " + JSON.stringify(afterToolbar));
 
   // ---- the request listener is live: a picture put into the page must be seen --
   // "No request went to the payload host" is only evidence if this listener would
@@ -5798,6 +5917,11 @@ async function composerEditorSurfaces(page, cdp) {
       const submit = document.querySelector('section.compose button[type="submit"]');
       const cr = r(compose), sr = r(surface), tr = r(toolbar), br = r(submit);
       const cs = getComputedStyle(surface);
+      // What sits under the body, measured so a change in the body's height can be
+      // traced to the thing that moved (the save-state line wrapping was one).
+      const actions = r(document.querySelector("section.compose .compose-actions"));
+      const state = document.querySelector("section.compose .compose-save-state");
+      const stateBox = r(state);
       const hit = (el) => {
         const b = r(el);
         const x = b.left + b.width / 2, y = b.top + b.height / 2;
@@ -5806,6 +5930,15 @@ async function composerEditorSurfaces(page, cdp) {
       };
       return {
         compose: cr && cr.height,
+        actionsH: actions && actions.height,
+        toolbarH: toolbar ? r(toolbar).height : null,
+        stateH: stateBox && stateBox.height,
+        stateText: state && state.textContent,
+        // Every block of the form, by class: the one whose height moved is the
+        // reason the body's did.
+        parts: [...document.querySelectorAll("section.compose .compose-form > *")].map(
+          (el) => (el.className && String(el.className).split(" ")[0]) + ":" + Math.round(el.getBoundingClientRect().height * 10) / 10,
+        ),
         surfaceH: sr && sr.height,
         scrollH: surface.scrollHeight,
         clientH: surface.clientHeight,
@@ -5817,7 +5950,59 @@ async function composerEditorSurfaces(page, cdp) {
         view: window.innerWidth + "x" + window.innerHeight,
       };
     });
+  // THE LINE UNDER THE BODY MUST NOT CHANGE THE BODY (#83). The autosave line's
+  // text changes with the save state, and at a phone's width a longer text used to
+  // wrap onto a second line, make the action row taller and take the difference
+  // from the body: a 42 px shrink that showed up only when a save finished between
+  // two measurements, so it passed or failed with the timing. The text is set to
+  // each state's words directly (the span's one text node, so React's own updates
+  // still apply), and the body and the row must keep their heights across all of
+  // them. Returns the largest change seen.
+  const statusSpread = async () =>
+    page.evaluate(() => {
+      const state = document.querySelector("section.compose .compose-save-state");
+      const surface = document.querySelector("section.compose .editor-surface, section.compose textarea.editor-plain");
+      const actions = document.querySelector("section.compose .compose-actions");
+      const node = state.firstChild;
+      const original = node.nodeValue;
+      const texts = [original, "Not saved yet", "Saving…", "Saved a moment ago", "Not saved · " + "the server did not answer in time ".repeat(3)];
+      const surfaceHs = [], actionHs = [];
+      for (const t of texts) {
+        node.nodeValue = t;
+        surfaceHs.push(surface.getBoundingClientRect().height);
+        actionHs.push(actions.getBoundingClientRect().height);
+      }
+      node.nodeValue = original;
+      const spread = (a) => Math.max(...a) - Math.min(...a);
+      return { surface: spread(surfaceHs), actions: spread(actionHs), surfaceHs, actionHs };
+    });
+  // The composer fills in over its first second or two: the send line and the
+  // encryption note change as recipient keys are looked up, and each can change
+  // height. That is the composer settling, not the body reacting to its content,
+  // so the measurement starts when every block of the form has held one height for
+  // a full second. (A composer that never settles is a failure of its own.)
+  const settleLayout = async (where) => {
+    let last = "";
+    let since = Date.now();
+    const start = Date.now();
+    for (;;) {
+      const now = await page.evaluate(() =>
+        JSON.stringify([...document.querySelectorAll("section.compose .compose-form > *, section.compose .editor-toolbar, section.compose .editor-surface, section.compose textarea.editor-plain")].map((el) => Math.round(el.getBoundingClientRect().height * 10))),
+      );
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+      } else if (Date.now() - since >= 1000) return;
+      if (Date.now() - start > 20000) fail(where + ": the composer's layout never settled: " + last);
+      await sleep(100);
+    }
+  };
   const bodyCheck = async (label) => {
+    await settleLayout(label);
+    const steady = await statusSpread();
+    if (steady.surface > 1 || steady.actions > 1) {
+      fail(label + " (" + (await page.evaluate(() => window.innerWidth + "x" + window.innerHeight)) + "): the save-state text changes the layout under the body: " + JSON.stringify(steady));
+    }
     const before = await measure();
     // Put 150 lines in: rich by pasting HTML, plain by setting the value through
     // the native setter and an input event, as typing would.
@@ -5835,7 +6020,10 @@ async function composerEditorSurfaces(page, cdp) {
     const after = await measure();
     const where = label + " (" + after.view + ")";
     if (Math.abs(after.surfaceH - before.surfaceH) > 1 || Math.abs(after.compose - before.compose) > 1) {
-      fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose + ")");
+      fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose +
+        "; blocks before " + JSON.stringify(before.parts) + " after " + JSON.stringify(after.parts) +
+        "; toolbar " + before.toolbarH + " -> " + after.toolbarH + "; action row " + before.actionsH + " -> " + after.actionsH + ", save line " + before.stateH + " -> " + after.stateH +
+        " [" + before.stateText + " -> " + after.stateText + "])");
     }
     if (!(after.scrollH > after.clientH + 20)) fail(where + ": the long body does not scroll inside itself (scrollH=" + after.scrollH + " clientH=" + after.clientH + ")");
     if (after.overflowY !== "auto") fail(where + ": the body's overflow-y is " + after.overflowY);
@@ -5907,11 +6095,35 @@ async function composerEditorSurfaces(page, cdp) {
     await sleep(500);
     const after = await measure();
     console.log("composer layout control: surface " + before.surfaceH + " -> " + after.surfaceH);
+    await discardOpenDraft();
     return Math.abs(after.surfaceH - before.surfaceH) > 50;
   });
 
-  // ---- leave nothing behind: discard the fixture draft ----------------------
-  await discardOpenDraft();
+  // The stability check above can fail: with the status line allowed to wrap
+  // (the rule it replaced, forced narrow so the effect is certain), changing its
+  // text changes the row's height, and the check must see it.
+  await control("composer-status-wrap", async () => {
+    const viewport = page.viewport();
+    await page.setViewport({ width: 360, height: 740, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+    await openDraft();
+    await page.evaluate(() => {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync("section.compose .compose-save-state { flex: 0 0 100% !important; overflow: visible !important; white-space: normal !important; text-overflow: clip !important; max-width: 7ch !important; }");
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    });
+    const spread = await statusSpread();
+    console.log("composer status control: " + JSON.stringify(spread));
+    // Discard the draft BEFORE leaving the phone viewport: puppeteer reloads the
+    // page when setViewport changes isMobile/hasTouch, and a Discard clicked into
+    // that reload failed the lane intermittently ("Page closed!"). Then reload
+    // explicitly, as the landscape check does, so nothing races the next surface.
+    await discardOpenDraft();
+    await page.setViewport(viewport);
+    await load(page, "#/inbox/review");
+    await waitForDesk(page);
+    return spread.actions > 1;
+  });
+
   page.off("request", onRequest);
   tally.composerEditor = 1;
 }

@@ -1531,6 +1531,10 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .editor-toolbar {
   display: flex;
+  /* Never squeezed by the body: a scroll container (the narrow-screen rule below)
+     has no automatic minimum height, so without this a long body's flex basis took
+     the difference out of the toolbar. */
+  flex: none;
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px;
@@ -1550,6 +1554,74 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .editor-tool[data-glyph]::before { content: attr(data-glyph); }
 .editor-tool:hover { background: var(--bg-hover); }
+/* The colour a palette button or swatch shows is set inline, per element. */
+.editor-tool, .editor-swatch { --swatch: transparent; }
+.editor-tool[aria-pressed="true"] { background: var(--bg-hover); border-color: var(--border-strong); }
+.editor-tool[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.editor-tool[aria-disabled="true"]:hover { background: transparent; }
+/* A glyph that stands for a style is drawn in it. */
+.editor-tool[data-tool="strike"]::before { text-decoration: line-through; }
+.editor-tool[data-tool="textColour"]::before,
+.editor-tool[data-tool="highlightColour"]::before { font-weight: 700; }
+.editor-tool[data-tool="textColour"]::after,
+.editor-tool[data-tool="highlightColour"]::after {
+  content: "";
+  display: block;
+  height: 3px;
+  margin-top: 1px;
+  border-radius: 1px;
+  background: var(--swatch, transparent);
+}
+.editor-tool[data-tool="textColour"],
+.editor-tool[data-tool="highlightColour"] { line-height: 1; }
+/* The font and size selects sit in the same roving order as the buttons. */
+.editor-select {
+  min-height: 2rem;
+  max-width: 9.5rem;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+}
+/* The colour palette: a row under the toolbar while a colour button is open. */
+.editor-palette {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sunken);
+}
+.editor-swatch {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--swatch);
+  cursor: pointer;
+}
+.editor-swatch-remove {
+  min-height: 1.75rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+/* A narrow window, or a phone held sideways, has no room for a wrapped toolbar
+   (#83: the body is a fixed size and the toolbar must not eat it). The toolbar is
+   one row that scrolls inside itself; the buttons keep their size. */
+@media (max-width: 720px), (max-height: 520px) {
+  .editor-toolbar { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
+  .editor-toolbar > .editor-tool { flex: none; }
+}
 .editor-body {
   display: flex;
   flex-direction: column;
@@ -1602,6 +1674,22 @@ li.ProseMirror-selectednode::after {
 .editor-surface p { margin: 0 0 0.5em; }
 .editor-surface ul, .editor-surface ol { margin: 0 0 0.5em; padding-inline-start: 1.5em; }
 .editor-surface li > p { margin: 0; }
+.editor-surface code {
+  padding: 0 0.25em;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+.editor-surface pre {
+  margin: 0 0 0.5em;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  overflow-x: auto;
+}
+.editor-surface pre code { padding: 0; background: none; font-size: inherit; }
 .editor-surface:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .editor-surface img { max-width: 100%; height: auto; }
 /* Quoted text is TEXT, not a label, so it is not muted: --fg-muted misses AAA
