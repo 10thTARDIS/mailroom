@@ -173,7 +173,7 @@ Companion to **mailroom-spec.md** (v0.4). Goal: an exhaustive inventory of featu
 | S/MIME encrypt/sign/verify | **[v0.4]** Priced 2–3× PGP (thin Go ecosystem). Decided: deferred to 2.x (ADR-024 §3, 2026-08-05) — no longer an open question | v2 — #10 |
 | WKD publishing (key authority) | Internet-Draft (pin revision); real identities only — catchall aliases unpublishable (spec §9) | shipped (v1.31.0) |
 | Autocrypt headers | Outbound header deliberately sent without `prefer-encrypt=mutual` until decrypt exists | shipped |
-| Shareable key pages (fingerprint/QR) | Partial: fingerprint page implemented (`internal/keypub/page.go`); no QR-code generation found anywhere in the tree | v1.x (partial) — #47 |
+| Shareable key pages (fingerprint/QR) | Fingerprint page (`internal/keypub/page.go`) with an inline-SVG QR code of the `OPENPGP4FPR:` URI generated on the server (`internal/keypub/qr.go`); no script, no external request, page CSP unchanged | **shipped (v1.101.0)** — #47 |
 | DNS OPENPGPKEY publishing | | v3 — #16 |
 | Phishing / homograph-URL warnings | ⚠ LINKS, not senders — the boundary with the row above, stated so this is not built twice or never. That one judges the `From` domain; this one judges URLs in message bodies. They share `internal/senderwarn.Skeleton`, which is exported for exactly that. | v2 — #11 |
 | Biometric unlock (native apps) | | v2 — #12 |

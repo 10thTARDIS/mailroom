@@ -41,6 +41,9 @@ type pageData struct {
 	AdvancedURL string
 	DirectURL   string
 	DownloadURL string
+	// QRSVG is the inline SVG of the fingerprint's OPENPGP4FPR URI, or empty.
+	// Built in qr.go from integers only; never from caller-supplied markup.
+	QRSVG template.HTML
 }
 
 // pageHTML has NO external resource of any kind — no CDN, no web font, no
@@ -59,12 +62,20 @@ const pageHTML = `<!DOCTYPE html>
   .fingerprint{font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:1.05rem;letter-spacing:.03em;background:#f2f2f2;padding:.6rem .8rem;border-radius:.3rem;word-break:break-all}
   .hint{color:#444}
   .urls{font-family:ui-monospace,Consolas,"Courier New",monospace;font-size:.85rem;word-break:break-all;padding-left:1.2rem}
+  .fpr{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start}
+  .fpr .fingerprint{flex:1 1 16em;margin:0}
+  .qrbox{flex:0 0 auto;max-width:10rem;font-size:.8rem}
+  .qrbox p{margin:.3rem 0 0}
+  svg.qr{width:9rem;height:9rem;display:block;border:1px solid #ccc}
   a.download{display:inline-block;margin-top:1rem}
 </style>
 </head>
 <body>
 <h1>OpenPGP key for {{.Address}}</h1>
+<div class="fpr">
 <p class="fingerprint">{{.Fingerprint}}</p>
+{{if .QRSVG}}<div class="qrbox">{{.QRSVG}}<p class="hint">Scan to check the fingerprint in an OpenPGP app.</p></div>{{end}}
+</div>
 <p class="hint">A fingerprint is what you check over a different channel — a phone call, a chat you already trust — to confirm this key really belongs to {{.Address}} before you rely on it.</p>
 <p>A correspondent's mail client will look for this key at, in order:</p>
 <ul class="urls">
@@ -151,6 +162,7 @@ func (s *Service) PageHandler() http.Handler {
 			// client already uses. A relative path also keeps this correct
 			// regardless of what host actually served this page.
 			DownloadURL: directPath,
+			QRSVG:       fingerprintQRSVG(fingerprint),
 		}
 
 		// Render fully into a buffer before touching the response, so a
