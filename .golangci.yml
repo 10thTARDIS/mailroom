@@ -33,6 +33,9 @@ run:
     # internal/sieve/live_test.go (#50): pure Go, no native artifact, so it is
     # linted here even though only scripts/sieve-live-test.sh runs it.
     - sievelive
+    # internal/api/jmapclient_integration_test.go (#33): the third-party JMAP
+    # client run. Pure Go; linted here, run by scripts/jmap-client-test.sh.
+    - jmapclient
 
 linters:
   default: standard

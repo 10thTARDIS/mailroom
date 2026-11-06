@@ -103,8 +103,8 @@ jobs:
       # is wrong is never examined at all. tantivy stays out: it is
       # `tantivy && cgo` and needs the musl static library, which is why it has
       # its own job (see .golangci.yml for the full reasoning).
-      - name: Vet (including the integration, interop and sievelive tags)
-        run: go vet -tags integration,interop,sievelive ./...
+      - name: Vet (including the integration, interop, sievelive and jmapclient tags)
+        run: go vet -tags integration,interop,sievelive,jmapclient ./...
       - name: Unit tests (no database)
         run: go test ./...
       # The restore drill's relevance filter (#306). It decides, on every push,
@@ -353,7 +353,7 @@ jobs:
       # would not appear in the call graph. tantivy is excluded here too — it
       # needs the native library; its own job builds and vets that path.
       - name: Vulnerability scan (including the integration + interop tags)
-        run: PATH="$(go env GOPATH)/bin:$PATH" govulncheck -tags=integration,interop ./...
+        run: PATH="$(go env GOPATH)/bin:$PATH" govulncheck -tags=integration,interop,jmapclient ./...
 
   schema-apply:
     runs-on: ubuntu-latest
@@ -386,6 +386,32 @@ jobs:
       # and host paths don't resolve from in here).
       - name: RLS negative tests + store integration tests
         run: sh scripts/integration-test.sh
+
+  jmap-client:
+    runs-on: ubuntu-latest
+    # Container start-up and a cold module cache, then one package and a few
+    # hundred requests: the test itself takes seconds.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # ⚠ THIS JOB EXISTS SO "THIRD-PARTY JMAP CLIENTS CAN CONNECT" (ADR-002) IS
+      # CHECKED, NOT ASSERTED (#33). Every other test of the JMAP surface is
+      # written by the people who wrote the server, so it agrees with the server
+      # about what the RFC says. This drives rockorager/go-jmap, the library the
+      # aerc mail client is built on, over real HTTP with an API key as a bearer
+      # token: session discovery, Mailbox/Email/Thread reads, filters, sorts,
+      # /changes across a change, and a draft create.
+      #
+      # It passes on today's behaviour. The non-conformances it found are listed
+      # in internal/api/testdata/jmapclient-known-gaps.txt, one step per line with
+      # a reference. A listed step that fails is reported as a known gap; an
+      # UNLISTED step that fails is a regression and turns this job red; a listed
+      # step that starts passing also turns it red, so the list shrinks when a gap
+      # is fixed. It reuses the integration script's throwaway PostgreSQL, narrowed
+      # to one package behind the `jmapclient` build tag, which is the only place
+      # the client library is compiled.
+      - name: Third-party JMAP client against the server
+        run: sh scripts/jmap-client-test.sh
 
   sync-harness:
     runs-on: ubuntu-latest

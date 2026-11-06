@@ -9,6 +9,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Under the hood
+
+- **A real third-party mail client now checks the JMAP interface on every
+  change.** A new CI check connects with an off-the-shelf JMAP client library
+  (the one the aerc mail client is built on), signs in with an API key, and
+  does what a mail client does: discovers the session, lists mailboxes, searches
+  and sorts messages, reads them, follows changes and creates a draft. The places
+  where Mailroom does not yet follow the JMAP standard are written down in one
+  list; the check fails if something else breaks, or if a listed gap is fixed
+  and the list is not updated.
+
 ## [1.101.0-beta.2] — 2026-11-06
 
 **The second beta of v1.101 adds View source and a QR code on the public key page.** You can now see any message exactly as it arrived, and correspondents can scan your key's fingerprint instead of comparing it by eye. It also tightens how web addresses in mail are read, and gives the person who runs Mailroom a report that measures plain-text mail ahead of a reading improvement planned for this release.

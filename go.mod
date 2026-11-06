@@ -5,6 +5,7 @@ module mailroom
 go 1.26.0
 
 require (
+	git.sr.ht/~rockorager/go-jmap v0.5.3
 	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/anyproto/tantivy-go v1.0.6
 	github.com/boombuler/barcode v1.1.0

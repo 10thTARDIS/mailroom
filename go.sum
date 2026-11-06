@@ -1,3 +1,5 @@
+git.sr.ht/~rockorager/go-jmap v0.5.3 h1:PjnobX0ySPHKG5TiUqLM6PlM3ngYHlLJeWLOeorZ7IY=
+git.sr.ht/~rockorager/go-jmap v0.5.3/go.mod h1:aOTCtwpZSINpDDSOkLGpHU0Kbbm5lcSDMcobX3ZtOjY=
 github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
 github.com/ProtonMail/go-crypto v1.5.2/go.mod h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=
 github.com/anyproto/tantivy-go v1.0.6 h1:8FI8otTeq5OFXK7Fw7vwG2vrwW1R1Yvcbiy4rO4YfoQ=
