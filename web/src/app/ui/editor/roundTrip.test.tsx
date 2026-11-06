@@ -15,7 +15,7 @@
 // writer). Each expectation is also checked against the editor's output here, so
 // the file cannot claim something its own HTML does not hold.
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { button, click, mountEditor, press } from "./editorTestkit";
 import type { Mounted } from "./editorTestkit";
@@ -72,7 +72,11 @@ const swatch = async (mm: Mounted, trigger: string, name: string): Promise<void>
   await click(sw);
   // Tiptap returns focus to the editor on the next animation frame; let it land
   // before the next palette opens, or its blur would close that one.
-  await new Promise((r) => setTimeout(r, 40));
+  // Wait for that to happen rather than for a fixed time: a busy machine can take
+  // well over a frame, and a fixed sleep made this test fail only under load.
+  await vi.waitFor(() => {
+    if (!mm.host.querySelector("[contenteditable]")?.contains(document.activeElement)) throw new Error("focus has not returned to the editor");
+  }, { timeout: 5000, interval: 10 });
 };
 
 describe("editor output for the sanitiser round trip", () => {
@@ -162,5 +166,5 @@ describe("editor output for the sanitiser round trip", () => {
     }
 
     await expect(JSON.stringify(cases, null, 2) + "\n").toMatchFileSnapshot("./testdata/sanitizer-roundtrip.json");
-  });
+  }, 60_000);
 });
