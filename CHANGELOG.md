@@ -9,13 +9,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.101.0-beta.2] — 2026-11-06
+
+**The second beta of v1.101 adds View source and a QR code on the public key page.** You can now see any message exactly as it arrived, and correspondents can scan your key's fingerprint instead of comparing it by eye. It also tightens how web addresses in mail are read, and gives the person who runs Mailroom a report that measures plain-text mail ahead of a reading improvement planned for this release.
+
 ### What's new
 
 - **View source.** The More menu of a message has a new **View source** item. It
   shows the message exactly as it arrived, as plain text in a fixed-width block,
   and never as a web page, so a hostile message cannot do anything by being
   looked at. A **Headers** tab lists every header line in the order it was
-  received, with long wrapped headers joined onto one line. **Copy** puts the
+  received, with long wrapped headers joined onto one line (the first 1,000 lines; the download has them all). **Copy** puts the
   whole message on the clipboard and **Download .eml** saves it. A very large
   message is shown cut off after 1 MiB with a note saying so; the copy and the
   download always have all of it.
