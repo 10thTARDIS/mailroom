@@ -522,7 +522,8 @@ function assertTableClean(root: ParentNode, where: string): void {
     }
   }
   // (ProseMirror's own trailing-break hack carries a class in the live DOM only.)
-  const all = ((root as Element).innerHTML ?? "").replace(/ class="ProseMirror-trailingBreak"/g, "");
+  const ser = new XMLSerializer();
+  const all = Array.from(root.childNodes).map((n) => ser.serializeToString(n)).join("").replace(/ class="ProseMirror-trailingBreak"/g, "");
   expect(all, `${where}: markup`).not.toMatch(/evil\.example|expression\(|url\(|javascript:|bgcolor|background=|\bclass=|\bwidth=/i);
 }
 

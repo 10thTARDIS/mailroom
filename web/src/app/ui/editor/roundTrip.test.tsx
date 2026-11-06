@@ -321,7 +321,10 @@ describe("editor output for the sanitiser round trip", () => {
   // DOM, so attribute quoting and entity forms cannot make a difference).
   it("every case's HTML loads back into the editor and is written out as the same document", async () => {
     expect(cases.length).toBeGreaterThan(30);
-    const norm = (h: string): string => new DOMParser().parseFromString(h, "text/html").body.innerHTML;
+    const norm = (h: string): string => {
+      const ser = new XMLSerializer();
+      return Array.from(new DOMParser().parseFromString(h, "text/html").body.childNodes).map((n) => ser.serializeToString(n)).join("");
+    };
     for (const c of cases) {
       const re = await mountEditor(c.html);
       try {
@@ -333,7 +336,10 @@ describe("editor output for the sanitiser round trip", () => {
   }, 120_000);
 
   it("control: the reopen comparison can fail (a document that is changed on the way in is reported)", async () => {
-    const norm = (h: string): string => new DOMParser().parseFromString(h, "text/html").body.innerHTML;
+    const norm = (h: string): string => {
+      const ser = new XMLSerializer();
+      return Array.from(new DOMParser().parseFromString(h, "text/html").body.childNodes).map((n) => ser.serializeToString(n)).join("");
+    };
     // A cell with a style the editor does not keep: loading it changes the document.
     const drifting = '<table style="border-collapse: collapse;"><tbody><tr><td style="color: red; border: 1px solid rgb(153, 153, 153); padding: 4px 8px"><p>x</p></td></tr></tbody></table>';
     const re = await mountEditor(drifting);
