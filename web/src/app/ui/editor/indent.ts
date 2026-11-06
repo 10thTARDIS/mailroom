@@ -16,7 +16,7 @@
 import { Extension } from "@tiptap/core";
 import type { CommandProps } from "@tiptap/core";
 import type { EditorState } from "@tiptap/pm/state";
-import { MAX_INDENT, clampIndent, indentStyle, parseIndent } from "./indentValue";
+import { clampIndent, indentStyle, parseIndent } from "./indentValue";
 
 const TYPES = ["paragraph", "heading"];
 
@@ -90,4 +90,3 @@ export const Indent = Extension.create({
   },
 });
 
-export { MAX_INDENT };
