@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**The composer can now make simple tables.** Add a table to a message, give it a
+## [1.101.0-beta.4] — 2026-11-06
+
+**The fourth beta of v1.101 lets the composer make simple tables.** Add a table to a message, give it a
 header row, and it reaches the recipient as a bordered table that looks the same in
 any mail app. Formatting inside cells (bold, colour and so on) is kept, and the
 plain-text version of the message shows the table as neat aligned columns.
@@ -57,8 +59,6 @@ plain-text version of the message shows the table as neat aligned columns.
   of outgoing mail, the message that is built, the message as it is read back, and
   the cleaning applied to incoming mail. A draft you reopen is written back
   exactly as it was saved.
-- Reopening a draft with a table no longer turns the bold in header cells into
-  extra bold marks.
 
 ## [1.101.0-beta.3] — 2026-11-06
 
