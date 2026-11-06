@@ -5926,6 +5926,11 @@ async function composerEditorSurfaces(page, cdp) {
         actionsH: actions && actions.height,
         stateH: stateBox && stateBox.height,
         stateText: state && state.textContent,
+        // Every block of the form, by class: the one whose height moved is the
+        // reason the body's did.
+        parts: [...document.querySelectorAll("section.compose .compose-form > *")].map(
+          (el) => (el.className && String(el.className).split(" ")[0]) + ":" + Math.round(el.getBoundingClientRect().height * 10) / 10,
+        ),
         surfaceH: sr && sr.height,
         scrollH: surface.scrollHeight,
         clientH: surface.clientHeight,
@@ -5963,7 +5968,29 @@ async function composerEditorSurfaces(page, cdp) {
       const spread = (a) => Math.max(...a) - Math.min(...a);
       return { surface: spread(surfaceHs), actions: spread(actionHs), surfaceHs, actionHs };
     });
+  // The composer fills in over its first second or two: the send line and the
+  // encryption note change as recipient keys are looked up, and each can change
+  // height. That is the composer settling, not the body reacting to its content,
+  // so the measurement starts when every block of the form has held one height for
+  // a full second. (A composer that never settles is a failure of its own.)
+  const settleLayout = async (where) => {
+    let last = "";
+    let since = Date.now();
+    const start = Date.now();
+    for (;;) {
+      const now = await page.evaluate(() =>
+        JSON.stringify([...document.querySelectorAll("section.compose .compose-form > *, section.compose .editor-surface, section.compose textarea.editor-plain")].map((el) => Math.round(el.getBoundingClientRect().height * 10))),
+      );
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+      } else if (Date.now() - since >= 1000) return;
+      if (Date.now() - start > 20000) fail(where + ": the composer's layout never settled: " + last);
+      await sleep(100);
+    }
+  };
   const bodyCheck = async (label) => {
+    await settleLayout(label);
     const steady = await statusSpread();
     if (steady.surface > 1 || steady.actions > 1) {
       fail(label + " (" + (await page.evaluate(() => window.innerWidth + "x" + window.innerHeight)) + "): the save-state text changes the layout under the body: " + JSON.stringify(steady));
@@ -5986,6 +6013,7 @@ async function composerEditorSurfaces(page, cdp) {
     const where = label + " (" + after.view + ")";
     if (Math.abs(after.surfaceH - before.surfaceH) > 1 || Math.abs(after.compose - before.compose) > 1) {
       fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose +
+        "; blocks before " + JSON.stringify(before.parts) + " after " + JSON.stringify(after.parts) +
         "; action row " + before.actionsH + " -> " + after.actionsH + ", save line " + before.stateH + " -> " + after.stateH +
         " [" + before.stateText + " -> " + after.stateText + "])");
     }
