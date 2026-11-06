@@ -674,6 +674,20 @@ func TestSanitizeHTML(t *testing.T) {
 			notWant: []string{"alert(1)", "href="},
 		},
 		{
+			// A browser reads each of these as a RELATIVE URL (a scheme cannot
+			// contain a space or start with NBSP), resolved against the app's own
+			// origin. No notWant on purpose: this case exists so the independent
+			// oracle in assertSafeDOM, which allows only http(s), mailto, tel and #
+			// hrefs, is what refuses a relative link if the sanitiser ever keeps one.
+			name: "links a browser would read as relative",
+			in: `<a href="java script:alert(1)">a</a>` +
+				`<a href="h t t p://example.com/">b</a>` +
+				"<a href=\"\u00a0javascript:alert(1)\">c</a>" +
+				`<a href="/settings">d</a>` +
+				`<a href="mailto-like:x">e</a>`,
+			want: []string{">a<", ">b<", ">c<", ">d<", ">e<"},
+		},
+		{
 			name: "an ordinary link survives — and is forced safe",
 			in:   `<a href="https://example.com/x" target="_self" rel="opener">read more</a>`,
 			want: []string{
