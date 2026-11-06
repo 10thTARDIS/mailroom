@@ -14,7 +14,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 **The fourth beta of v1.101 lets the composer make simple tables.** Add a table to a message, give it a
 header row, and it reaches the recipient as a bordered table that looks the same in
 any mail app. Formatting inside cells (bold, colour and so on) is kept, and the
-plain-text version of the message shows the table as neat aligned columns.
+plain-text version of the message shows the table as neat aligned columns. Replies
+and forwards now quote the original with its formatting, so a reply to a formatted
+message no longer flattens it to plain text.
 
 ### What's new: tables
 
@@ -51,8 +53,41 @@ plain-text version of the message shows the table as neat aligned columns.
   length goes out exactly as laid out; a very wide one is wrapped like any long
   line.
 
+### What's new: replies and forwards keep the original's formatting
+
+When you reply to or forward a message that has formatting, the quoted original
+now keeps it: bold and italic, lists, links, colours, headings and tables arrive in
+your reply the way the sender wrote them, under the same "On ... wrote:" line as
+before, and below your signature as before.
+
+- **Pictures from the web are never included.** A picture that has to be fetched
+  from a website is left out of the quote and the quote says "[picture not
+  included]" where it was. A picture that was part of the message itself is kept
+  and sent with your reply, so the person you write to sees it; if it cannot be
+  carried (for example it is held back by the attachment scan, or the quote would
+  carry more than 10 MB of pictures), it is left out with the same note.
+- **Newsletter-style layout is tidied.** Many messages are laid out with tables
+  that are not really tables. Those are quoted as plain paragraphs, in reading
+  order, instead of a grid of boxes. A table that is real data (more than one
+  column, nothing nested inside it, at most 20 columns) stays a table.
+- **Long messages are shortened.** A quote keeps whole paragraphs and tables up to
+  about 50,000 characters, then says "[The rest of the original message is not
+  included]". The same note appears when the message itself was too large for
+  Mailroom to load in full.
+- **Plain-text messages are quoted as before**, and so is a reply written in
+  plain-text mode. Encrypted messages are quoted exactly as before: the decrypted
+  text is never stored and is quoted as plain text only.
+
 ### Under the hood
 
+- A quoted original is built from the version of the message the server has already
+  made safe to show, never from the raw message; Mailroom then removes what the
+  composer does not keep and the outgoing mail cleaning runs on the result as on
+  every draft. Messages with hostile content (scripts, forms, frames, hidden
+  pictures, scripted links) are tested end to end: nothing runs, nothing is
+  fetched, and none of it is in the quote, the sent message or the saved draft.
+- Every format is also checked through a quote, from the received message to the
+  saved draft and back.
 - Every format the composer can make (bold, italic, underline, lists, links,
   pictures, the styles from the last beta, and now tables) is checked all the way
   from the composer to what a recipient's copy shows, at each step: the cleaning

@@ -296,11 +296,11 @@ describe("pictures from the original", () => {
 
   it("with the picture deleted from the body, it is not sent (nothing orphaned travels)", async () => {
     await open("reply", withCid());
-    const surface = host.querySelector(".ProseMirror") as HTMLElement & { editor?: { commands: { setContent: (h: string) => boolean } } };
+    const surface = host.querySelector(".ProseMirror") as HTMLElement & { editor?: { commands: { setContent: (h: string, opts?: { emitUpdate?: boolean }) => boolean } } };
     expect(surface.editor).toBeDefined();
     expect((await sent()).attachments).toHaveLength(1); // control: it travels while the body names it
     await act(async () => {
-      surface.editor?.commands.setContent("<p>my reply, quote deleted</p>", { emitUpdate: true } as never);
+      surface.editor?.commands.setContent("<p>my reply, quote deleted</p>", { emitUpdate: true });
     });
     expect((await sent()).attachments).toEqual([]);
   });
