@@ -5,7 +5,8 @@
 // inline pictures) plus the block quote a reply quote needs. Beta 2 adds the new
 // formatting: strike-through, subscript, superscript, inline code, code blocks,
 // text and highlight colour, font family and size (each only from the fixed
-// lists in ./styleValues.ts) and paragraph indentation. Everything else
+// lists in ./styleValues.ts) and paragraph indentation. Beta 4 adds simple tables
+// (./tables.ts). Everything else
 // StarterKit ships stays switched off (headings, rules, gap cursor), so the schema,
 // and therefore what a paste can become, is no wider than what the toolbar offers.
 
@@ -19,6 +20,7 @@ import StarterKit from "@tiptap/starter-kit";
 import type { EditorProps } from "@tiptap/pm/view";
 import { Indent } from "./indent";
 import { countDroppedImages } from "./paste";
+import { TABLE_EXTENSIONS } from "./tables";
 import { TEXT_STYLE_EXTENSIONS } from "./textStyles";
 import { isAllowedLinkUri, isInlineImageSrc } from "./uri";
 
@@ -41,10 +43,26 @@ export interface EditorHooks {
  * target, rel and title are not parsed (so they cannot be kept) and not rendered:
  * the server decides rel and target when the message is sent. Done by wrapping the
  * kit's own link extension, which avoids depending on its package directly. */
+/** Where a `font-weight` style may make text bold: everywhere except while the
+ * parser is directly inside a table or a row, which is where a table's own cells
+ * are read. (ProseMirror reads an element's styles in its PARENT's context.) The
+ * editor writes `font-weight:bold` on a header cell, and without this, reopening a
+ * draft would read it back as a bold mark on every header cell's text, so a
+ * reopened document would differ from the one saved. It is also what the fixed-list
+ * rule asks: a style on a table, row or cell is not read. */
+const BOLD_STYLE_CONTEXT = "doc/|paragraph/|blockquote/|bulletList/|orderedList/|listItem/|codeBlock/|tableCell/|tableHeader/";
+
 const Kit = StarterKit.extend({
   addExtensions() {
     return (this.parent?.() ?? []).map((ext) =>
-      ext.name === "link"
+      ext.name === "bold"
+        ? ext.extend({
+            parseHTML(this: { parent?: () => unknown }) {
+              const rules = (this.parent?.() ?? []) as Array<Record<string, unknown>>;
+              return rules.map((rule) => ("style" in rule ? { ...rule, context: BOLD_STYLE_CONTEXT } : rule)) as never;
+            },
+          })
+        : ext.name === "link"
         ? ext.extend({
             addAttributes() {
               return {
@@ -89,6 +107,7 @@ export function buildExtensions(hooks: EditorHooks) {
     Superscript,
     ...TEXT_STYLE_EXTENSIONS,
     Indent,
+    ...TABLE_EXTENSIONS,
     Image.extend({
       // EVERY parse path (paste, drop, the seed, insertContent) goes through this
       // rule, so a picture that is not inline is refused wherever it came from, not
@@ -171,7 +190,10 @@ export function buildEditorProps(
       // Tab leaves the editor, as it did when this was a plain contentEditable
       // (operator decision, ADR-051 beta 2): the body never traps the keyboard.
       // The list-item extension would otherwise take Tab to nest an item; nesting
-      // is on Mod-] and Mod-[ and the toolbar instead (./indent.ts). Returning true
+      // is on Mod-] and Mod-[ and the toolbar instead (./indent.ts). In a table the
+      // library would take Tab to the next cell and, at the last one, ADD A ROW; that
+      // binding is removed in ./tables.ts as well, so this guard is not the only thing
+      // between Tab and a trap. Returning true
       // tells ProseMirror not to handle the key; it does NOT cancel it, so the
       // browser moves focus.
       keydown: (_view, event) => event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey,

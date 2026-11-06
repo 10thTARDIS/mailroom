@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // @vitest-environment jsdom
 
-// THE EDITOR HALF OF THE SANITISER ROUND TRIP (ADR-051 §3). Every beta-2 format is
-// made through the real toolbar, and the HTML the editor would send is written to
-// testdata/sanitizer-roundtrip.json. internal/api/sanitize_editor_roundtrip_test.go
-// reads that file and feeds each document through SanitizeOutboundHTML, asserting
-// that the tag and the style property and value of every expectation survive.
+// THE EDITOR HALF OF THE ROUND TRIP (ADR-051 §3 and §6). Every format of betas
+// 1 to 4 (the basic marks and lists, links, inline pictures, the beta-2 styles,
+// and tables) is made through the real toolbar, and the HTML the editor would send
+// is written to testdata/sanitizer-roundtrip.json, with the plain text the same
+// document gives. internal/api/sanitize_editor_roundtrip_test.go reads that file and
+// takes each document through the whole path, asserting at EVERY stage that the
+// tag, the attributes and the style properties and values of every expectation
+// survive: SanitizeOutboundHTML, the MIME builder, parsing that MIME back as a
+// received message, and the reader's sanitiser. (internal/compose reads the same
+// file for the plain-text half: an aligned table must survive format=flowed.)
+//
+// Drafts reopen: each case's HTML is also loaded back into the editor, and what
+// the editor writes must be the same document.
 //
 // The two halves are tied together here: this test FAILS when the file differs
 // from what the editor produces today (a stale fixture would let the Go test pass
@@ -17,19 +25,24 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
-import { button, click, mountEditor, press } from "./editorTestkit";
+import { button, click, inCell, mountEditor, paste, press } from "./editorTestkit";
+import { htmlToText } from "./plainText";
 import type { Mounted } from "./editorTestkit";
 
 interface Expectation {
   tag: string;
   /** Style properties the element must carry, with the value the editor wrote. */
   style?: Record<string, string>;
+  /** Attributes the element must carry, with the value the editor wrote. */
+  attrs?: Record<string, string>;
   /** The tag must be inside this one. */
   within?: string;
 }
 interface Case {
   name: string;
   html: string;
+  /** The plain-text rendering of the same document (rich to plain). */
+  text: string;
   expect: Expectation[];
 }
 
@@ -41,10 +54,17 @@ afterEach(async () => {
 
 const cases: Case[] = [];
 
-async function record(name: string, seed: string, steps: (mm: Mounted) => Promise<void>, expectations: Expectation[]): Promise<void> {
+async function record(
+  name: string,
+  seed: string,
+  steps: (mm: Mounted) => Promise<void>,
+  expectations: Expectation[],
+  opts: { selectAll?: boolean } = {},
+): Promise<void> {
   m = await mountEditor(seed);
   await act(async () => {
-    m!.editor.commands.selectAll();
+    if (opts.selectAll === false) m!.editor.commands.focus("end");
+    else m!.editor.commands.selectAll();
   });
   try {
     await steps(m);
@@ -53,7 +73,7 @@ async function record(name: string, seed: string, steps: (mm: Mounted) => Promis
   }
   const html = m.html();
   expect(html, name).not.toBe(seed);
-  cases.push({ name, html, expect: expectations });
+  cases.push({ name, html, text: htmlToText(html), expect: expectations });
   await m.unmount();
   m = null;
 }
@@ -82,6 +102,37 @@ const swatch = async (mm: Mounted, trigger: string, name: string): Promise<void>
 describe("editor output for the sanitiser round trip", () => {
   it("builds every format through the toolbar and matches the committed fixture", async () => {
     const P = "<p>sample</p>";
+    // ---- beta 1: the basic marks, lists, links and pictures ----
+    await record("bold", P, (mm) => click(button(mm, "Bold")), [{ tag: "strong" }]);
+    await record("italic", P, (mm) => click(button(mm, "Italic")), [{ tag: "em" }]);
+    await record("underline", P, (mm) => click(button(mm, "Underline")), [{ tag: "u" }]);
+    await record("bulleted list", P, (mm) => click(button(mm, "Bulleted list")), [{ tag: "ul" }, { tag: "li", within: "ul" }]);
+    await record("numbered list", P, (mm) => click(button(mm, "Numbered list")), [{ tag: "ol" }, { tag: "li", within: "ol" }]);
+    await record(
+      "link",
+      P,
+      async (mm) => {
+        const prompt = vi.spyOn(window, "prompt").mockReturnValue("https://example.com/page");
+        try {
+          await click(button(mm, "Insert link"));
+        } finally {
+          prompt.mockRestore();
+        }
+      },
+      [{ tag: "a", attrs: { href: "https://example.com/page" } }],
+    );
+    await record(
+      "inline picture",
+      "<p>see:</p>",
+      async (mm) => {
+        await act(async () => {
+          mm.editor.chain().focus("end").insertContent({ type: "image", attrs: { src: "cid:pic1@inline.mailroom", alt: "a picture" } }).run();
+        });
+      },
+      [{ tag: "img", attrs: { src: "cid:pic1@inline.mailroom", alt: "a picture" }, style: { "max-width": "100%" } }],
+      { selectAll: false },
+    );
+    // ---- beta 2: styles ----
     await record("strike-through", P, (mm) => click(button(mm, "Strikethrough")), [{ tag: "s" }]);
     await record("subscript", P, (mm) => click(button(mm, "Subscript")), [{ tag: "sub" }]);
     await record("superscript", P, (mm) => click(button(mm, "Superscript")), [{ tag: "sup" }]);
@@ -155,16 +206,147 @@ describe("editor output for the sanitiser round trip", () => {
       [{ tag: "blockquote" }, { tag: "p", style: { "margin-left": "2em" }, within: "blockquote" }, { tag: "span", style: { color: "rgb(103, 78, 167)" } }],
     );
 
+    // ---- beta 4: tables ----
+    const CELL = { border: "1px solid rgb(153, 153, 153)", padding: "4px 8px" };
+    const HEAD = { ...CELL, "text-align": "left", "font-weight": "bold" };
+    const fill = async (mm: Mounted, rows: string[][]): Promise<void> => {
+      for (let r = 0; r < rows.length; r++) for (let c = 0; c < rows[r]!.length; c++) await inCell(mm, r, c, rows[r]![c]);
+    };
+    await record(
+      "table, no header row",
+      "<p>before</p>",
+      async (mm) => {
+        await click(button(mm, "Insert table"));
+        await click(button(mm, "Header row"));
+        await fill(mm, [["a1", "b1", "c1"], ["a2", "b2", "c2"], ["a3", "b3", "c3"]]);
+      },
+      [
+        { tag: "table", style: { "border-collapse": "collapse" } },
+        { tag: "td", style: CELL, within: "table" },
+      ],
+      { selectAll: false },
+    );
+    await record(
+      "table, header row",
+      "<p>before</p>",
+      async (mm) => {
+        await click(button(mm, "Insert table"));
+        await fill(mm, [["Item", "Qty", "Price"], ["Apple", "3", "1.50"], ["Watermelon", "12", "0.20"]]);
+      },
+      [
+        { tag: "table", style: { "border-collapse": "collapse" } },
+        { tag: "th", style: HEAD, attrs: { scope: "col" }, within: "table" },
+        { tag: "td", style: CELL, within: "table" },
+      ],
+      { selectAll: false },
+    );
+    await record(
+      "table, formatting inside cells",
+      "<p>before</p>",
+      async (mm) => {
+        await click(button(mm, "Insert table"));
+        await fill(mm, [["Name", "Note"], ["word", "other"]]);
+        await inCell(mm, 1, 0);
+        await act(async () => {
+          const to = mm.editor.state.selection.from;
+          mm.editor.commands.setTextSelection({ from: to - 4, to });
+        });
+        await click(button(mm, "Bold"));
+        await swatch(mm, "Text colour", "Red");
+        await inCell(mm, 1, 1);
+        await act(async () => {
+          const to = mm.editor.state.selection.from;
+          mm.editor.commands.setTextSelection({ from: to - 5, to });
+        });
+        await click(button(mm, "Italic"));
+      },
+      [
+        { tag: "th", style: HEAD, attrs: { scope: "col" }, within: "table" },
+        { tag: "strong", within: "td" },
+        { tag: "span", style: { color: "rgb(204, 0, 0)" }, within: "td" },
+        { tag: "em", within: "td" },
+      ],
+      { selectAll: false },
+    );
+    await record(
+      "table inside a quote",
+      "<blockquote><p>quoted</p></blockquote>",
+      async (mm) => {
+        await click(button(mm, "Insert table"));
+        await fill(mm, [["h1", "h2"], ["x", "y"]]);
+      },
+      [
+        { tag: "blockquote" },
+        { tag: "table", style: { "border-collapse": "collapse" }, within: "blockquote" },
+        { tag: "th", style: HEAD, attrs: { scope: "col" }, within: "blockquote" },
+        { tag: "td", style: CELL, within: "blockquote" },
+      ],
+      { selectAll: false },
+    );
+    await record(
+      "pasted table with colspan and rowspan",
+      "<p>before</p>",
+      async (mm) => {
+        await paste(mm, {
+          html: '<table><tr><th colspan="2">Heading</th></tr><tr><td rowspan="2">left</td><td>right</td></tr><tr><td>below</td></tr></table>',
+        });
+      },
+      [
+        { tag: "th", style: HEAD, attrs: { scope: "col", colspan: "2" }, within: "table" },
+        { tag: "td", style: CELL, attrs: { rowspan: "2" }, within: "table" },
+      ],
+      { selectAll: false },
+    );
+
     // Every expectation is true of the HTML beside it.
     for (const c of cases) {
       const doc = new DOMParser().parseFromString(c.html, "text/html");
       for (const e of c.expect) {
         const hits = Array.from(doc.querySelectorAll<HTMLElement>(e.within ? `${e.within} ${e.tag}` : e.tag));
-        const ok = hits.some((el) => Object.entries(e.style ?? {}).every(([p, v]) => el.style.getPropertyValue(p) === v));
+        const ok = hits.some(
+          (el) =>
+            Object.entries(e.style ?? {}).every(([p, v]) => el.style.getPropertyValue(p) === v) &&
+            Object.entries(e.attrs ?? {}).every(([a, v]) => el.getAttribute(a) === v),
+        );
         expect(ok, `${c.name}: ${JSON.stringify(e)} in ${c.html}`).toBe(true);
       }
     }
 
     await expect(JSON.stringify(cases, null, 2) + "\n").toMatchFileSnapshot("./testdata/sanitizer-roundtrip.json");
-  }, 60_000);
+  }, 120_000);
+
+  // DRAFTS REOPEN. A saved draft is the editor's own HTML put back into the
+  // editor; what it writes again must be the same document, or opening a draft
+  // would change it. Compared after normalising (parsed and re-serialised by the
+  // DOM, so attribute quoting and entity forms cannot make a difference).
+  it("every case's HTML loads back into the editor and is written out as the same document", async () => {
+    expect(cases.length).toBeGreaterThan(30);
+    const norm = (h: string): string => {
+      const ser = new XMLSerializer();
+      return Array.from(new DOMParser().parseFromString(h, "text/html").body.childNodes).map((n) => ser.serializeToString(n)).join("");
+    };
+    for (const c of cases) {
+      const re = await mountEditor(c.html);
+      try {
+        expect(norm(re.html()), `reopening "${c.name}"`).toBe(norm(c.html));
+      } finally {
+        await re.unmount();
+      }
+    }
+  }, 120_000);
+
+  it("control: the reopen comparison can fail (a document that is changed on the way in is reported)", async () => {
+    const norm = (h: string): string => {
+      const ser = new XMLSerializer();
+      return Array.from(new DOMParser().parseFromString(h, "text/html").body.childNodes).map((n) => ser.serializeToString(n)).join("");
+    };
+    // A cell with a style the editor does not keep: loading it changes the document.
+    const drifting = '<table style="border-collapse: collapse;"><tbody><tr><td style="color: red; border: 1px solid rgb(153, 153, 153); padding: 4px 8px"><p>x</p></td></tr></tbody></table>';
+    const re = await mountEditor(drifting);
+    try {
+      expect(norm(re.html())).not.toBe(norm(drifting));
+    } finally {
+      await re.unmount();
+    }
+  });
 });

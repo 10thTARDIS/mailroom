@@ -187,6 +187,10 @@ the same layout.
 
 #43, #47 and #35 ride in whichever beta has room.
 
+**As released:** the steps shipped as v1.101.0-beta.1 (step 1), beta.3 (step 2,
+alongside format=flowed sending, #93) and beta.4 (step 3), with #43, #47 and the
+#35 report in beta.2. #35's display change was measured and not built.
+
 ## Consequences
 
 - **Cost:** about 150 KB gzip of editor code. It is loaded only when the composer

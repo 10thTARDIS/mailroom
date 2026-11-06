@@ -1642,7 +1642,7 @@ a.attachment:hover { background: var(--bg-sunken); }
 /* The ProseMirror base rules, shipped here instead of injected by the library
    (`injectCSS: false`, ADR-051 §2) so the styles are ours and reviewable. This
    is prosemirror-view's own base sheet, minus the pieces for features the schema
-   does not have (gap cursor, tables). */
+   does not have (gap cursor); tables are styled below. */
 .ProseMirror {
   position: relative;
   word-wrap: break-word;
@@ -1691,6 +1691,16 @@ li.ProseMirror-selectednode::after {
 }
 .editor-surface pre code { padding: 0; background: none; font-size: inherit; }
 .editor-surface:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+/* Tables (ADR-051 beta 4). The cells carry their own border and padding as inline
+   styles (that is what is sent, and the screen shows the same). The table keeps its
+   natural width, so a wide one scrolls sideways INSIDE the editing surface and the
+   page never does; the surface is the keyboard-focusable scroller. A paragraph in a
+   cell sits tight. Dark mode: the cell border (#999) and the inherited text colour
+   both read on the dark surface. */
+.editor-surface { overflow-x: auto; }
+.editor-surface table { margin: 0 0 0.5em; }
+.editor-surface td > p, .editor-surface th > p { margin: 0; }
+.editor-surface .selectedCell { background: var(--bg-hover); }
 .editor-surface img { max-width: 100%; height: auto; }
 /* Quoted text is TEXT, not a label, so it is not muted: --fg-muted misses AAA
    (5.9:1), and scripts/a11y-contrast.allow holds only labels to AA — body text

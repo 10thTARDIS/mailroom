@@ -9,6 +9,57 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**The composer can now make simple tables.** Add a table to a message, give it a
+header row, and it reaches the recipient as a bordered table that looks the same in
+any mail app. Formatting inside cells (bold, colour and so on) is kept, and the
+plain-text version of the message shows the table as neat aligned columns.
+
+### What's new: tables
+
+- **Insert table** on the formatting bar puts a table with three rows and three
+  columns, and a header row, where you are typing, with the cursor in the first
+  cell.
+- **Change it from the same bar.** While the cursor is in a table you can add a
+  row above or below, add a column to the left or right, delete the row or column
+  you are in, switch the header row on or off, or delete the whole table. These
+  buttons are always on the bar; outside a table they are dimmed and say so to a
+  screen reader, so the bar never changes shape under your hands.
+- **Tab still leaves the message body**, inside a table too, so the keyboard is
+  never trapped, and Tab at the last cell never adds a row. The arrow keys move
+  between cells.
+- **Simple on purpose.** There is no merging of cells and no resizing of columns.
+  A table you paste that already has merged cells keeps them.
+- **On a phone** a table wider than the screen scrolls sideways inside the message
+  body; the page itself never scrolls sideways.
+
+### How tables look to the people you send them to
+
+- Every cell has a thin grey border and some padding, and header cells are bold
+  and left-aligned, so the table reads the same in any mail app.
+- A table pasted from a web page or a document keeps its rows, columns and text
+  only. Its colours, widths, backgrounds and links to outside pictures are left
+  behind, and Mailroom's own border and padding are used instead.
+
+### Plain text
+
+- **Tables become aligned text** in the plain version of a message, and when you
+  switch a draft to plain text: columns are lined up, a line of dashes sits under
+  the header row, and a cell that is longer than about 40 characters is cut with
+  an ellipsis so the table stays readable. A table whose rows fit the usual line
+  length goes out exactly as laid out; a very wide one is wrapped like any long
+  line.
+
+### Under the hood
+
+- Every format the composer can make (bold, italic, underline, lists, links,
+  pictures, the styles from the last beta, and now tables) is checked all the way
+  from the composer to what a recipient's copy shows, at each step: the cleaning
+  of outgoing mail, the message that is built, the message as it is read back, and
+  the cleaning applied to incoming mail. A draft you reopen is written back
+  exactly as it was saved.
+- Reopening a draft with a table no longer turns the bold in header cells into
+  extra bold marks.
+
 ## [1.101.0-beta.3] — 2026-11-06
 
 **The third beta of v1.101 gives the composer a full set of formatting, and makes

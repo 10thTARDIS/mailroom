@@ -1286,6 +1286,18 @@ const SURFACES = [
     },
   },
   {
+    // THE COMPOSER WITH A TABLE IN IT (ADR-051 beta 4). The plain "compose" surface
+    // has no table, so on its own it would pass for a table that violated every
+    // rule: cells with text (a header row and body cells), the table controls
+    // available, and the cursor in a cell.
+    name: "compose-table",
+    async open(page) {
+      await openComposeWith(page, async () => {
+        await insertTableWithText(page, [["Item", "Qty"], ["Apple", "3"]]);
+      });
+    },
+  },
+  {
     // A COMPOSER REACHED BY RELOAD (#612). The surface above opens the composer
     // with a keypress on a page whose session is long established — the warm
     // path — and it stayed green for the whole time a RELOAD onto a composer URL
@@ -5627,6 +5639,38 @@ async function openComposeWith(page, use) {
   await use();
 }
 
+/** Inserts a table through the toolbar button and types `rows` into its first
+ * cells with the keyboard: Tab is NOT how the cursor moves (it leaves the
+ * editor), the arrow keys are. Used by the table surfaces. */
+async function insertTableWithText(page, rows) {
+  await page.click("section.compose .editor-surface");
+  await page.click('section.compose button[aria-label="Insert table"]');
+  await waitForSelectorD(page, "section.compose .editor-surface table th", { timeout: 30000 });
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < rows[r].length; c++) {
+      await page.keyboard.type(rows[r][c]);
+      if (c < rows[r].length - 1) await page.keyboard.press("ArrowRight");
+    }
+    if (r < rows.length - 1) {
+      // To the first cell of the next row: Down, then back to the left edge.
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Home");
+    }
+  }
+}
+
+/** Where the caret is: [row, column] of its table cell, or null. */
+function caretCell(page) {
+  return page.evaluate(() => {
+    const sel = window.getSelection();
+    const node = sel && sel.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const cell = el && el.closest("th, td");
+    if (!cell) return null;
+    return [cell.parentElement.rowIndex, cell.cellIndex];
+  });
+}
+
 /**
  * The composer's editor is its own chunk (ADR-051), fetched after the composer
  * opens. Until it arrives the composer holds a placeholder, and axe run against
@@ -5871,6 +5915,130 @@ async function composerEditorSurfaces(page, cdp) {
   }
   const afterToolbar = await page.evaluate(() => window.__cspViolations.slice());
   if (afterToolbar.length) fail("CSP violations after styled paste and toolbar use: " + JSON.stringify(afterToolbar));
+
+  // ---- tables in a real browser (ADR-051 beta 4) -----------------------------------
+  // What jsdom cannot answer: the controls' names and unavailable state in the
+  // accessibility tree, the caret moving between cells with the arrow keys (jsdom
+  // has no layout), Tab leaving from the last cell without adding a row, and the
+  // style attributes exactly as the editor writes them (jsdom re-serialises them).
+  const TABLE_ONLY = ["Add row above", "Add row below", "Add column left", "Add column right", "Delete row", "Delete column", "Header row", "Delete table"];
+  const controlState = async () => {
+    const out = {};
+    for (const name of ["Insert table"].concat(TABLE_ONLY)) {
+      const snap = await axSnapshot(page, 'section.compose button[aria-label="' + name + '"]');
+      out[name] = snap ? { role: snap.role, name: snap.name, disabled: !!snap.disabled } : null;
+    }
+    return out;
+  };
+  const expectControls = (state, insertDisabled, tableDisabled, where) => {
+    for (const [name, st] of Object.entries(state)) {
+      if (!st || st.role !== "button" || st.name !== name) fail(where + ": the control " + JSON.stringify(name) + " is not a button of that name in the accessibility tree: " + JSON.stringify(st));
+      const want = name === "Insert table" ? insertDisabled : tableDisabled;
+      if (st.disabled !== want) fail(where + ": " + JSON.stringify(name) + " should " + (want ? "" : "not ") + "be announced as unavailable: " + JSON.stringify(st));
+    }
+  };
+  await page.evaluate(() => document.querySelector("section.compose .editor-surface").focus());
+  await page.keyboard.down("Control");
+  await page.keyboard.press("End");
+  await page.keyboard.up("Control");
+  expectControls(await controlState(), false, true, "outside a table");
+
+  await page.click('section.compose button[aria-label="Insert table"]');
+  await waitForSelectorD(page, "section.compose .editor-surface table th", { timeout: 10000 });
+  expectControls(await controlState(), true, false, "inside a table");
+
+  // (Tiptap writes a style as the browser's own "prop: value;" text, so the fixed
+  // #999 reads back as rgb(153, 153, 153): the same colour. Compared declaration by
+  // declaration, with the colour in that form.)
+  const written = await page.evaluate(() => {
+    const t = document.querySelector("section.compose .editor-surface table");
+    const cells = [...t.querySelectorAll("td, th")];
+    const decls = (el) => {
+      const out = {};
+      for (const d of (el.getAttribute("style") || "").split(";")) {
+        const i = d.indexOf(":");
+        if (i > 0) out[d.slice(0, i).trim()] = d.slice(i + 1).trim();
+      }
+      return JSON.stringify(Object.keys(out).sort().map((k) => k + "=" + out[k]));
+    };
+    return {
+      table: decls(t),
+      tableAttrs: t.getAttributeNames(),
+      th: [...new Set(cells.filter((c) => c.tagName === "TH").map(decls))],
+      td: [...new Set(cells.filter((c) => c.tagName === "TD").map(decls))],
+      cellAttrs: [...new Set(cells.map((c) => c.tagName + ":" + c.getAttributeNames().sort().join(",")))].sort(),
+      scopes: [...new Set(cells.filter((c) => c.tagName === "TH").map((c) => c.getAttribute("scope")))],
+      parts: t.querySelectorAll("colgroup, col, thead").length,
+      counts: [t.rows.length, t.rows[0].cells.length, cells.length],
+    };
+  });
+  const want = (o) => JSON.stringify(Object.keys(o).sort().map((k) => k + "=" + o[k]));
+  const CELL = { border: "1px solid rgb(153, 153, 153)", padding: "4px 8px" };
+  if (written.table !== want({ "border-collapse": "collapse" }) || written.tableAttrs.join() !== "style") fail("the table's written form: " + JSON.stringify(written));
+  if (written.th.join("|") !== want({ ...CELL, "text-align": "left", "font-weight": "bold" }) || written.scopes.join() !== "col") fail("the header cells' written form: " + JSON.stringify(written));
+  if (written.td.join("|") !== want(CELL) || written.parts !== 0) fail("the body cells' written form: " + JSON.stringify(written));
+  if (written.cellAttrs.join() !== "TD:style,TH:scope,style") fail("a cell carries attributes beyond style (and scope on a header): " + JSON.stringify(written.cellAttrs));
+  if (written.counts.join() !== "3,3,9") fail("Insert table did not make a 3 by 3 table: " + JSON.stringify(written.counts));
+  const inFirst = await caretCell(page);
+  if (!inFirst || inFirst.join() !== "0,0") fail("the cursor is not in the first cell after Insert table: " + JSON.stringify(inFirst));
+
+  // Arrow keys move the caret between cells (the cells are empty past the first,
+  // so every arrow is at an edge).
+  await page.keyboard.type("ab");
+  const walk = [];
+  for (const key of ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"]) {
+    await page.keyboard.press(key);
+    walk.push(key + "->" + JSON.stringify(await caretCell(page)));
+  }
+  if (walk.join(" ") !== 'ArrowRight->[0,1] ArrowDown->[1,1] ArrowLeft->[1,0] ArrowUp->[0,0]') fail("the arrow keys did not move between cells: " + walk.join(" "));
+
+  // Tab LEAVES, from the last cell as from any other: no row is added and focus
+  // goes on to whatever follows the body (Shift+Tab: whatever precedes it).
+  const rowsNow = () => page.evaluate(() => document.querySelector("section.compose .editor-surface table").rows.length);
+  const focusInBody = () =>
+    page.evaluate(() => {
+      const s = document.querySelector("section.compose .editor-surface");
+      return s.contains(document.activeElement);
+    });
+  await page.click("section.compose .editor-surface table tr:last-child td:last-child");
+  if ((await caretCell(page) || []).join() !== "2,2") fail("could not put the caret in the last cell: " + JSON.stringify(await caretCell(page)));
+  await page.keyboard.press("Tab");
+  if (await focusInBody()) fail("Tab in the last cell did not leave the editor");
+  if ((await rowsNow()) !== 3) fail("Tab in the last cell added a row: " + (await rowsNow()) + " rows");
+  await page.click("section.compose .editor-surface table tr:first-child th:first-child");
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("Tab");
+  await page.keyboard.up("Shift");
+  if (await focusInBody()) fail("Shift+Tab in the first cell did not leave the editor");
+  await page.click("section.compose .editor-surface table tr:nth-child(2) td:nth-child(2)");
+  await page.keyboard.press("Tab");
+  if (await focusInBody()) fail("Tab in a middle cell did not leave the editor");
+
+  // The toolbar acts in the real browser: add a row and a column, then delete the table.
+  await page.click("section.compose .editor-surface table tr:nth-child(2) td:nth-child(2)");
+  await page.click('section.compose button[aria-label="Add row below"]');
+  await page.click('section.compose button[aria-label="Add column right"]');
+  const grown = await page.evaluate(() => {
+    const t = document.querySelector("section.compose .editor-surface table");
+    return [t.rows.length, t.rows[0].cells.length];
+  });
+  if (grown.join() !== "4,4") fail("Add row below / Add column right made a " + grown.join("x") + " table, not 4x4");
+  await page.click('section.compose button[aria-label="Delete table"]');
+  await until("the table is gone", 10000, () => page.evaluate(() => !document.querySelector("section.compose .editor-surface table")), 33);
+  expectControls(await controlState(), false, true, "after Delete table");
+  const afterTables = await page.evaluate(() => window.__cspViolations.slice());
+  if (afterTables.length) fail("CSP violations while using tables: " + JSON.stringify(afterTables));
+  if (requested.length) fail("tables caused requests to " + PAYLOAD_HOST + ": " + requested.join(", "));
+
+  // The checks above can fail: an unavailable control that is NOT announced
+  // unavailable, or a Tab that does not leave, would be seen (the same functions
+  // on a page that has been made to misbehave).
+  await control("composer-table-state-check", async () => {
+    await page.evaluate(() => document.querySelector('section.compose button[aria-label="Delete table"]').removeAttribute("aria-disabled"));
+    const st = await controlState();
+    return st["Delete table"] && st["Delete table"].disabled === false;
+  });
+  await page.evaluate(() => { window.__cspViolations.length = 0; });
 
   // ---- the request listener is live: a picture put into the page must be seen --
   // "No request went to the payload host" is only evidence if this listener would
@@ -6192,6 +6360,25 @@ async function phoneWidthSurfaces(page, contactIds) {
       name: "compose",
       hash: "#/inbox/review?compose=new",
       ready: (p) => waitForSelectorD(p, 'section.compose[role="dialog"]', { timeout: 30000 }),
+    },
+    // A table wider than the phone (ADR-051 beta 4): its cells hold unbreakable
+    // words, so the table is wider than the body. It must scroll sideways INSIDE
+    // the editing surface (a marked, focusable, named scroller) and the page must
+    // not.
+    {
+      name: "compose-wide-table",
+      hash: "#/inbox/review?compose=new",
+      ready: async (p) => {
+        await waitForSelectorD(p, 'section.compose[role="dialog"]', { timeout: 30000 });
+        await waitForEditor(p);
+        await insertTableWithText(p, [["AVeryLongUnbreakableHeadingWord", "AnotherVeryLongUnbreakableHeadingWord"], ["CellContentThatDoesNotBreak", "AndNeitherDoesThisOneAtAll"]]);
+        await until("the table is wider than the editing surface", 10000, () =>
+          p.evaluate(() => {
+            const s = document.querySelector("section.compose .editor-surface");
+            return !!s && s.scrollWidth > s.clientWidth + 20;
+          }),
+        );
+      },
     },
     {
       name: "settings",
