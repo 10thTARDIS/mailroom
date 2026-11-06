@@ -5924,6 +5924,7 @@ async function composerEditorSurfaces(page, cdp) {
       return {
         compose: cr && cr.height,
         actionsH: actions && actions.height,
+        toolbarH: toolbar ? r(toolbar).height : null,
         stateH: stateBox && stateBox.height,
         stateText: state && state.textContent,
         // Every block of the form, by class: the one whose height moved is the
@@ -5979,7 +5980,7 @@ async function composerEditorSurfaces(page, cdp) {
     const start = Date.now();
     for (;;) {
       const now = await page.evaluate(() =>
-        JSON.stringify([...document.querySelectorAll("section.compose .compose-form > *, section.compose .editor-surface, section.compose textarea.editor-plain")].map((el) => Math.round(el.getBoundingClientRect().height * 10))),
+        JSON.stringify([...document.querySelectorAll("section.compose .compose-form > *, section.compose .editor-toolbar, section.compose .editor-surface, section.compose textarea.editor-plain")].map((el) => Math.round(el.getBoundingClientRect().height * 10))),
       );
       if (now !== last) {
         last = now;
@@ -6014,7 +6015,7 @@ async function composerEditorSurfaces(page, cdp) {
     if (Math.abs(after.surfaceH - before.surfaceH) > 1 || Math.abs(after.compose - before.compose) > 1) {
       fail(where + ": the body grew with its content (surface " + before.surfaceH + " -> " + after.surfaceH + ", composer " + before.compose + " -> " + after.compose +
         "; blocks before " + JSON.stringify(before.parts) + " after " + JSON.stringify(after.parts) +
-        "; action row " + before.actionsH + " -> " + after.actionsH + ", save line " + before.stateH + " -> " + after.stateH +
+        "; toolbar " + before.toolbarH + " -> " + after.toolbarH + "; action row " + before.actionsH + " -> " + after.actionsH + ", save line " + before.stateH + " -> " + after.stateH +
         " [" + before.stateText + " -> " + after.stateText + "])");
     }
     if (!(after.scrollH > after.clientH + 20)) fail(where + ": the long body does not scroll inside itself (scrollH=" + after.scrollH + " clientH=" + after.clientH + ")");

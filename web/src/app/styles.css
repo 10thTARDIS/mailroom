@@ -1531,6 +1531,10 @@ a.attachment:hover { background: var(--bg-sunken); }
 }
 .editor-toolbar {
   display: flex;
+  /* Never squeezed by the body: a scroll container (the narrow-screen rule below)
+     has no automatic minimum height, so without this a long body's flex basis took
+     the difference out of the toolbar. */
+  flex: none;
   flex-wrap: wrap;
   gap: 2px;
   padding: 4px;
@@ -1584,6 +1588,7 @@ a.attachment:hover { background: var(--bg-sunken); }
 /* The colour palette: a row under the toolbar while a colour button is open. */
 .editor-palette {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
