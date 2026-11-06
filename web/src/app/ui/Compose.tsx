@@ -255,7 +255,7 @@ function quoteHeader(parent: EffectiveEmail): string {
  * Email/get). Quoting nothing is deliberate when it has not: a quote is a
  * convenience, and inventing one from the preview would put words in the user's
  * mouth. */
-function quotedText(parent: EffectiveEmail | null): string {
+export function quotedText(parent: EffectiveEmail | null): string {
   if (!parent) return "";
   const text = plainTextOf(parent);
   if (!text) return "";
@@ -280,7 +280,7 @@ function quotedText(parent: EffectiveEmail | null): string {
  *   - an original whose HTML leaves nothing to quote once pictures from the web
  *     and layout are dealt with.
  */
-function formattedQuoteOf(parent: EffectiveEmail | null): { html: string; carried: CarriedPicture[] } | null {
+export function formattedQuoteOf(parent: EffectiveEmail | null): { html: string; carried: CarriedPicture[] } | null {
   if (!parent) return null;
   if (parent.encrypted === true || (parent.decrypted !== undefined && parent.decrypted !== null)) return null;
   const html = htmlBodyOf(parent);
@@ -328,7 +328,7 @@ function signatureBlockStrings(
  * quote. That ORDER is the convention — the quote stays last, where a reader looks
  * for it, and the signature sits below what you write rather than under the quoted
  * mail. */
-function openingBodies(
+export function openingBodies(
   parent: EffectiveEmail | null,
   sig: { html: string; text: string } | null,
   formatted: { html: string } | null,

@@ -104,13 +104,13 @@
   {
     "name": "javascript: link in a paragraph",
     "group": "hostile",
-    "live": true,
+    "live": false,
     "html": "<p>see <a href=\"javascript:document.title='pwned'\">this</a> now</p>"
   },
   {
     "name": "iframe srcdoc",
     "group": "hostile",
-    "live": true,
+    "live": false,
     "html": "<iframe srcdoc=\"&lt;script&gt;document.title='pwned'&lt;/script&gt;\"></iframe><p>after frame</p>"
   },
   {

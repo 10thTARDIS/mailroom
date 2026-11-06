@@ -121,14 +121,14 @@
   {
     "name": "javascript: link in a paragraph",
     "group": "hostile",
-    "live": true,
+    "live": false,
     "source": "\u003cp\u003esee \u003ca href=\"javascript:document.title='pwned'\"\u003ethis\u003c/a\u003e now\u003c/p\u003e",
     "html": "\u003cp\u003esee \u003ca\u003ethis\u003c/a\u003e now\u003c/p\u003e"
   },
   {
     "name": "iframe srcdoc",
     "group": "hostile",
-    "live": true,
+    "live": false,
     "source": "\u003ciframe srcdoc=\"\u0026lt;script\u0026gt;document.title='pwned'\u0026lt;/script\u0026gt;\"\u003e\u003c/iframe\u003e\u003cp\u003eafter frame\u003c/p\u003e",
     "html": "\u003cp\u003eafter frame\u003c/p\u003e"
   },
