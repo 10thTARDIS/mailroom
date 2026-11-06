@@ -6095,6 +6095,7 @@ async function composerEditorSurfaces(page, cdp) {
     await sleep(500);
     const after = await measure();
     console.log("composer layout control: surface " + before.surfaceH + " -> " + after.surfaceH);
+    await discardOpenDraft();
     return Math.abs(after.surfaceH - before.surfaceH) > 50;
   });
 
@@ -6112,12 +6113,17 @@ async function composerEditorSurfaces(page, cdp) {
     });
     const spread = await statusSpread();
     console.log("composer status control: " + JSON.stringify(spread));
+    // Discard the draft BEFORE leaving the phone viewport: puppeteer reloads the
+    // page when setViewport changes isMobile/hasTouch, and a Discard clicked into
+    // that reload failed the lane intermittently ("Page closed!"). Then reload
+    // explicitly, as the landscape check does, so nothing races the next surface.
+    await discardOpenDraft();
     await page.setViewport(viewport);
+    await load(page, "#/inbox/review");
+    await waitForDesk(page);
     return spread.actions > 1;
   });
 
-  // ---- leave nothing behind: discard the fixture draft ----------------------
-  await discardOpenDraft();
   page.off("request", onRequest);
   tally.composerEditor = 1;
 }
