@@ -108,6 +108,7 @@ export interface KeyInit {
   ctrlKey?: boolean;
   shiftKey?: boolean;
   metaKey?: boolean;
+  altKey?: boolean;
 }
 
 /** A keydown on the surface; the event, so a test can see if it was cancelled. */

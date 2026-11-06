@@ -79,6 +79,7 @@ import { ImportKeyDialog } from "./ImportKeyDialog";
 import { SendLaterMenu } from "./SendLaterMenu";
 import { SnippetPicker } from "./SnippetPicker";
 import { RichEditor } from "./editor/LazyRichEditor";
+import { htmlToText } from "./editor/plainText";
 import { isWithheld, scanStateFor, withheldReasonKey } from "./attachmentScanPolicy";
 import { focusMessageListSoon, trapTab } from "./focusTrap";
 import { t, type MessageKey } from "../i18n";
@@ -204,56 +205,6 @@ function textToHtml(text: string): string {
     .split(/\n{2,}/)
     .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
     .join("");
-}
-
-/** HTML → plain text. Used both for the multipart/alternative text fallback and
- * for the rich→plain toggle. Block elements become line breaks, list items get a
- * bullet, a blockquote's lines are prefixed with "> ", and an image collapses to
- * its alt text — a readable plain rendering, not a perfect one. */
-function htmlToText(html: string): string {
-  // DOMParser builds an inert document (no scripts run, nothing loads), which is
-  // all this needs: walk it for text. (ADR-051 §4; this was a <template> before.)
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  return walkText(doc.body)
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function walkText(node: Node): string {
-  let out = "";
-  node.childNodes.forEach((child) => {
-    if (child.nodeType === Node.TEXT_NODE) {
-      out += (child.textContent ?? "").replace(/\s+/g, " ");
-      return;
-    }
-    if (child.nodeType !== Node.ELEMENT_NODE) return;
-    const el = child as HTMLElement;
-    const tag = el.tagName.toLowerCase();
-    if (tag === "br") {
-      out += "\n";
-      return;
-    }
-    if (tag === "img") {
-      const alt = el.getAttribute("alt");
-      out += alt ? `[${alt}]` : "[image]";
-      return;
-    }
-    const inner = walkText(el);
-    if (tag === "blockquote") {
-      out += `${inner
-        .split("\n")
-        .map((line) => `> ${line}`)
-        .join("\n")}\n`;
-    } else if (tag === "li") {
-      out += `• ${inner}\n`;
-    } else if (/^(p|div|h[1-6]|ul|ol|tr|table|section|article|header|footer|figure|pre)$/.test(tag)) {
-      out += `${inner}\n`;
-    } else {
-      out += inner;
-    }
-  });
-  return out;
 }
 
 /** A fresh Content-ID for an inline image. It is used both in the body's
