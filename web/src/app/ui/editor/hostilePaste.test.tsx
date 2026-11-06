@@ -470,3 +470,188 @@ describe("hostile styles in pasted HTML: the value goes, the text stays", () => 
     expect(m.html()).toBe("<p>t</p>");
   });
 });
+
+// ---- tables (ADR-051 beta 4) ----------------------------------------------------
+// A table keeps its structure and text and nothing else: no style, background,
+// bgcolor, width, class, align or handler on a table, row or cell survives, and
+// the editor's own fixed border and padding are written instead. The oracle below
+// is written out here, independently of ./tables.ts, so loosening the extension
+// cannot loosen the check with it.
+
+const TABLE_TAGS = new Set(["TABLE", "TBODY", "TR", "TH", "TD"]);
+
+/** What the editor writes on a cell, as the DOM reads it back. */
+const OWN_CELL = { border: "1px solid #999999", padding: "4px 8px" };
+
+/** A table document holds only the editor's own forms. */
+function assertTableClean(root: ParentNode, where: string): void {
+  expect(root.querySelectorAll(DANGEROUS).length, `${where}: dangerous element`).toBe(0);
+  expect(root.querySelectorAll("colgroup, col, thead, tfoot, caption").length, `${where}: a table part the editor never writes`).toBe(0);
+  for (const el of Array.from(root.querySelectorAll("table, tbody, tr, th, td"))) {
+    expect(TABLE_TAGS.has(el.tagName)).toBe(true);
+    const names = el.getAttributeNames().filter((n) => !(el.tagName === "TD" || el.tagName === "TH") || !["colspan", "rowspan"].includes(n));
+    const want = el.tagName === "TABLE" ? ["style"] : el.tagName === "TH" ? ["scope", "style"] : el.tagName === "TD" ? ["style"] : [];
+    expect(names.sort(), `${where}: attributes of ${el.tagName}`).toEqual(want);
+    const style = (el as HTMLElement).style;
+    if (el.tagName === "TABLE") {
+      expect(style.getPropertyValue("border-collapse"), `${where}: table style`).toBe("collapse");
+      expect(style.length, `${where}: table style has only one declaration`).toBe(1);
+    }
+    if (el.tagName === "TD" || el.tagName === "TH") {
+      expect(style.getPropertyValue("padding"), `${where}: ${el.tagName} padding`).toBe(OWN_CELL.padding);
+      const border = style.getPropertyValue("border").replace(/rgb\(153, 153, 153\)/, "#999999");
+      expect(border, `${where}: ${el.tagName} border`).toBe(OWN_CELL.border);
+      for (const prop of Array.from(style)) {
+        expect(prop, `${where}: ${el.tagName} declares ${prop}`).toMatch(/^(border(-.+)?|padding(-.+)?|text-align|font-weight)$/);
+      }
+      if (el.tagName === "TD") expect(style.getPropertyValue("font-weight") + style.getPropertyValue("text-align"), `${where}: td is not a header`).toBe("");
+      expect(style.cssText, `${where}: ${el.tagName} style`).not.toMatch(/url\(|expression|background|width|evil/i);
+    }
+    if (el.tagName === "TH") expect(el.getAttribute("scope")).toBe("col");
+  }
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    for (const attr of Array.from(el.attributes)) {
+      expect(attr.name.startsWith("on"), `${where}: ${el.tagName} has ${attr.name}`).toBe(false);
+      if (["TABLE", "TBODY", "TR", "TH", "TD"].includes(el.tagName)) {
+        expect(["style", "scope", "colspan", "rowspan"], `${where}: ${el.tagName} carries ${attr.name}`).toContain(attr.name);
+      }
+    }
+  }
+  // (ProseMirror's own trailing-break hack carries a class in the live DOM only.)
+  const all = ((root as Element).innerHTML ?? "").replace(/ class="ProseMirror-trailingBreak"/g, "");
+  expect(all, `${where}: markup`).not.toMatch(/evil\.example|expression\(|url\(|javascript:|bgcolor|background=|\bclass=|\bwidth=/i);
+}
+
+interface TableCase {
+  name: string;
+  html: string;
+  /** Text that must still be there. */
+  text: string[];
+  live: boolean;
+}
+
+const NEST = (n: number): string => {
+  let inner = `level ${n}`;
+  for (let i = n - 1; i >= 1; i--) inner = `level ${i}<table><tbody><tr><td>${inner}</td></tr></tbody></table>`;
+  return `<table><tbody><tr><td>${inner}</td></tr></tbody></table>`;
+};
+
+const TABLE_CASES: TableCase[] = [
+  { name: "td with a url() background", html: `<table><tr><td style="background:url(${EVIL})">cell one</td></tr></table>`, text: ["cell one"], live: false },
+  { name: "table background attribute", html: `<table background="${EVIL}"><tr><td>cell two</td></tr></table>`, text: ["cell two"], live: false },
+  { name: "td onclick", html: `<table><tr><td onclick="${SET}" onmouseover="${SET}">cell three</td></tr></table>`, text: ["cell three"], live: true },
+  { name: "th with expression() in its style", html: `<table><tr><th style="width:expression(${SET});color:expression(${SET})">head four</th></tr></table>`, text: ["head four"], live: false },
+  { name: "bgcolor, width, class, align, valign, height, cellpadding, id", html: `<table class="x" id="t" width="9999" bgcolor="#ff0000" cellpadding="40" border="9" align="right" style="width:99999px;min-width:5000px;background:url(${EVIL})"><tr class="r" onclick="${SET}" style="height:900px"><td class="c" width="5000" height="900" bgcolor="red" align="right" valign="top" style="background:red;position:fixed">cell five</td></tr></table>`, text: ["cell five"], live: true },
+  { name: "a table in a live handler-bearing wrapper", html: `<div onclick="${SET}"><table><tr><td><img src=x onerror="${SET}">cell six</td></tr></table></div>`, text: ["cell six"], live: true },
+  { name: "colspan and rowspan with hostile styles beside them", html: `<table><tr><td colspan="2" style="background:url(${EVIL})">wide seven</td></tr><tr><td>a</td><td rowspan="2">b</td></tr></table>`, text: ["wide seven"], live: false },
+  { name: "colgroup with widths", html: `<table><colgroup><col width="900" style="width:900px"></colgroup><tr><td>cell eight</td></tr></table>`, text: ["cell eight"], live: false },
+  { name: "a table nested five deep", html: NEST(5), text: [1, 2, 3, 4, 5].map((n) => `level ${n}`), live: false },
+  { name: "a script and a style element inside cells", html: `<table><tr><td><script>${SET}</script>cell nine<style>td{background:url(${EVIL})}</style></td></tr></table>`, text: ["cell nine"], live: false },
+];
+
+describe("hostile tables: the structure and the text stay, everything else goes", () => {
+  for (const c of TABLE_CASES) {
+    it(`${c.name}`, async () => {
+      m = await mountEditor("<p>draft</p>");
+      await paste(m, { html: c.html, text: "pasted text" });
+      fireEverything(m.surface);
+      await settle();
+
+      expect(pwned()).toBe(false);
+      for (const t of c.text) {
+        expect(m.surface.textContent, `live: ${t}`).toContain(t);
+        expect(m.html(), `getHTML: ${t}`).toContain(t);
+      }
+      expect(m.surface.querySelectorAll("table").length, "the table itself survived").toBeGreaterThan(0);
+      assertTableClean(m.surface, "live editor");
+      assertTableClean(inert(m.html()).body, "getHTML");
+      // The seed and insertContent route apply the same rules as paste.
+      for (const route of ["seed", "insertContent", "setContent"] as const) {
+        const seeded = route === "seed" ? await mountEditor(c.html) : await mountEditor("<p>draft</p>");
+        try {
+          if (route === "insertContent") await act(async () => void seeded.editor.commands.insertContent(c.html));
+          if (route === "setContent") await act(async () => void seeded.editor.commands.setContent(c.html));
+          fireEverything(seeded.surface);
+          expect(pwned(), route).toBe(false);
+          assertTableClean(inert(seeded.html()).body, route);
+          for (const t of c.text) expect(seeded.html(), `${route}: ${t}`).toContain(t);
+        } finally {
+          await seeded.unmount();
+        }
+      }
+    });
+  }
+
+  it("the harness can see a table handler run (negative control): the live-page route trips the flag", async () => {
+    for (const c of TABLE_CASES.filter((x) => x.live)) {
+      document.title = "calm";
+      const box = document.createElement("div");
+      document.body.appendChild(box);
+      box.appendChild(live(box, c.html));
+      fireEverything(box);
+      await settle();
+      box.remove();
+      expect(pwned(), c.name).toBe(true);
+    }
+  });
+
+  it("nested five deep: all five levels are still tables, none lost", async () => {
+    m = await mountEditor(NEST(5));
+    expect(inert(m.html()).body.querySelectorAll("table").length).toBe(5);
+  });
+
+  it("a pasted table of 500 rows parses in bounded time and keeps every row", async () => {
+    const rows = Array.from({ length: 500 }, (_, i) => `<tr><td style="background:url(${EVIL})" onclick="${SET}">row ${i} a</td><td width="999">row ${i} b</td></tr>`).join("");
+    m = await mountEditor("<p>draft</p>");
+    const t0 = performance.now();
+    await paste(m, { html: `<table>${rows}</table>`, text: "x" });
+    const took = performance.now() - t0;
+    // A ceiling generous enough for a loaded CI runner; the point is "not
+    // quadratic or unbounded", which would be minutes, not seconds.
+    expect(took, `paste took ${Math.round(took)} ms`).toBeLessThan(15_000);
+    expect(grid500(m)).toBe(500);
+    expect(m.surface.textContent).toContain("row 499 b");
+    assertTableClean(inert(m.html()).body, "getHTML");
+    fireEverything(m.surface.querySelector("table")!);
+    expect(pwned()).toBe(false);
+  }, 60_000);
+
+  it("control: a clean table keeps its structure, its colspan and its own border, so the suite is not passing because everything is dropped", async () => {
+    m = await mountEditor("");
+    await paste(m, { html: `<table><tr><th>Name</th><th>Qty</th></tr><tr><td colspan="2" style="background:url(${EVIL})">kept</td></tr></table>` });
+    const doc = inert(m.html()).body;
+    expect(doc.querySelectorAll("th").length).toBe(2);
+    expect(doc.querySelector("td")!.getAttribute("colspan")).toBe("2");
+    expect(doc.querySelector("td")!.style.getPropertyValue("padding")).toBe("4px 8px");
+    expect(doc.querySelector("td")!.style.getPropertyValue("border")).toContain("1px solid");
+    assertTableClean(doc, "control");
+    expect(doc.textContent).toContain("kept");
+  });
+
+  it("the table oracle can fail (negative control): each hostile form, put in a live table, is rejected", () => {
+    const bad = [
+      `<table><tr><td style="background:url(${EVIL})">x</td></tr></table>`,
+      `<table background="${EVIL}"><tr><td>x</td></tr></table>`,
+      `<table><tr><td onclick="${SET}">x</td></tr></table>`,
+      `<table><tr><th style="width:expression(1)">x</th></tr></table>`,
+      `<table class="x"><tr><td>x</td></tr></table>`,
+      `<table><tr><td bgcolor="red">x</td></tr></table>`,
+      `<table><tr><td width="9">x</td></tr></table>`,
+      `<table><colgroup><col></colgroup><tr><td>x</td></tr></table>`,
+      // and a table that is merely missing the editor's own border
+      `<table style="border-collapse: collapse"><tr><td style="padding: 4px 8px">x</td></tr></table>`,
+    ];
+    for (const html of bad) {
+      const box = document.createElement("div");
+      box.appendChild(live(box, html));
+      expect(() => assertTableClean(box, "control"), html).toThrow();
+    }
+    const ok = document.createElement("div");
+    ok.appendChild(
+      live(ok, `<table style="border-collapse: collapse"><tbody><tr><th scope="col" style="border: 1px solid rgb(153, 153, 153); padding: 4px 8px; text-align: left; font-weight: bold">h</th></tr><tr><td colspan="2" style="border: 1px solid rgb(153, 153, 153); padding: 4px 8px">x</td></tr></tbody></table>`),
+    );
+    expect(() => assertTableClean(ok, "control")).not.toThrow();
+  });
+});
+
+const grid500 = (mm: Mounted): number => mm.surface.querySelectorAll("table tr").length;

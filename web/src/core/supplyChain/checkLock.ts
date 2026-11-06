@@ -20,9 +20,10 @@
  * beta 2, extension-text-style (colour, background colour, font family and size;
  * background colour is used instead of extension-highlight, which would add a
  * package and write `<mark>` where mail clients expect a styled span),
- * extension-subscript and extension-superscript (the `<sub>` and `<sup>` marks).
- * The rest are what starter-kit and react bring with them. Beta 3 adds its table
- * package here when it lands. */
+ * extension-subscript and extension-superscript (the `<sub>` and `<sup>` marks), and,
+ * from beta 4, extension-table (simple tables: Table, TableRow, TableHeader and
+ * TableCell, built on the prosemirror-tables package @tiptap/pm already ships).
+ * The rest are what starter-kit and react bring with them. */
 export const ALLOWED_TIPTAP: readonly string[] = [
   "@tiptap/core",
   "@tiptap/pm",
@@ -54,6 +55,7 @@ export const ALLOWED_TIPTAP: readonly string[] = [
   "@tiptap/extension-strike",
   "@tiptap/extension-subscript",
   "@tiptap/extension-superscript",
+  "@tiptap/extension-table",
   "@tiptap/extension-text",
   "@tiptap/extension-text-style",
   "@tiptap/extension-underline",

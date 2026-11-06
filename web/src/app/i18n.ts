@@ -769,6 +769,18 @@ const en = {
   "compose.codeBlock": "Code block",
   "compose.indent": "Increase indent",
   "compose.outdent": "Decrease indent",
+  // BETA 4: simple tables. The row and column controls are always on the bar and
+  // marked unavailable outside a table (RichTextEditor.tsx), so the bar's order
+  // and size never change.
+  "compose.tableInsert": "Insert table",
+  "compose.tableRowBefore": "Add row above",
+  "compose.tableRowAfter": "Add row below",
+  "compose.tableColBefore": "Add column left",
+  "compose.tableColAfter": "Add column right",
+  "compose.tableDeleteRow": "Delete row",
+  "compose.tableDeleteCol": "Delete column",
+  "compose.tableHeaderRow": "Header row",
+  "compose.tableDelete": "Delete table",
   "compose.undo": "Undo",
   "compose.redo": "Redo",
   "compose.fontFamily": "Font",

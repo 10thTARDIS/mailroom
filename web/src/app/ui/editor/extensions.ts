@@ -5,7 +5,8 @@
 // inline pictures) plus the block quote a reply quote needs. Beta 2 adds the new
 // formatting: strike-through, subscript, superscript, inline code, code blocks,
 // text and highlight colour, font family and size (each only from the fixed
-// lists in ./styleValues.ts) and paragraph indentation. Everything else
+// lists in ./styleValues.ts) and paragraph indentation. Beta 4 adds simple tables
+// (./tables.ts). Everything else
 // StarterKit ships stays switched off (headings, rules, gap cursor), so the schema,
 // and therefore what a paste can become, is no wider than what the toolbar offers.
 
@@ -19,6 +20,7 @@ import StarterKit from "@tiptap/starter-kit";
 import type { EditorProps } from "@tiptap/pm/view";
 import { Indent } from "./indent";
 import { countDroppedImages } from "./paste";
+import { TABLE_EXTENSIONS } from "./tables";
 import { TEXT_STYLE_EXTENSIONS } from "./textStyles";
 import { isAllowedLinkUri, isInlineImageSrc } from "./uri";
 
@@ -89,6 +91,7 @@ export function buildExtensions(hooks: EditorHooks) {
     Superscript,
     ...TEXT_STYLE_EXTENSIONS,
     Indent,
+    ...TABLE_EXTENSIONS,
     Image.extend({
       // EVERY parse path (paste, drop, the seed, insertContent) goes through this
       // rule, so a picture that is not inline is refused wherever it came from, not

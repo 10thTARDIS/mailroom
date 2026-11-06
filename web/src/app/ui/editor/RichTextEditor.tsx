@@ -99,6 +99,24 @@ export function editorHtml(editor: Editor): string {
   return editor.getHTML().replace(/<p(\s[^>]*)?><\/p>/g, "<p$1><br></p>");
 }
 
+/** Whether the table the cursor is in has a header row (its first row is all header cells). */
+function firstRowIsHeader(ed: Editor): boolean {
+  const { $from } = ed.state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type.name === "table") {
+      const row = node.firstChild;
+      if (!row || row.childCount === 0) return false;
+      let all = true;
+      row.forEach((cell) => {
+        if (cell.type.name !== "tableHeader") all = false;
+      });
+      return all;
+    }
+  }
+  return false;
+}
+
 interface Tool {
   id: string;
   labelKey: MessageKey;
@@ -206,6 +224,8 @@ export default function RichTextEditor({
         blockquote: ed?.isActive("blockquote") ?? false,
         bulletList: ed?.isActive("bulletList") ?? false,
         orderedList: ed?.isActive("orderedList") ?? false,
+        inTable: ed?.isActive("table") ?? false,
+        headerRow: ed ? firstRowIsHeader(ed) : false,
         canUndo: ed?.can().undo() ?? false,
         canRedo: ed?.can().redo() ?? false,
         fontFamily: typeof style["fontFamily"] === "string" ? (style["fontFamily"] as string) : "",
@@ -492,6 +512,59 @@ export default function RichTextEditor({
         glyph: "🖼",
         title: t("compose.insertImage"),
         run: () => imgRef.current?.click(),
+      },
+    },
+    {
+      kind: "tool",
+      tool: {
+        id: "insertTable",
+        labelKey: "compose.tableInsert",
+        glyph: "▦",
+        cssGlyph: true,
+        title: t("compose.tableInsert"),
+        // One table at a time in a cell is plenty: tables are simple.
+        disabled: state?.inTable,
+        run: () => void chain()?.insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+      },
+    },
+    ...(
+      [
+        ["tableRowBefore", "compose.tableRowBefore", "+↑", () => chain()?.addRowBefore().run()],
+        ["tableRowAfter", "compose.tableRowAfter", "+↓", () => chain()?.addRowAfter().run()],
+        ["tableColBefore", "compose.tableColBefore", "+←", () => chain()?.addColumnBefore().run()],
+        ["tableColAfter", "compose.tableColAfter", "+→", () => chain()?.addColumnAfter().run()],
+        ["tableDeleteRow", "compose.tableDeleteRow", "−═", () => chain()?.deleteRow().run()],
+        ["tableDeleteCol", "compose.tableDeleteCol", "−║", () => chain()?.deleteColumn().run()],
+      ] as Array<[string, MessageKey, string, () => unknown]>
+    ).map(
+      ([id, key, glyph, run]): Item => ({
+        kind: "tool",
+        tool: { id, labelKey: key, glyph, cssGlyph: true, title: t(key), disabled: !state?.inTable, run: () => void run() },
+      }),
+    ),
+    {
+      kind: "tool",
+      tool: {
+        id: "tableHeaderRow",
+        labelKey: "compose.tableHeaderRow",
+        glyph: "H",
+        cssGlyph: true,
+        title: t("compose.tableHeaderRow"),
+        active: state?.inTable ? state.headerRow : false,
+        disabled: !state?.inTable,
+        run: () => void chain()?.toggleHeaderRow().run(),
+      },
+    },
+    {
+      kind: "tool",
+      tool: {
+        id: "tableDelete",
+        labelKey: "compose.tableDelete",
+        glyph: "✕",
+        cssGlyph: true,
+        title: t("compose.tableDelete"),
+        disabled: !state?.inTable,
+        run: () => void chain()?.deleteTable().run(),
       },
     },
   ];
