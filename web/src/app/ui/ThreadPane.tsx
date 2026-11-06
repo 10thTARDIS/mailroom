@@ -87,6 +87,7 @@ import { PaneToolbar } from "./pane/PaneToolbar";
 import type { PaneMenuItem } from "./pane/PaneToolbar";
 import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 import { addressLine } from "./addressLabel";
+import { ViewSourceDialog } from "./ViewSourceDialog";
 import { SenderPopover } from "./pane/SenderPopover";
 import { conversationIds, foldPlan } from "./pane/fold";
 import { lineSideSentence } from "./pane/lineSide";
@@ -1297,6 +1298,15 @@ export function ThreadPane({
   const plan = useMemo(() => foldPlan(messages, email.id), [messages, email.id]);
   const now = Date.now();
 
+  // View source (#43): the dialog is this pane's, opened from its More menu, and
+  // it reads the OPENED message's own blob through the ordinary download.
+  const [showSource, setShowSource] = useState(false);
+  const sourceGuard = useBlobGuard();
+  const sourceUrl = client.blobUrl(email.blobId, "message.eml", "message/rfc822");
+  useEffect(() => {
+    setShowSource(false);
+  }, [email.id]);
+
   const menu: PaneMenuItem[] = [
     // First: it is the verb a reader reaches for after Reply, and until #582 the
     // only way to reach the forward composer at all was the attachment viewer —
@@ -1322,6 +1332,7 @@ export function ThreadPane({
     ...(onRefile ? [{ key: "refile", label: t("pane.menu.refile"), onSelect: onRefile }] : []),
     { key: "rule", label: t("rules.fromMessage"), onSelect: onCreateRule },
     { key: "print", label: t("action.print"), onSelect: onPrint },
+    { key: "viewSource", label: t("pane.menu.viewSource"), onSelect: () => setShowSource(true) },
     // Only for a message the classifier still has an open question about
     // (#176). A permanently-disabled "Dismiss" on every other message would be
     // a control that never does anything.
@@ -1582,6 +1593,17 @@ export function ThreadPane({
           );
         })}
       </div>
+      {showSource ? (
+        <ViewSourceDialog
+          load={() => client.fetchBlobOnce(sourceUrl)}
+          onDownload={() => void sourceGuard.open(sourceUrl, { download: "message.eml" })}
+          downloadNotice={sourceGuard.notice}
+          onClose={() => {
+            sourceGuard.clear();
+            setShowSource(false);
+          }}
+        />
+      ) : null}
     </aside>
   );
 }

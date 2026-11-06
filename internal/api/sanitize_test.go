@@ -82,7 +82,7 @@ func assertSafeDOM(t *testing.T, in, out string) {
 			}
 			for _, a := range n.Attr {
 				key := strings.ToLower(a.Key)
-				val := normalizeURL(a.Val) // lowercase, control/space characters stripped
+				val := oracleStrip(a.Val) // an independent WHATWG-style stripper, not the code under test
 
 				if strings.HasPrefix(key, "on") {
 					fail("attribute %q survived: an event handler reached the DOM", key)
@@ -93,11 +93,11 @@ func assertSafeDOM(t *testing.T, in, out string) {
 
 				switch key {
 				case "href":
-					if scheme, ok := splitScheme(val); ok && !linkSchemes[scheme] {
-						fail("href with scheme %q survived (%q)", scheme, a.Val)
+					if !hasAnyPrefix(val, "http:", "https:", "mailto:", "tel:", "#") {
+						fail("href=%q survived and is not http:, https:, mailto:, tel: or #", a.Val)
 					}
 				case "src":
-					if classifyImageSrc(a.Val) != srcInline {
+					if !hasAnyPrefix(val, "cid:", "data:image/") || strings.HasPrefix(val, "data:image/svg") {
 						fail("src=%q survived and is not an inline (data:image/cid:) source", a.Val)
 					}
 				case "srcset", "background", "poster", "action", "formaction",
@@ -672,6 +672,20 @@ func TestSanitizeHTML(t *testing.T) {
 				"<a href=\"\x01javascript:alert(1)\">d</a>",
 			want:    []string{">a<", ">b<", ">c<", ">d<"},
 			notWant: []string{"alert(1)", "href="},
+		},
+		{
+			// A browser reads each of these as a RELATIVE URL (a scheme cannot
+			// contain a space or start with NBSP), resolved against the app's own
+			// origin. No notWant on purpose: this case exists so the independent
+			// oracle in assertSafeDOM, which allows only http(s), mailto, tel and #
+			// hrefs, is what refuses a relative link if the sanitiser ever keeps one.
+			name: "links a browser would read as relative",
+			in: `<a href="java script:alert(1)">a</a>` +
+				`<a href="h t t p://example.com/">b</a>` +
+				"<a href=\"\u00a0javascript:alert(1)\">c</a>" +
+				`<a href="/settings">d</a>` +
+				`<a href="mailto-like:x">e</a>`,
+			want: []string{">a<", ">b<", ">c<", ">d<", ">e<"},
 		},
 		{
 			name: "an ordinary link survives — and is forced safe",
@@ -1425,6 +1439,88 @@ func TestNoFalseRemoteContentBanner(t *testing.T) {
 	} {
 		if got := SanitizeHTML(in); strings.Contains(got, blockedAttr) {
 			t.Errorf("SanitizeHTML(%q) falsely reports blocked remote content: %s", in, got)
+		}
+	}
+}
+
+// oracleStrip is the test oracle's OWN WHATWG pre-parse stripping: trim C0
+// controls and spaces at the ends, drop tab/LF/CR inside, lowercase ASCII. It
+// shares no code with normalizeURL, so loosening that cannot loosen the oracle.
+func oracleStrip(s string) string {
+	s = strings.TrimFunc(s, func(r rune) bool { return r <= 0x20 })
+	s = strings.NewReplacer("\t", "", "\n", "", "\r", "").Replace(s)
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 32
+		}
+	}
+	return string(b)
+}
+
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestURLClassificationMatchesTheBrowser pins normalizeURL to the WHATWG URL
+// parser's pre-parse stripping: leading and trailing C0 controls and spaces go,
+// and an interior tab, LF or CR goes; an interior space, an interior control
+// other than those three, and a no-break space do not. The reference is a
+// browser, not our own earlier behaviour.
+func TestURLClassificationMatchesTheBrowser(t *testing.T) {
+	img := []struct {
+		name string
+		in   string
+		want srcKind
+	}{
+		{"interior spaces in data: are a relative URL", "d a t a:image/png,AAAA", srcNone},
+		{"interior space in cid: is a relative URL", "c id:x", srcNone},
+		{"a leading NBSP is not stripped, so no scheme matches", "\u00a0cid:x", srcNone},
+		{"a leading NBSP before data: is not a data URL", "\u00a0data:image/png,AAAA", srcNone},
+		{"a leading space is stripped", " cid:x", srcInline},
+		{"a trailing space is stripped", "cid:x ", srcInline},
+		{"leading C0 control is stripped", "\x01cid:x", srcInline},
+		{"an interior tab is stripped", "ci\td:x", srcInline},
+		{"an interior LF is stripped", "da\nta:image/png,AAAA", srcInline},
+		{"an interior CR is stripped", "ci\rd:x", srcInline},
+		{"entity-decoded tab as the parser delivers it", "c\tid:x", srcInline},
+		{"an interior NUL is not stripped", "ci\x00d:x", srcNone},
+		{"an interior DEL is not stripped", "ci\x7fd:x", srcNone},
+		{"an svg disguised with an interior space stays refused (not widened)", "data:image/svg +xml,x", srcNone},
+		{"an svg disguised with an interior NUL stays refused", "data:image/svg\x00+xml,x", srcNone},
+		{"an svg disguised with an interior DEL stays refused", "data:image/svg\x7f+xml,x", srcNone},
+		{"an svg disguised with an interior C0 control stays refused", "data:image/svg\x01+xml,x", srcNone},
+		{"https stays remote", " https://example.com/a.png", srcRemote},
+		{"h ttps is relative", "h ttps://example.com/a.png", srcNone},
+		{"javascript with a tab is still a scheme and refused", "java\tscript:alert(1)", srcNone},
+	}
+	for _, c := range img {
+		if got := classifyImageSrc(c.in); got != c.want {
+			t.Errorf("%s: classifyImageSrc(%q) = %v, want %v", c.name, c.in, got, c.want)
+		}
+	}
+
+	links := []struct {
+		name   string
+		in     string
+		wantOK bool
+	}{
+		{"java script: is relative, so refused", "java script:alert(1)", false},
+		{"h t t p is relative, so refused", "h t t p://example.com/", false},
+		{"a tab inside javascript: is refused", "java\tscript:alert(1)", false},
+		{"a leading NBSP javascript: is relative, so refused", "\u00a0javascript:alert(1)", false},
+		{"a leading space https link survives", " https://example.com/", true},
+		{"a tab inside https survives (the browser reads it as https)", "ht\ttps://example.com/", true},
+		{"mailto survives", "mailto:you@example.com", true},
+	}
+	for _, c := range links {
+		if _, ok := safeLinkURL(c.in); ok != c.wantOK {
+			t.Errorf("%s: safeLinkURL(%q) ok = %v, want %v", c.name, c.in, ok, c.wantOK)
 		}
 	}
 }

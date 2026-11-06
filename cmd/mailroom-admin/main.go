@@ -194,6 +194,13 @@
 //	                   script with its size and which is active, and a STRUCTURAL summary
 //	                   of the active one. Never prints a body unless --show-active. The
 //	                   client can only send read verbs; there is no --apply.)
+//	plaintext-report   [--user-id U] [--limit N]
+//	                   (#35, report first: of the messages shown as plain text, how many
+//	                   are format=flowed, how many have no marker but look hard-wrapped at
+//	                   a fixed width, how many lines a rejoin rule would join, and per
+//	                   reason why the rest were not judged wrapped. Parameters and the
+//	                   --limit bound are printed. Read-only transactions, never writes;
+//	                   prints counts and hashed message ids, never message text.)
 //	from-field-report  --user-id [--batch N] [--examples N]
 //	                   (mailroom#754: how many messages carry no From, several From fields,
 //	                   an empty one beside a real one, a group or several mailboxes — and,
@@ -455,6 +462,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"placement-report":          runPlacementReport,
 	"placement-explain":         runPlacementExplain,
 	"plan-check":                runPlanCheck,
+	"plaintext-report":          runPlaintextReport,
 	"nudge-report":              runNudgeReport,
 	"from-field-report":         runFromFieldReport,
 	"placement-backfill":        runPlacementBackfill,

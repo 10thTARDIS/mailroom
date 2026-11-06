@@ -52,7 +52,7 @@ Companion to **mailroom-spec.md** (v0.4). Goal: an exhaustive inventory of featu
 | Inline (CID) images | | shipped (v1.0.0) |
 | Preview text / snippets | | shipped (v1.0.0) |
 | Reading-pane layouts (vertical/horizontal/none) | | shipped |
-| View source / raw headers | Partial: raw bytes are reachable via the JMAP blob download (`internal/api/blob.go`), so an API client can fetch source; the web client has no "view source" menu item or raw-headers view | v1.0 (partial) — #43 |
+| View source / raw headers | **View source…** in a message's More menu opens the raw message as text in a monospace block (never rendered as HTML), with a Headers tab (every header in order, folded lines joined), Copy, and a .eml download through the existing blob download; a message over 1 MiB is shown truncated with a note (`web/src/app/ui/ViewSourceDialog.tsx`, `web/src/core/messageSource.ts`) | **shipped (v1.101.0)** — #43 |
 | Print / export message to PDF | Browser print-to-PDF, deliberately, rather than a bespoke renderer | shipped (v1.1.0) |
 | Message translation | Needs T2 or ext. service | v2 — #4 |
 | Read receipts — request/send | Privacy-sensitive, optional | v2 — #11 |
@@ -173,7 +173,7 @@ Companion to **mailroom-spec.md** (v0.4). Goal: an exhaustive inventory of featu
 | S/MIME encrypt/sign/verify | **[v0.4]** Priced 2–3× PGP (thin Go ecosystem). Decided: deferred to 2.x (ADR-024 §3, 2026-08-05) — no longer an open question | v2 — #10 |
 | WKD publishing (key authority) | Internet-Draft (pin revision); real identities only — catchall aliases unpublishable (spec §9) | shipped (v1.31.0) |
 | Autocrypt headers | Outbound header deliberately sent without `prefer-encrypt=mutual` until decrypt exists | shipped |
-| Shareable key pages (fingerprint/QR) | Partial: fingerprint page implemented (`internal/keypub/page.go`); no QR-code generation found anywhere in the tree | v1.x (partial) — #47 |
+| Shareable key pages (fingerprint/QR) | Fingerprint page (`internal/keypub/page.go`) with an inline-SVG QR code of the `OPENPGP4FPR:` URI generated on the server (`internal/keypub/qr.go`); no script, no external request, page CSP unchanged | **shipped (v1.101.0)** — #47 |
 | DNS OPENPGPKEY publishing | | v3 — #16 |
 | Phishing / homograph-URL warnings | ⚠ LINKS, not senders — the boundary with the row above, stated so this is not built twice or never. That one judges the `From` domain; this one judges URLs in message bodies. They share `internal/senderwarn.Skeleton`, which is exported for exactly that. | v2 — #11 |
 | Biometric unlock (native apps) | | v2 — #12 |
