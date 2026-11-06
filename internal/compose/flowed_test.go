@@ -43,7 +43,6 @@ func unflowRFC3676(wire string) string {
 			// A soft break never crosses a depth change: close the paragraph.
 			out = append(out, strings.Repeat(">", accDepth)+prefixSpace(accDepth)+acc.String())
 			acc.Reset()
-			accDepth = -1
 		}
 		acc.WriteString(rest)
 		accDepth = depth
