@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**Replies and forwards now keep the original message's formatting.** A reply to a
+## [1.101.0-beta.5] — 2026-11-07
+
+**The fifth beta of v1.101: replies and forwards now keep the original message's formatting.** A reply to a
 formatted message no longer flattens it to plain text: the quote keeps bold,
 lists, links, colours and real tables, leaves out pictures from the web, and
 shortens very long messages with a note.
