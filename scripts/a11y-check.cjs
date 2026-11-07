@@ -5844,11 +5844,11 @@ async function quotedReplyCarry(page) {
     });
     await control("composer-quote-request-listener", async () => {
       requested.length = 0;
-      await page.evaluate((host) => {
+      await page.evaluate(() => {
         const img = document.createElement("img");
-        img.src = "https://t.news." + host + "/control.gif";
+        img.src = "https://t.news.theatre.example.com/control.gif";
         document.body.appendChild(img);
-      }, QUOTE_HOST);
+      });
       await sleep(1000);
       const heard = requested.length > 0;
       requested.length = 0;
