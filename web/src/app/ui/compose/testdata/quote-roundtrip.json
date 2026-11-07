@@ -1,0 +1,702 @@
+[
+  {
+    "name": "inline img with onerror",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><img src=\"cid:a@inline.mailroom\" style=\"max-width: 100%;\"></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> [image]",
+    "expect": []
+  },
+  {
+    "name": "javascript: link",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>click me</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> click me",
+    "expect": []
+  },
+  {
+    "name": "data:text/html link",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>data link</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> data link",
+    "expect": []
+  },
+  {
+    "name": "script",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>after script</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> after script",
+    "expect": []
+  },
+  {
+    "name": "style element",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>after style</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> after style",
+    "expect": []
+  },
+  {
+    "name": "css url() in style attribute",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>styled</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> styled",
+    "expect": []
+  },
+  {
+    "name": "remote image",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><p>[picture not included]</p><p>after</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> [picture not included]\n> after",
+    "expect": []
+  },
+  {
+    "name": "meta refresh",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>after meta</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> after meta",
+    "expect": []
+  },
+  {
+    "name": "parked image with srcset",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><p>[picture not included]</p><p>after</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> [picture not included]\n> after",
+    "expect": []
+  },
+  {
+    "name": "tracking pixel",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>hello</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> hello",
+    "expect": []
+  },
+  {
+    "name": "cid with no matching part",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>pic</p><p><img src=\"cid:ghost@example.com\" style=\"max-width: 100%;\"></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> pic\n> [image]",
+    "expect": []
+  },
+  {
+    "name": "javascript: link in a paragraph",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>see this now</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> see this now",
+    "expect": []
+  },
+  {
+    "name": "iframe srcdoc",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>after frame</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> after frame",
+    "expect": []
+  },
+  {
+    "name": "base href",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>rel[picture not included]</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> rel[picture not included]",
+    "expect": []
+  },
+  {
+    "name": "style block with import",
+    "group": "hostile",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>after style</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> after style",
+    "expect": []
+  },
+  {
+    "name": "newsletter",
+    "group": "layout",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>Example News</p><p>Issue 42</p><p>Main story</p><p>The first paragraph of the main story, with a <a href=\"https://example.com/story\">link</a>.</p><p>A second paragraph.</p><p>Sidebar</p><ul><li><p>One</p></li><li><p>Two</p></li></ul><p>You are receiving this because you subscribed. <a href=\"https://example.com/unsub\">Unsubscribe</a></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> Example News\n> Issue 42\n> Main story\n> The first paragraph of the main story, with a link.\n> A second paragraph.\n> Sidebar\n> • One\n> • Two\n>\n> You are receiving this because you subscribed. Unsubscribe",
+    "expect": []
+  },
+  {
+    "name": "plain data table",
+    "group": "layout",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>Prices:</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Item</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Price</p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Tea</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>3</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Cake</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>4</p></td></tr></tbody></table><p>Thanks</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> Prices:\n> Item  Price\n> ----  -----\n> Tea   3\n> Cake  4\n> Thanks",
+    "expect": []
+  },
+  {
+    "name": "data table inside a layout table",
+    "group": "layout",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>Report</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Region</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Total</p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>North</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>10</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>South</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>12</p></td></tr></tbody></table><p>End of report</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> Report\n> Region  Total\n> ------  -----\n> North   10\n> South   12\n> End of report",
+    "expect": []
+  },
+  {
+    "name": "bold",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><strong>sample</strong></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "strong",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "italic",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><em>sample</em></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "em",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "underline",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><u>sample</u></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "u",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "bulleted list",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><ul><li><p>sample</p></li></ul></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> • sample",
+    "expect": [
+      {
+        "tag": "ul",
+        "within": "blockquote"
+      },
+      {
+        "tag": "li",
+        "within": "ul"
+      }
+    ]
+  },
+  {
+    "name": "numbered list",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><ol><li><p>sample</p></li></ol></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> • sample",
+    "expect": [
+      {
+        "tag": "ol",
+        "within": "blockquote"
+      },
+      {
+        "tag": "li",
+        "within": "ol"
+      }
+    ]
+  },
+  {
+    "name": "link",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><a href=\"https://example.com/page\">sample</a></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "https://example.com/page"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "inline picture",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>see:<img src=\"cid:pic1@inline.mailroom\" alt=\"a picture\" style=\"max-width: 100%;\"></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> see:[a picture]",
+    "expect": [
+      {
+        "tag": "img",
+        "attrs": {
+          "src": "cid:pic1@inline.mailroom",
+          "alt": "a picture"
+        },
+        "style": {
+          "max-width": "100%"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "strike-through",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><s>sample</s></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "s",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "subscript",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><sub>sample</sub></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "sub",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "superscript",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><sup>sample</sup></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "sup",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "inline code",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><code>sample</code></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "code",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "code block",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><pre><code>line one</code></pre></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> line one",
+    "expect": [
+      {
+        "tag": "code",
+        "within": "pre"
+      }
+    ]
+  },
+  {
+    "name": "block quote",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><blockquote><p>sample</p></blockquote></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> > sample",
+    "expect": [
+      {
+        "tag": "blockquote",
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "text colour",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"color: rgb(204, 0, 0);\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(204, 0, 0)"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "highlight colour",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"background-color: rgb(255, 255, 0);\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "background-color": "rgb(255, 255, 0)"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "font Sans-serif",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-family: Arial, Helvetica, sans-serif;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Arial, Helvetica, sans-serif"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "font Serif",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-family: Georgia, &quot;Times New Roman&quot;, serif;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Georgia, \"Times New Roman\", serif"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "font Monospace",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-family: &quot;Courier New&quot;, Courier, monospace;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "\"Courier New\", Courier, monospace"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "font Wide",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-family: Verdana, Geneva, sans-serif;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-family": "Verdana, Geneva, sans-serif"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "size Small",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-size: 12px;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "12px"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "size Large",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-size: 18px;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "18px"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "size Huge",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p><span style=\"font-size: 24px;\">sample</span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "font-size": "24px"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "paragraph indent, two levels",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p style=\"margin-left: 4em;\">sample</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n>     sample",
+    "expect": [
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "4em"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "deepest paragraph indent",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p style=\"margin-left: 12em;\">sample</p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n>             sample",
+    "expect": [
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "12em"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "nested list",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><ul><li><p>one</p><ul><li><p>two</p></li></ul></li></ul></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> • one\n>   • two",
+    "expect": [
+      {
+        "tag": "ul",
+        "within": "li"
+      }
+    ]
+  },
+  {
+    "name": "everything on one span, indent and strike on its paragraph",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p style=\"margin-left: 2em;\"><span style=\"color: rgb(11, 46, 107); background-color: rgb(182, 215, 168); font-family: Verdana, Geneva, sans-serif; font-size: 18px;\"><s>sample</s></span></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n>   sample",
+    "expect": [
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(11, 46, 107)",
+          "background-color": "rgb(182, 215, 168)",
+          "font-family": "Verdana, Geneva, sans-serif",
+          "font-size": "18px"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "s",
+        "within": "blockquote"
+      },
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "2em"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "a quote holding an indented, coloured paragraph",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><blockquote><p style=\"margin-left: 2em;\"><span style=\"color: rgb(103, 78, 167);\">quoted</span></p></blockquote></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> >   quoted",
+    "expect": [
+      {
+        "tag": "blockquote",
+        "within": "blockquote"
+      },
+      {
+        "tag": "p",
+        "style": {
+          "margin-left": "2em"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(103, 78, 167)"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "table, no header row",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a1</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b1</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c1</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a2</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b2</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c2</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>a3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>b3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>c3</p></td></tr></tbody></table><p><br></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> a1  b1  c1\n> a2  b2  c2\n> a3  b3  c3",
+    "expect": [
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "table"
+      }
+    ]
+  },
+  {
+    "name": "table, header row",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Item</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Qty</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Price</p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Apple</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>3</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>1.50</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>Watermelon</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>12</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>0.20</p></td></tr></tbody></table><p><br></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> Item        Qty  Price\n> ----------  ---  -----\n> Apple       3    1.50\n> Watermelon  12   0.20",
+    "expect": [
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "table"
+      }
+    ]
+  },
+  {
+    "name": "table, formatting inside cells",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Name</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Note</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p><br></p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><span style=\"color: rgb(204, 0, 0);\"><strong>word</strong></span></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><em>other</em></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr></tbody></table><p><br></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> Name  Note\n> ----  -----  -\n> word  other",
+    "expect": [
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "strong",
+        "within": "td"
+      },
+      {
+        "tag": "span",
+        "style": {
+          "color": "rgb(204, 0, 0)"
+        },
+        "within": "td"
+      },
+      {
+        "tag": "em",
+        "within": "td"
+      }
+    ]
+  },
+  {
+    "name": "table inside a quote",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><blockquote><p>quoted</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>h1</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>h2</p></th><th scope=\"col\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p><br></p></th></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>x</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>y</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p><br></p></td></tr></tbody></table></blockquote></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> > quoted\n> > h1  h2\n> > --  --  -\n> > x   y",
+    "expect": [
+      {
+        "tag": "blockquote",
+        "within": "blockquote"
+      },
+      {
+        "tag": "table",
+        "style": {
+          "border-collapse": "collapse"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col"
+        },
+        "within": "blockquote"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "within": "blockquote"
+      }
+    ]
+  },
+  {
+    "name": "pasted table with colspan and rowspan",
+    "group": "format",
+    "html": "<p><br></p><p>On 3/2/2026, Alice wrote:</p><blockquote><p>before</p><table style=\"border-collapse: collapse;\"><tbody><tr><th scope=\"col\" colspan=\"2\" style=\"padding: 4px 8px; text-align: left; font-weight: bold; border: 1px solid rgb(153, 153, 153);\"><p>Heading</p></th></tr><tr><td rowspan=\"2\" style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>left</p></td><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>right</p></td></tr><tr><td style=\"padding: 4px 8px; border: 1px solid rgb(153, 153, 153);\"><p>below</p></td></tr></tbody></table><p><br></p></blockquote>",
+    "text": "On 3/2/2026, Alice wrote:\n> before\n> Heading\n> -------  -----\n> left     right\n> below",
+    "expect": [
+      {
+        "tag": "th",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px",
+          "text-align": "left",
+          "font-weight": "bold"
+        },
+        "attrs": {
+          "scope": "col",
+          "colspan": "2"
+        },
+        "within": "table"
+      },
+      {
+        "tag": "td",
+        "style": {
+          "border": "1px solid rgb(153, 153, 153)",
+          "padding": "4px 8px"
+        },
+        "attrs": {
+          "rowspan": "2"
+        },
+        "within": "table"
+      }
+    ]
+  }
+]

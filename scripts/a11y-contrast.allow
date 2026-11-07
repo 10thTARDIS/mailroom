@@ -125,6 +125,17 @@
 # .attachment-size, on the tile's --bg-sunken, hence 5.34:1 floored to 5.3.
 .compose-tile-size 5.3 a composer attachment tile's size
 .compose-tile-origin 5.3 a composer attachment tile's "from the message" note
+# A recipient chip's "no key" note, first linted when the quoted-reply surface
+# (ADR-051 beta 5) opened a REPLY, the first composer surface with a recipient: the
+# same muted tone as the tile notes above, measured 5.34:1 in the light theme.
+# Never the only carrier: the chip's accessible name says the same.
+.compose-chip-nokey 5.3 a recipient chip's "no key" note
+# A link inside a quoted paragraph of the composer's body, first linted when the
+# quoted-reply surface (ADR-051 beta 5) put a formatted original's link in the
+# editor: the link colour on the editor surface, 6.68:1 measured in the dark theme.
+# AA holds (check-tokens.mjs asserts the pair); it is the text of a link, which is
+# underlined, so colour is never the only carrier.
+.editor-surface>blockquote>p>a 6.6 a link in the text a reply quotes
 .sender-popover-address 5.9 the sender popover's address line
 .sender-popover-alias 5.9 the sender popover's "writes to" line
 .sender-popover-section>h3 5.9 a sender-popover section heading

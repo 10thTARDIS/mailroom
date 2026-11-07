@@ -9,6 +9,50 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**Replies and forwards now keep the original message's formatting.** A reply to a
+formatted message no longer flattens it to plain text: the quote keeps bold,
+lists, links, colours and real tables, leaves out pictures from the web, and
+shortens very long messages with a note.
+
+### What's new: replies and forwards keep the original's formatting
+
+When you reply to or forward a message that has formatting, the quoted original
+now keeps it: bold and italic, lists, links, colours, headings and tables arrive in
+your reply the way the sender wrote them, under the same "On ... wrote:" line as
+before, and below your signature as before.
+
+- **Pictures from the web are never included.** A picture that has to be fetched
+  from a website is left out of the quote and the quote says "[picture not
+  included]" where it was. A picture that was part of the message itself is kept
+  and sent with your reply, so the person you write to sees it; if it cannot be
+  carried (for example it is held back by the attachment scan, or the quote would
+  carry more than 10 MB of pictures), it is left out with the same note.
+- **Newsletter-style layout is tidied.** Many messages are laid out with tables
+  that are not really tables. Those are quoted as plain paragraphs, in reading
+  order, instead of a grid of boxes. A table that is real data (more than one
+  column, nothing nested inside it, at most 20 columns) stays a table.
+- **Long messages are shortened.** A quote keeps whole paragraphs and tables up to
+  about 50,000 characters, then says "[The rest of the original message is not
+  included]". The same note appears when the message itself was too large for
+  Mailroom to load in full.
+- **What the sender hid stays hidden.** Text the sender made invisible (hidden, or
+  white on white) is left out of the quote, so a reply never carries words you
+  could not see. A quote keeps at most 50 pictures.
+- **Plain-text messages are quoted as before**, and so is a reply written in
+  plain-text mode. Encrypted messages are quoted exactly as before: the decrypted
+  text is never stored and is quoted as plain text only.
+
+### Under the hood
+
+- A quoted original is built from the version of the message the server has already
+  made safe to show, never from the raw message; Mailroom then removes what the
+  composer does not keep and the outgoing mail cleaning runs on the result as on
+  every draft. Messages with hostile content (scripts, forms, frames, hidden
+  pictures, scripted links) are tested end to end: nothing runs, nothing is
+  fetched, and none of it is in the quote, the sent message or the saved draft.
+- Every format is also checked through a quote, from the received message to the
+  saved draft and back.
+
 ## [1.101.0-beta.4] — 2026-11-06
 
 **The fourth beta of v1.101 lets the composer make simple tables.** Add a table to a message, give it a

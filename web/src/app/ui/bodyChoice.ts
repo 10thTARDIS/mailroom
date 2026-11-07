@@ -18,7 +18,7 @@ import type { EmailBodyPart } from "../../core/jmap/types";
 interface BodySource {
   textBody?: EmailBodyPart[];
   htmlBody?: EmailBodyPart[];
-  bodyValues?: Record<string, { value: string }>;
+  bodyValues?: Record<string, { value: string; isTruncated?: boolean }>;
 }
 
 const typeOf = (p: EmailBodyPart): string => p.type.toLowerCase();
@@ -61,6 +61,15 @@ export function htmlToRender(src: BodySource, sep = "\n\n"): string {
     })
     .filter(Boolean)
     .join(sep);
+}
+
+/** Whether the server cut a text/html part short (EmailBodyValue.isTruncated):
+ * the HTML the message is shown or quoted from is then not all of the original. */
+export function htmlBodyTruncated(src: BodySource): boolean {
+  if (!hasHtmlPart(src.htmlBody)) return false;
+  return (src.htmlBody ?? []).some(
+    (p) => typeOf(p) === "text/html" && !!p.partId && src.bodyValues?.[p.partId]?.isTruncated === true,
+  );
 }
 
 /** A text/plain value, unflowed when the part is marked format=flowed (RFC

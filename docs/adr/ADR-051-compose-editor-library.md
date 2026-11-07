@@ -157,6 +157,7 @@ their markers.
     or loads, and that the resulting document holds none of them.
 - **Reply quotes stay as today: escaped plain text, never the parent's HTML.**
   Quoting a message with its formatting would be a separate decision.
+  *Superseded for HTML originals by §7 (#92).*
 - **Compose.tsx no longer uses `innerHTML`.** The editor is seeded through
   `setContent` (a schema parse) and read through `getHTML()` (a serializer).
   ADR-015's exception is retired, and the web build's no-`innerHTML` check applies
@@ -189,7 +190,69 @@ the same layout.
 
 **As released:** the steps shipped as v1.101.0-beta.1 (step 1), beta.3 (step 2,
 alongside format=flowed sending, #93) and beta.4 (step 3), with #43, #47 and the
-#35 report in beta.2. #35's display change was measured and not built.
+#35 report in beta.2. #35's display change was measured and not built. Step 4,
+formatted quotes (§7, #92), shipped as beta.5.
+
+### 7. Amendment (2026-11-06): replies and forwards quote with formatting (#92)
+
+The operator decided (2026-11-06) that replies and forwards quote the original
+with its formatting, in v1.101.0, as its own beta. This retires §4's plain-text
+quote rule for originals that have an HTML body.
+
+**The source is never the raw part.** The quote is built from the original's
+HTML body value as the JMAP API returns it. That value has already been through
+the reader's sanitiser on the server (`bodyValues` in `internal/api/body.go`), so
+remote content is parked, active content is gone, and CSS is allowlisted, before
+the browser sees any of it. An original with no HTML body keeps today's escaped
+plain-text quote. So does a reply written in plain-text mode, and the plain
+alternative of every reply is still derived from the editor's document.
+
+**Three layers, each sufficient for its own threat:**
+
+1. **Server, on read:** the reader's sanitiser, as above.
+2. **Editor, on seed:** the HTML is parsed into the editor's schema in an inert
+   document (§4), so anything the schema does not define is dropped. The beta-1
+   image rule and the beta-2 style rules apply unchanged. Specifically for quotes:
+   - a parked remote image (`data-mailroom-remote-src`, `data-mailroom-blocked`)
+     and an image whose `src` is a Mailroom proxy path are dropped, never revived;
+   - an inline `cid:` image is kept only when the original lists that part with a
+     blob the reply can carry as its own inline attachment, within the reply's
+     attachment limits. Otherwise it is dropped, and the quote says so.
+3. **Server, on save and send:** `SanitizeOutboundHTML`, as for every draft.
+
+**Layout tables are not data tables.** Most HTML mail lays itself out with
+tables, and the editor would turn each one into a bordered grid. A quoted table
+is kept as a table only when it reads as data: no nested table, no
+`role="presentation"`, more than one column in some row, and at most 20 columns.
+Any other table is flattened, its cells' content kept in order as blocks. The
+rule runs on the quote only; pasting keeps §4's behaviour.
+
+**Size.** The quote is cut at a whole top-level block once it passes a fixed
+budget of the original's text, a constant in the code, followed by a note that
+the rest is not included. The same note appears when the server already
+truncated the body value (`isTruncated`). A quote never cuts mid-element, and
+the note is our own text, not the original's.
+
+**Encrypted originals** follow the existing quoting rules exactly (ADR-037:
+plaintext is never persisted). Formatted quoting adds no path by which a
+decrypted body reaches a saved draft that the plain-text quote did not already
+have.
+
+**What does not change:** the attribution line, where the quote sits (last,
+below the signature), the forward's subject and attachments, and the server's
+sanitisation of every saved and sent body.
+
+**Tests:**
+- a hostile-original suite: the hostile-paste payloads delivered as received
+  messages through the real reader sanitiser, then replied to and forwarded.
+  It asserts nothing runs or loads and that the quote and the saved draft hold
+  none of them, with a negative control showing the oracle can fail;
+- a round trip per supported format: received HTML, then the quote, then a saved
+  draft that reopens identically, then the outbound sanitiser;
+- layout tables flattened and data tables kept, both with synthetic newsletter-
+  shaped fixtures;
+- the plain-text fallback, truncation at a block boundary with the note, `cid:`
+  kept and dropped, and encrypted originals unchanged.
 
 ## Consequences
 
@@ -201,8 +264,8 @@ alongside format=flowed sending, #93) and beta.4 (step 3), with #43, #47 and the
   tier. Everything we use is MIT on npm today. If that happened, we would pin the
   last MIT version and could fall back to ProseMirror directly, which Tiptap is
   built on, without changing the stored format, which is HTML.
-- **ADR-015** is partly superseded (§4). Its plain-text reply quoting remains in
-  force.
+- **ADR-015** is partly superseded (§4). Its plain-text reply quoting is
+  retired for HTML originals by §7; it remains for plain-text originals.
 
 ## Alternatives considered
 
