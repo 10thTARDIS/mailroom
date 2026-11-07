@@ -9,6 +9,153 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.101.0] — 2026-11-07
+
+**v1.101 is the new composer.** Writing a message now has a full formatting bar:
+fonts and sizes, text and highlight colour, strike-through, subscript and
+superscript, quotes, code, indentation, undo and redo, and simple tables. Pasting
+keeps formatting, pictures show while you write, and the message body holds one
+steady size with the buttons always in view. Replies and forwards keep the
+original message's formatting instead of flattening it to plain text, and the
+plain-text mail you send now rewraps neatly on phones. You can also view any
+message's source exactly as it arrived, and your public key page shows a QR code
+of its fingerprint.
+
+### What's new: writing a message
+
+Everything is on the formatting bar, which is a single stop for the Tab key and is
+moved with the arrow keys. Hovering over a button shows its keyboard shortcut.
+
+- **Bold, italic, underline, lists and links work as before**, on a new editor
+  underneath (Ctrl+B, Ctrl+I, Ctrl+U, Ctrl+Shift+8 for a bulleted list,
+  Ctrl+Shift+7 for a numbered one).
+- **Fonts and sizes.** Pick a font (Sans-serif, Serif, Monospace or Wide) and a
+  size (Small, Normal, Large or Huge) for the selected text. Choosing Default font
+  or Normal puts it back.
+- **Text colour and highlight colour.** Two colour buttons open a small palette of
+  named colours (for example Red, Dark blue, Yellow, Light green), each reachable
+  with the arrow keys; Escape closes it, and Remove colour clears the colour.
+- **Strikethrough** (Ctrl+Shift+S), **subscript** (Ctrl+,) and **superscript**
+  (Ctrl+.).
+- **Block quote** (Ctrl+Shift+B), **inline code** (Ctrl+E) and **code block**
+  (Ctrl+Alt+C). Code keeps its line breaks and spacing exactly.
+- **Indent and outdent** (Ctrl+] and Ctrl+[). In a list they move the item one
+  level in or out; in a paragraph or a quote they move the whole paragraph in, up
+  to six levels.
+- **Undo and redo buttons** (Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y), dimmed when there is
+  nothing to undo or redo.
+- **Simple tables.** Insert table puts a three-by-three table with a header row
+  where you are typing. While the cursor is in a table you can add a row above or
+  below, add a column to the left or right, delete the row or column you are in,
+  switch the header row on or off, or delete the table. The arrow keys move
+  between cells. There is no merging of cells or resizing of columns. Recipients
+  see a plain bordered table that reads the same in any mail app.
+- **Pasting keeps formatting.** Text copied from a web page, a document or another
+  mail keeps its bold, italic, lists, links and tables. Press Ctrl+Shift+V
+  (Cmd+Shift+V on a Mac) to paste plain text instead.
+- **Pictures show while you write.** A picture you insert, a picture in a draft
+  you reopen and a picture in a quoted reply appear in the composer.
+- **The message body fills the window.** It stays one size between the address
+  fields and the Send, Send later and Discard buttons, and long messages scroll
+  inside it, in rich and plain text and on a phone. On a narrow screen the
+  formatting bar, and a wide table, scroll sideways inside themselves.
+- **Tab still leaves the message body**, inside a table too, so the keyboard is
+  never trapped, and Ctrl+Enter still sends.
+
+### What's new: replies and forwards keep the original's formatting
+
+When you reply to or forward a formatted message, the quoted original keeps its
+bold and italic, lists, links, colours, headings and tables, under the same
+"On ... wrote:" line and below your signature as before.
+
+- **Pictures from the web are never included.** A picture that has to be fetched
+  from a website is left out, and the quote says "[picture not included]" where
+  it was. A picture that was part of the message itself is kept and sent with your
+  reply, unless the attachment scan holds it back or the quote would carry more
+  than 10 MB or 50 pictures.
+- **Newsletter-style layout is tidied.** Tables used only for layout are quoted as
+  plain paragraphs in reading order; a table of real data (more than one column,
+  nothing nested inside it, at most 20 columns) stays a table.
+- **Long messages are shortened.** A quote keeps whole paragraphs up to about
+  50,000 characters, then says "[The rest of the original message is not
+  included]". The same note appears when the message was too large for Mailroom to
+  load in full.
+- **What the sender hid stays hidden.** Text the sender made invisible (hidden, or
+  white on white) is left out of the quote, so a reply never carries words you
+  could not see.
+- **Plain-text messages, plain-text replies and encrypted messages are quoted as
+  before.** Decrypted text is never stored.
+
+### What's new: plain-text mail
+
+- **Plain text you send rewraps on any screen.** The plain-text version of every
+  message (including the plain alternative of a formatted one) is sent in the
+  standard "flowed" form, so a phone or narrow window can rewrap a long paragraph
+  while the line breaks you typed stay put. Quote marks stay on every line, the
+  signature line (`-- `) stays on its own line, and a long web address is never
+  broken in two. Drafts you reopen and messages you quote keep their paragraphs
+  whole.
+- **Switching a draft to plain text** turns quotes into lines starting with ">",
+  keeps code exactly, turns tables into aligned columns with a line of dashes under
+  the header, turns indents into leading spaces, and drops colours and fonts.
+
+### What's new: reading
+
+- **View source.** The More menu of a message has a **View source** item that
+  shows the message exactly as it arrived, as plain text and never as a web page.
+  A **Headers** tab lists every header line in order (the first 1,000 lines).
+  **Copy** puts the whole message on the clipboard and **Download .eml** saves it;
+  a very large message is shown cut off after 1 MiB, but the copy and download
+  always have all of it.
+- **A QR code on the public key page.** The fingerprint page also shows a QR code
+  in the form OpenPGP apps scan, drawn by the server; the page still runs no
+  script and loads nothing from elsewhere.
+
+### Safety and behaviour
+
+- **Only the offered formatting is kept.** A pasted font not in the list, an
+  unusual size, or anything but a plain colour is left off and the words stay.
+  Scripts, forms, embedded frames, styles and event handlers in pasted content are
+  dropped before they reach the page, and pictures from the web are left out of a
+  paste (you are told once and can attach the picture instead).
+- **Links are limited to web and mail addresses.** A link must start with http,
+  https or mailto; an address typed without a scheme, such as `www.example.com`,
+  gets `https://` in front.
+- **Signatures and templates are cleaned** by the server when they are saved and
+  when they are read.
+- **Plain text that wraps travels in a protective encoding**, so mail systems
+  cannot strip its line-end markers, and a signed message signs exactly the text
+  that is sent.
+- **Web addresses in mail are read the way a browser reads them.** Nothing that was
+  refused before is allowed now.
+- The server still cleans every message again before it is saved or sent.
+
+### For the person who runs Mailroom
+
+- **`mailroom-admin plaintext-report`** is a read-only count of how much plain-text
+  mail is hard-wrapped, per user, with the reason each other message was not
+  counted. It never prints message text. (On the mail it was measured against,
+  hard-wrapped plain text was too rare to change how it is displayed.)
+
+### Under the hood
+
+- The editor (Tiptap, open-source packages only) loads only when you open the
+  composer, as a separate download. The build refuses an editor that needs dynamic
+  code, and a dependency list that strays from the reviewed one.
+- Every format the composer can make is checked all the way from the composer to
+  what a recipient's copy shows, including through a quoted reply, and a reopened
+  draft is written back exactly as it was saved. Messages with hostile content are
+  tested end to end through a reply: nothing runs, nothing is fetched, and none of
+  it reaches the quote, the saved draft or the sent message.
+- A real third-party JMAP client library now checks Mailroom's JMAP interface on
+  every change; the places Mailroom does not yet follow the standard are listed,
+  and the check fails if anything else breaks.
+
+### Upgrading
+
+- Nothing to do beyond running the new image: there is no database change and no
+  change to the deployment files.
+
 ## [1.101.0-beta.6] — 2026-11-07
 
 **The sixth beta of v1.101 makes pictures visible while you write.** A picture you
