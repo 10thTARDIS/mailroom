@@ -5725,7 +5725,16 @@ async function quotedReplyCarry(page) {
   const onRequest = (req) => {
     // Only a fetch over the network counts: the cid: picture's own (refused) attempt
     // is reported by the browser as a request too, and names the newsletter's id.
-    if (/^https?:/i.test(req.url()) && req.url().indexOf(QUOTE_HOST) >= 0) requested.push(req.url());
+    // Any network fetch that leaves Mailroom's own origin counts, not only one to the
+    // newsletter's host: compared as parsed origins, never as substrings.
+    if (!/^https?:/i.test(req.url())) return;
+    let origin = "";
+    try {
+      origin = new URL(req.url()).origin;
+    } catch {
+      origin = "unparseable";
+    }
+    if (origin !== new URL(BASE).origin) requested.push(req.url());
   };
   page.on("request", onRequest);
   await page.evaluateOnNewDocument(() => {
@@ -5811,7 +5820,7 @@ async function quotedReplyCarry(page) {
     if (otherCsp.length) fail("CSP violations: " + JSON.stringify(otherCsp));
     if (!cidRefusals.length) fail("the hero's cid: refusal was not seen: the listener or the picture is not what this check believes");
     console.log("composer quote csp: " + cidRefusals.length + " img-src refusal(s) of the message's own cid: picture, nothing else");
-    if (requested.length) fail("a request went to " + QUOTE_HOST + ": " + requested.join(", "));
+    if (requested.length) fail("a request left Mailroom's origin (the quoted newsletter names " + QUOTE_HOST + "): " + requested.join(", "));
 
     // Discard it, and wait for the destroy itself.
     const destroyed = page.waitForResponse(
