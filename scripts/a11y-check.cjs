@@ -5682,8 +5682,11 @@ async function quoteChecks(page, rootSelector) {
     if (el.querySelector("table")) bad.push("a layout table was left in the quote");
     const imgs = [...el.querySelectorAll("img:not(.ProseMirror-separator)")];
     const srcs = imgs.map((i) => i.getAttribute("src") || "");
-    if (!srcs.some((x) => x.indexOf("cid:hero-autumn") === 0)) bad.push("the message's own hero picture was not kept (" + JSON.stringify(srcs) + ")");
-    for (const x of srcs) if (!/^cid:/i.test(x)) bad.push("a picture that is not the message's own: " + x.slice(0, 80));
+    // The live DOM shows the message's own picture as a data: URL (the document
+    // itself says cid:, which the saved-draft check below reads). A cid: src or a
+    // remote one in the live DOM is wrong: the CSP refuses the first, the second leaks.
+    if (!srcs.some((x) => /^data:image\//i.test(x))) bad.push("the message's own hero picture is not shown (" + JSON.stringify(srcs.map((x) => x.slice(0, 20))) + ")");
+    for (const x of srcs) if (!/^data:image\//i.test(x)) bad.push("a picture that is not the message's own: " + x.slice(0, 80));
     const markup = new XMLSerializer().serializeToString(el);
     if (markup.indexOf(host) >= 0 && !/href="https:\/\/news\.theatre/.test(markup)) bad.push("the surface names " + host + " somewhere other than a link");
     if (/data-mailroom|\/jmap\/proxy\//.test(markup)) bad.push("a parked or proxied picture reached the editor");
@@ -5807,6 +5810,7 @@ async function quotedReplyCarry(page) {
     ]) {
       if (re.test(htmlPart)) fail("the saved HTML holds " + name + ": " + htmlPart.slice(0, 200));
     }
+    if (!/src="cid:hero-autumn/.test(htmlPart)) fail("the saved HTML does not keep the hero as cid: " + htmlPart.slice(0, 200));
     if (htmlPart.indexOf("Six productions") < 0) fail("the saved HTML lost the quote: " + htmlPart.slice(0, 200));
     // What the server stored: read it back.
     const back = await page.evaluate(async (id) => {
