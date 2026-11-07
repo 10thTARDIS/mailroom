@@ -637,6 +637,9 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
   const [sending, setSending] = useState(false);
   const [sendLaterOpen, setSendLaterOpen] = useState(false);
   const editorPending = richMode && !quoteSeedReady;
+  // For runAutosave, which must not take it as a dependency (see touchedRef).
+  const editorPendingRef = useRef(editorPending);
+  editorPendingRef.current = editorPending;
 
   // The server's advertised scheduling horizon, read from the session rather than
   // assumed: the server ENFORCES it, so offering a preset it would refuse would be
@@ -1180,6 +1183,11 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
 
   const runAutosave = useCallback(
     async (onBlur: boolean): Promise<void> => {
+      // The periodic save waits while an untouched formatted quote is still the raw
+      // seed (an edit to the subject or recipients in the first moments would
+      // otherwise save it). A flush on blur or close still saves, so no edit is
+      // lost: the server sanitises the body and reopening runs it through the editor.
+      if (!onBlur && editorPendingRef.current) return;
       const snap = snapshotRef.current;
       const decision = autosaveDecision({
         dirty: draftDirty(savedSnapshot.current, snap),
