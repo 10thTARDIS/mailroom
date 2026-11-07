@@ -220,8 +220,11 @@ describe("pasting hostile HTML into the editor", () => {
     await paste(m, {
       html: '<p><img src="cid:a@inline.mailroom"><img src="data:image/png;base64,iVBORw0KGgo="></p>',
     });
-    const srcs = pictures(m).map((i) => i.getAttribute("src"));
+    // The DOCUMENT keeps cid:; the live DOM shows no src for it (no preview).
+    const doc = new DOMParser().parseFromString(m.html(), "text/html");
+    const srcs = Array.from(doc.querySelectorAll("img")).map((i) => i.getAttribute("src"));
     expect(srcs).toEqual(["cid:a@inline.mailroom", "data:image/png;base64,iVBORw0KGgo="]);
+    expect(pictures(m).map((i) => i.getAttribute("src"))).toEqual([null, "data:image/png;base64,iVBORw0KGgo="]);
     expect(m.notices).toEqual([]);
   });
 

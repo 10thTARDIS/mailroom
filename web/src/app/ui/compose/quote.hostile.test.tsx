@@ -367,7 +367,9 @@ describe("replying to a hostile original", () => {
     fireEverything(surface);
     await settle();
     expect(pwned()).toBe(false);
-    expect(surface.querySelector("blockquote img:not(.ProseMirror-separator)")?.getAttribute("src")).toBe("cid:a@inline.mailroom");
+    // The live DOM shows no cid: src (the CSP would refuse it); the sent document keeps it.
+    expect(surface.querySelector("blockquote img:not(.ProseMirror-separator)")?.hasAttribute("src")).toBe(false);
+    expect(inert(await sendHtml()).querySelector("blockquote img")?.getAttribute("src")).toBe("cid:a@inline.mailroom");
     assertQuoteClean(surface, "live editor");
     expect(obs.requests).toEqual([]);
   });

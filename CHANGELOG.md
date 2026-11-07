@@ -9,6 +9,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Fixes
+
+- **Pictures you put in a message now show in the composer.** Before, a picture you
+  inserted, a picture in a draft you reopened, and a picture in a quoted reply
+  showed only its description while writing, even though it was sent correctly.
+  They now appear as you write, and the saved and sent message is unchanged.
+
 ## [1.101.0-beta.5] — 2026-11-07
 
 **The fifth beta of v1.101: replies and forwards now keep the original message's formatting.** A reply to a

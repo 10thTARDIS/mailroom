@@ -18,8 +18,10 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import StarterKit from "@tiptap/starter-kit";
 import type { EditorProps } from "@tiptap/pm/view";
+import { normalizeCid } from "../inlineImages";
 import { Indent } from "./indent";
 import { countDroppedImages } from "./paste";
+import type { PreviewStore } from "./previewStore";
 import { TABLE_EXTENSIONS } from "./tables";
 import { TEXT_STYLE_EXTENSIONS } from "./textStyles";
 import { isAllowedLinkUri, isInlineImageSrc } from "./uri";
@@ -79,7 +81,7 @@ const Kit = StarterKit.extend({
   },
 });
 
-export function buildExtensions(hooks: EditorHooks) {
+export function buildExtensions(hooks: EditorHooks, previews?: PreviewStore) {
   return [
     Kit.configure({
       heading: false,
@@ -123,6 +125,38 @@ export function buildExtensions(hooks: EditorHooks) {
       // Only src, alt and the fixed style. width, height and title are not kept
       // (title is hover text, not an alternative to alt), so pasted markup cannot
       // size or label a picture.
+      // The live DOM never carries a cid: src (the CSP refuses it): a node view
+      // shows the store's data: URL instead. renderHTML and the schema are the
+      // library's own, so getHTML() still says cid:.
+      addNodeView() {
+        return ({ node }) => {
+          const img = document.createElement("img");
+          img.setAttribute("style", IMAGE_STYLE);
+          let current = node;
+          const apply = (): void => {
+            const alt = (current.attrs["alt"] as string | null) ?? "";
+            img.setAttribute("alt", alt);
+            const src = (current.attrs["src"] as string | null) ?? "";
+            let shown: string | null = null;
+            if (/^cid:/i.test(src)) shown = previews?.get(normalizeCid(src.slice(4))) ?? null;
+            else if (/^data:image\//i.test(src)) shown = src;
+            if (shown) img.setAttribute("src", shown);
+            else img.removeAttribute("src");
+          };
+          apply();
+          const unsubscribe = previews?.subscribe(() => apply());
+          return {
+            dom: img,
+            update: (updated) => {
+              if (updated.type !== current.type) return false;
+              current = updated;
+              apply();
+              return true;
+            },
+            destroy: () => unsubscribe?.(),
+          };
+        };
+      },
       addAttributes() {
         return {
           src: { default: null },
