@@ -9,6 +9,11 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.101.0-beta.6] — 2026-11-07
+
+**The sixth beta of v1.101 makes pictures visible while you write.** A picture you
+put in a message now shows in the composer instead of only its description.
+
 ### Fixes
 
 - **Pictures you put in a message now show in the composer.** Before, a picture you
