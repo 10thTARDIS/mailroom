@@ -21,6 +21,7 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { t, type MessageKey } from "../../i18n";
 import { buildEditorProps, buildExtensions } from "./extensions";
+import type { PreviewStore } from "./previewStore";
 import { editorHtml } from "./editorHtml";
 import { FONT_FAMILIES, FONT_SIZES } from "./styleValues";
 import type { EditorHooks } from "./extensions";
@@ -40,6 +41,8 @@ export interface RichTextEditorProps {
    * tests, which read the document without an edit having happened. */
   onReady?: (editor: Editor | null) => void;
   label: string;
+  /** Display-only pictures for `cid:` images (see ./previewStore.ts). */
+  previews?: PreviewStore;
 }
 
 const isMac = (): boolean =>
@@ -144,6 +147,7 @@ export default function RichTextEditor({
   onNotice,
   onReady,
   label,
+  previews,
 }: RichTextEditorProps): JSX.Element {
   const imgRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -183,7 +187,7 @@ export default function RichTextEditor({
     // ProseMirror's base rules ship in our own stylesheet (styles.css), not
     // injected at run time (ADR-051 §2).
     injectCSS: false,
-    extensions: buildExtensions(hooks.current),
+    extensions: buildExtensions(hooks.current, previews),
     content: initialHTML,
     editorProps: buildEditorProps(hooks.current, {
       class: "editor-surface",

@@ -5697,6 +5697,29 @@ async function quoteChecks(page, rootSelector) {
   }, rootSelector, QUOTE_HOST);
 }
 
+/** Waits until `count` pictures in the composer's editor are DRAWN (a decoded
+ * bitmap, a data: currentSrc), and fails if one has a cid: src in the live DOM. */
+async function pictureChecks(page, what, count, fail) {
+  await until(what + " is drawn", 30000, () => picturesDrawn(page, "section.compose .editor-surface", count), 33);
+  const attrs = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("section.compose .editor-surface img:not(.ProseMirror-separator)")).map((i) => (i.getAttribute("src") || "").slice(0, 4)),
+  );
+  if (attrs.some((a) => a === "cid:")) fail(what + ": a cid: src is in the live DOM");
+}
+
+/** True when at least `count` pictures under `root` are drawn: a decoded bitmap
+ * whose currentSrc is a data: URL, and no picture there is left undrawn. */
+function picturesDrawn(page, root, count) {
+  return page.evaluate(
+    (sel, n) => {
+      const imgs = Array.from(document.querySelectorAll(sel + " img:not(.ProseMirror-separator)"));
+      return imgs.length >= n && imgs.every((i) => i.naturalWidth > 0 && i.currentSrc.startsWith("data:image/"));
+    },
+    root,
+    count,
+  );
+}
+
 /**
  * A REPLY TO THE NEWSLETTER, SAVED (ADR-051 beta 5, #92), against the real server.
  * What jsdom cannot say: that the server ACCEPTS the original's own inline picture
@@ -5807,19 +5830,38 @@ async function quotedReplyCarry(page) {
     );
     if (!stored || stored.disposition !== "inline" || !stored.blobId) fail("the stored draft does not list the hero as inline: " + JSON.stringify(back));
 
-    // ⚠ ONE KIND OF VIOLATION IS KNOWN AND TOLERATED, BY NAME: the editor shows an
-    // inline picture as `<img src="cid:...">`, which the shell's `img-src 'self'
-    // data: https:` refuses (the picture shows as its alt text in the editor and is
-    // sent correctly). That is how every inline picture in the composer has behaved
-    // since the editor could hold one, uploaded or quoted; displaying one is a
-    // separate decision. Exactly `img-src cid` (the browser reports the scheme as the blocked URI) is let through and counted;
-    // anything else, a script, a style, a frame, a remote picture, fails.
+    // THE PICTURES ARE SHOWN, AND NOTHING IS TOLERATED. The editor's document names
+    // an inline picture as `cid:...`, which the shell's `img-src 'self' data: https:`
+    // refuses; the editor therefore DISPLAYS a data: URL (a node view fed by a
+    // preview store) while the document keeps cid:. So any CSP violation at all
+    // fails here, a cid: refusal included, and the pictures must really be drawn.
+    await pictureChecks(page, "the quoted hero", 1, fail);
+
+    // A picture the user inserts is shown the same way, and the saved draft still
+    // says cid: for it. The file is made in the page (the browser may not share a
+    // filesystem with this script): a one-pixel PNG put into the toolbar's own input.
+    const savedAgain = page.waitForResponse(
+      (r) => r.request().method() === "POST" && /"Email\/set"/.test(r.request().postData() || "") && /img-[^"]*@inline\.mailroom/.test(r.request().postData() || ""),
+      { timeout: 30000 },
+    );
+    await page.evaluate(() => {
+      const bin = atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      const dt = new DataTransfer();
+      dt.items.add(new File([bytes], "pixel.png", { type: "image/png" }));
+      const input = document.querySelector("section.compose input.editor-image-input");
+      input.files = dt.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await pictureChecks(page, "the inserted picture", 2, fail);
+    const again = await savedAgain;
+    const againHtml = again.request().postData() || "";
+    if (/data:image/.test(againHtml)) fail("the saved draft holds a data: URL: " + againHtml.slice(0, 200));
+    if (!/cid:img-[^"\\]*@inline\.mailroom/.test(againHtml)) fail("the saved draft lost the inserted picture's cid: " + againHtml.slice(0, 200));
     const csp = await page.evaluate(() => window.__cspQuote.slice());
-    const cidRefusals = csp.filter((v) => /^img-src cid( |$)/.test(v));
-    const otherCsp = csp.filter((v) => !/^img-src cid( |$)/.test(v));
-    if (otherCsp.length) fail("CSP violations: " + JSON.stringify(otherCsp));
-    if (!cidRefusals.length) fail("the hero's cid: refusal was not seen: the listener or the picture is not what this check believes");
-    console.log("composer quote csp: " + cidRefusals.length + " img-src refusal(s) of the message's own cid: picture, nothing else");
+    if (csp.length) fail("CSP violations: " + JSON.stringify(csp));
+    console.log("composer quote csp: no violation, the quoted and the inserted picture are drawn from data: URLs");
     if (requested.length) fail("a request left Mailroom's origin (the quoted newsletter names " + QUOTE_HOST + "): " + requested.join(", "));
 
     // Discard it, and wait for the destroy itself.
@@ -5862,6 +5904,22 @@ async function quotedReplyCarry(page) {
       const heard = requested.length > 0;
       requested.length = 0;
       return heard;
+    });
+    // The drawn-picture check can fail: a picture with no src, or a cid: one the
+    // browser refuses, is not "drawn".
+    await control("composer-picture-drawn-check", async () => {
+      await page.evaluate(() => {
+        const box = document.createElement("div");
+        box.id = "__pictureControl";
+        const a = document.createElement("img");
+        a.setAttribute("alt", "no src");
+        box.appendChild(a);
+        document.body.appendChild(box);
+      });
+      const drawn = await picturesDrawn(page, "#__pictureControl", 1);
+      await page.evaluate(() => document.getElementById("__pictureControl").remove());
+      console.log("composer picture control: drawn=" + drawn);
+      return drawn === false;
     });
     await control("composer-quote-csp-listener", async () => {
       await page.evaluate(() => {

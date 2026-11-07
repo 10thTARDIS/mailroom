@@ -79,6 +79,8 @@ import { ImportKeyDialog } from "./ImportKeyDialog";
 import { SendLaterMenu } from "./SendLaterMenu";
 import { SnippetPicker } from "./SnippetPicker";
 import { RichEditor } from "./editor/LazyRichEditor";
+import { MAX_PREVIEW_BYTES, createPreviewStore, isPreviewableType } from "./editor/previewStore";
+import { blobToDataUrl } from "./inlineImages";
 import { htmlToText } from "./editor/plainText";
 import { editorHtml } from "./editor/editorHtml";
 import type { Editor } from "@tiptap/core";
@@ -684,6 +686,28 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
     // with the draft (outgoingAttachments sends one only while the body names it).
     ...(quote?.carried ?? []).map((c) => ({ blobId: c.blobId, cid: c.cid, name: c.name, type: c.type })),
   ]);
+  // Display-only data: URLs for the cid: pictures in the editor (the CSP has no
+  // cid: source). Never written into the document, a draft or a send.
+  const previews = useRef(createPreviewStore()).current;
+  const previewRequested = useRef(new Set<string>());
+  useEffect(() => {
+    // Only a cid that matches an inlineImages entry is ever fetched, once each.
+    for (const im of inlineImages) {
+      const key = im.cid.trim().toLowerCase();
+      if (previewRequested.current.has(key) || previews.has(im.cid)) continue;
+      previewRequested.current.add(key);
+      if (!isPreviewableType(im.type)) continue;
+      void (async () => {
+        try {
+          const blob = await client.fetchInlineImage(im.blobId);
+          if (!blob || !isPreviewableType(blob.type) || blob.size > MAX_PREVIEW_BYTES) return;
+          previews.set(im.cid, await blobToDataUrl(blob));
+        } catch {
+          // The alt text stays.
+        }
+      })();
+    }
+  }, [inlineImages, client, previews]);
   const [uploading, setUploading] = useState(false);
   /**
    * Parts of the forwarded message this session has RELEASED.
@@ -1047,6 +1071,14 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
     try {
       const res = await client.upload(file);
       const cid = newCid();
+      previewRequested.current.add(cid.toLowerCase());
+      if (isPreviewableType(file.type) && file.size <= MAX_PREVIEW_BYTES) {
+        try {
+          previews.set(cid, await blobToDataUrl(file));
+        } catch {
+          // The alt text stays.
+        }
+      }
       setInlineImages((cur) => [
         ...cur,
         {
@@ -1735,6 +1767,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
                 setHtmlBody(html);
               }}
               onImageFile={insertImageUpload}
+              previews={previews}
               onNotice={(message) => pushToast({ kind: "info", message })}
               onBlur={() => void runAutosave(true)}
               onReady={normaliseQuoteSeed}
