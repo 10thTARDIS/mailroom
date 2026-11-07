@@ -106,7 +106,9 @@ describe("pictures", () => {
     expect(img?.getAttributeNames()).toEqual(["src"]);
     const huge = quote(`<p>t</p><img src="data:image/png;base64,${"A".repeat(QUOTE_PICTURE_BYTE_CAP)}">`);
     expect(dom(huge.html).querySelectorAll("img")).toHaveLength(0);
-  });
+    // Parsing a cap-sized picture in jsdom takes seconds on a loaded runner, and the
+    // 5 s default failed it there; the work is bounded, so give it room.
+  }, 30_000);
 
   describe("a cid: picture", () => {
     const html = '<p>hi</p><p><img src="cid:logo@example.com" alt="Logo" onerror="x()" style="width:9px"></p>';
