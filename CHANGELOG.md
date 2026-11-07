@@ -35,6 +35,9 @@ before, and below your signature as before.
   about 50,000 characters, then says "[The rest of the original message is not
   included]". The same note appears when the message itself was too large for
   Mailroom to load in full.
+- **What the sender hid stays hidden.** Text the sender made invisible (hidden, or
+  white on white) is left out of the quote, so a reply never carries words you
+  could not see. A quote keeps at most 50 pictures.
 - **Plain-text messages are quoted as before**, and so is a reply written in
   plain-text mode. Encrypted messages are quoted exactly as before: the decrypted
   text is never stored and is quoted as plain text only.

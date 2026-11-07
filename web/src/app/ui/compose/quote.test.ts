@@ -8,7 +8,14 @@
 
 import { describe, expect, it } from "vitest";
 import type { BlobId } from "../../../core/jmap/types";
-import { QUOTE_PICTURE_BYTE_CAP, QUOTE_TEXT_BUDGET, formatQuote, isDataTable } from "./quote";
+import {
+  QUOTE_NODE_BUDGET,
+  QUOTE_PICTURE_BYTE_CAP,
+  QUOTE_PICTURE_COUNT_CAP,
+  QUOTE_TEXT_BUDGET,
+  formatQuote,
+  isDataTable,
+} from "./quote";
 import type { QuoteInput, QuotePart } from "./quote";
 
 const PIC = "[picture not included]";
@@ -123,9 +130,18 @@ describe("pictures", () => {
       ]);
     });
 
-    it("matches a content-id written with angle brackets or percent-encoding", () => {
-      const q = quote('<p><img src="cid:a%40example.com"></p>', { parts: [part({ cid: "<a@example.com>" })] });
+    it("matches a content-id written with angle brackets, case-insensitively", () => {
+      const q = quote('<p><img src="cid:<A@Example.com>"></p>', { parts: [part({ cid: "<a@example.com>" })] });
       expect(q.carried.map((c) => c.cid)).toEqual(["a@example.com"]);
+    });
+
+    // The reader (inlineImages.ts normalizeCid) and the server do not percent-decode
+    // a cid:, so such a picture is broken in the reading pane; the reply must not
+    // carry a picture the user never saw (security review of #92, finding 4).
+    it("does NOT percent-decode a content-id, as the reader does not", () => {
+      const q = quote('<p>hi</p><p><img src="cid:a%40example.com"></p>', { parts: [part({ cid: "<a@example.com>" })] });
+      expect(q.carried).toEqual([]);
+      expect(dom(q.html).querySelectorAll("img")).toHaveLength(0);
     });
 
     it("matches case-insensitively, as the reading pane does, and names the picture by the part's own id", () => {
@@ -327,5 +343,98 @@ describe("what is read is only ever parsed, never run", () => {
   it("a handler on a kept picture is gone from the output", () => {
     const q = quote('<p><img src="cid:logo@example.com" onerror="document.title=1"></p>', { parts: [part()] });
     expect(q.html).not.toContain("onerror");
+  });
+});
+
+
+// THE SECURITY REVIEW OF #92. Each case is a shape the first budget let through.
+describe("budgets the review found bypassable", () => {
+  it("counts loose text inside a wrapper: one <div> around a long message is cut", () => {
+    const q = quote(`<div>${"x".repeat(200_000)}</div><p>after</p>`);
+    expect(q.html.length).toBeLessThan(QUOTE_TEXT_BUDGET + 1_000);
+    expect(q.html).toContain(REST);
+    expect(q.html).not.toContain("after");
+  });
+
+  it("deeply nested wrappers around a huge text cannot carry it whole", () => {
+    const q = quote(`${"<div>".repeat(500)}${"y".repeat(1_000_000)}${"</div>".repeat(500)}`);
+    expect(q.html.length).toBeLessThan(QUOTE_TEXT_BUDGET + 50_000);
+    expect(q.html).toContain(REST);
+  });
+
+  it("Gmail-shaped mail (<div dir=ltr> with <br> lines) keeps its leading lines, cut between lines", () => {
+    const line = "z".repeat(1_000);
+    const q = quote(`<div dir="ltr">${`${line}<br>`.repeat(120)}</div>`);
+    const kept = (dom(q.html).body.textContent ?? "").split(line).length - 1;
+    expect(kept).toBeGreaterThan(40);
+    expect(kept).toBeLessThanOrEqual(50);
+    expect(q.html).toContain(REST);
+    // never cut inside a line: the kept z's are a whole number of lines
+    const zs = ((dom(q.html).body.textContent ?? "").match(/z/g) ?? []).length;
+    expect(zs % line.length).toBe(0);
+  });
+
+  it("a complete Gmail-shaped quote under budget has NO rest note", () => {
+    const q = quote(`<div dir="ltr">${"short line<br>".repeat(100)}</div>`);
+    expect(q.html).not.toContain(REST);
+  });
+
+  it("content after an over-budget wrapper is not silently kept or reordered", () => {
+    const q = quote(`<div>${"z".repeat(100_000)}<p>para</p></div><p>tail</p>`);
+    expect(q.html).not.toContain("tail");
+    expect(q.html).toContain(REST);
+  });
+
+  // Sized just past the node budget (two elements a unit): jsdom's DOM mutation is
+  // quadratic in sibling count, so a browser-sized flood (measured linear in
+  // Chromium, about 1.5 s for 40,000 elements) would only time the test runner out.
+  it("bounds elements, not only text: a picture-only flood is cut at the node budget", () => {
+    const units = Math.ceil(QUOTE_NODE_BUDGET / 2) + 500;
+    const q = quote(`<p>start</p>${'<p><img src="cid:logo@example.com"></p>'.repeat(units)}`, { parts: [part()] });
+    expect(dom(q.html).body.getElementsByTagName("*").length).toBeLessThanOrEqual(QUOTE_NODE_BUDGET + 10);
+    expect(q.html).toContain(REST);
+  }, 60_000);
+
+  it("an empty-element flood is cut at the node budget", () => {
+    const units = Math.ceil(QUOTE_NODE_BUDGET / 2) + 500;
+    const q = quote(`<p>start</p>${"<p><b>.</b></p>".repeat(units)}`);
+    expect(dom(q.html).body.getElementsByTagName("*").length).toBeLessThanOrEqual(QUOTE_NODE_BUDGET + 10);
+    expect(q.html).toContain(REST);
+  }, 60_000);
+
+  it("keeps at most QUOTE_PICTURE_COUNT_CAP pictures; later ones get the note", () => {
+    const tiny = "data:image/png;base64,iVBORw0KGgo=";
+    const q = quote(`<p>${`<img src="${tiny}" alt="p"> `.repeat(QUOTE_PICTURE_COUNT_CAP + 30)}</p>`);
+    expect(dom(q.html).querySelectorAll("img")).toHaveLength(QUOTE_PICTURE_COUNT_CAP);
+    expect(q.html).toContain(PIC);
+  });
+});
+
+describe("what the sender hid stays hidden", () => {
+  it("removes hidden, display:none, visibility:hidden, opacity:0 and font-size:0 content", () => {
+    const q = quote(
+      '<p>seen</p><div style="display:none">HIDDEN1</div><p hidden>HIDDEN2</p><p style="font-size:0">HIDDEN3</p>' +
+        '<p style="visibility: hidden">HIDDEN4</p><p style="opacity:0">HIDDEN5</p><p style="font-size:0px">HIDDEN6</p>',
+    );
+    expect(q.html).toContain("seen");
+    expect(q.html).not.toMatch(/HIDDEN/);
+  });
+
+  it("control: small but visible text and partial opacity are kept", () => {
+    const q = quote('<p style="font-size:9px">small</p><p style="opacity:0.5">faint</p><p style="display:block">shown</p>');
+    expect(text(q.html)).toContain("small");
+    expect(text(q.html)).toContain("faint");
+    expect(text(q.html)).toContain("shown");
+  });
+
+  it("drops a near-white text colour but keeps the text and an ordinary colour", () => {
+    const q = quote(
+      '<p><span style="color:#ffffff">white</span> <span style="color: rgb(250, 250, 250)">offwhite</span> <span style="color:#cc0000;font-weight:bold">red</span></p>',
+    );
+    const d = dom(q.html);
+    expect(d.body.textContent).toContain("white");
+    expect(d.body.textContent).toContain("offwhite");
+    expect(q.html).not.toMatch(/#ffffff|250, 250, 250/i);
+    expect(q.html).toMatch(/#cc0000/i);
   });
 });

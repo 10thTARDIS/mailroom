@@ -615,9 +615,15 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
    */
   const htmlBodyRef = useRef(htmlBody);
   htmlBodyRef.current = htmlBody;
+  // Until the lazily loaded editor exists, an untouched formatted quote is still
+  // the raw seed, so sending waits for it (the security review of #92: a send in
+  // that window would ship the seed rather than the editor's document).
+  const [quoteSeedReady, setQuoteSeedReady] = useState(() => !quote || !!resumed);
   const normaliseQuoteSeed = useCallback(
     (ed: Editor | null): void => {
-      if (!ed || !quote || resumed) return;
+      if (!ed) return;
+      setQuoteSeedReady(true);
+      if (!quote || resumed) return;
       if (htmlBodyRef.current !== opening.current.html) return;
       const norm = editorHtml(ed);
       if (norm === opening.current.html) return;
@@ -630,6 +636,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
 
   const [sending, setSending] = useState(false);
   const [sendLaterOpen, setSendLaterOpen] = useState(false);
+  const editorPending = richMode && !quoteSeedReady;
 
   // The server's advertised scheduling horizon, read from the session rather than
   // assumed: the server ENFORCES it, so offering a preset it would refuse would be
@@ -1402,6 +1409,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
   };
 
   const send = async (sendAt?: string, opts: { archive?: boolean } = {}): Promise<void> => {
+    if (editorPending) return;
     if (allChips.length === 0) {
       pushToast({ kind: "error", message: t("compose.needRecipient") });
       return;
@@ -1807,7 +1815,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
           <button
             type="submit"
             className="button button-primary"
-            disabled={sending || uploading}
+            disabled={sending || uploading || editorPending}
             title={t("compose.sendShortcut")}
           >
             {sending ? t("compose.sending") : t("action.send")}
@@ -1821,7 +1829,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
             <button
               type="button"
               className="button"
-              disabled={sending || uploading}
+              disabled={sending || uploading || editorPending}
               title={t("compose.sendArchiveShortcut")}
               onClick={() => void send(undefined, { archive: true })}
             >
@@ -1834,7 +1842,7 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
           <button
             type="button"
             className="button"
-            disabled={sending || uploading}
+            disabled={sending || uploading || editorPending}
             aria-haspopup="dialog"
             onClick={() => setSendLaterOpen(true)}
           >
