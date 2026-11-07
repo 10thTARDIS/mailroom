@@ -34,6 +34,10 @@ describe("the picture node view", () => {
     const previews = createPreviewStore();
     m = await mountEditor('<p><img src="cid:a@x" alt="Logo"></p>', { previews });
     await act(async () => previews.set("a@x", PNG));
+    // ProseMirror's observer reads DOM changes on a timer: let it run. If the node
+    // view's own src change were read back as an edit, the document would now say
+    // data: instead of cid:.
+    await act(async () => new Promise((r) => setTimeout(r, 60)));
     expect(m.surface.querySelectorAll('[src^="cid:"]')).toHaveLength(0);
     expect(m.html()).toContain('src="cid:a@x"');
     expect(m.html()).not.toContain("data:");

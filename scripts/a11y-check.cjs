@@ -5781,7 +5781,13 @@ async function quotedReplyCarry(page) {
       (r) => r.request().method() === "POST" && /"Email\/set"/.test(r.request().postData() || "") && /"create"/.test(r.request().postData() || ""),
       { timeout: 30000 },
     );
-    await page.click("section.compose .editor-surface");
+    // Not a click: the hero is now DRAWN, so a click in the middle of the surface
+    // lands on the picture and selects it, and typing would replace it. Focus the
+    // surface and go to the end of the document instead.
+    await page.focus("section.compose .editor-surface");
+    await page.keyboard.down("Control");
+    await page.keyboard.press("End");
+    await page.keyboard.up("Control");
     await page.keyboard.type("x");
     const res = await saved;
     const sent = JSON.parse(res.request().postData() || "{}");
