@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -315,7 +316,10 @@ type API struct {
 	// decision — fail-safe: the warning fires rather than being suppressed.
 	trustedAuthservIDs []string
 	sessionState       string
-	methods            map[string]methodFn
+	// publicOrigin is the configured scheme://host the session URLs are built
+	// on (WithPublicOrigin); empty means the request's own origin.
+	publicOrigin string
+	methods      map[string]methodFn
 	// version is the server version the MCP endpoint reports (WithVersion).
 	version string
 	// mcpMetadata is the protected-resource metadata URL of /mcp, set when the
@@ -873,8 +877,32 @@ func (e errSentinel) Error() string { return string(e) }
 // depth for a response that should never be treated as a document at all
 // (spec §11, #39).
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	writeJSONAs(w, status, "application/json", v)
+}
+
+// writeProblem answers a request-level error (RFC 8620 §3.6.1): the same
+// hardened JSON body, served as application/problem+json (RFC 7807) as the RFC
+// requires.
+func writeProblem(w http.ResponseWriter, status int, e requestError) {
+	writeJSONAs(w, status, "application/problem+json", e)
+}
+
+// requestBodyError classifies why a JMAP request body did not decode (RFC 8620
+// §3.6.1): bytes that are not JSON at all are notJSON; JSON that is not a
+// Request object, or a body over the size cap, stays notRequest.
+func requestBodyError(err error) requestError {
+	var tooBig *http.MaxBytesError
+	var syntax *json.SyntaxError
+	if !errors.As(err, &tooBig) &&
+		(errors.As(err, &syntax) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) {
+		return newRequestError("notJSON", http.StatusBadRequest, err.Error())
+	}
+	return newRequestError("notRequest", http.StatusBadRequest, err.Error())
+}
+
+func writeJSONAs(w http.ResponseWriter, status int, contentType string, v any) {
 	h := w.Header()
-	h.Set("Content-Type", "application/json")
+	h.Set("Content-Type", contentType)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", jsonCSP)
 	h.Set("X-Frame-Options", "DENY")
@@ -899,12 +927,11 @@ func (a *API) RequestHandler(w http.ResponseWriter, r *http.Request) {
 	var req Request
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBytes))
 	if err := dec.Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest,
-			newRequestError("notRequest", http.StatusBadRequest, err.Error()))
+		writeProblem(w, http.StatusBadRequest, requestBodyError(err))
 		return
 	}
 	if len(req.MethodCalls) > maxCallsInRequest {
-		writeJSON(w, http.StatusBadRequest,
+		writeProblem(w, http.StatusBadRequest,
 			newRequestError("limit", http.StatusBadRequest, "too many method calls"))
 		return
 	}
@@ -913,7 +940,7 @@ func (a *API) RequestHandler(w http.ResponseWriter, r *http.Request) {
 	// capability the server never offered and get a straight answer — which is
 	// exactly how a client ends up depending on semantics we never promised.
 	if reqErr := validateUsing(req.Using); reqErr != nil {
-		writeJSON(w, http.StatusBadRequest, reqErr)
+		writeProblem(w, http.StatusBadRequest, *reqErr)
 		return
 	}
 

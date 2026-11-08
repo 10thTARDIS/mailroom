@@ -384,13 +384,16 @@ func trimMsgIDs(ids []string) []string {
 	return out
 }
 
-// msgIDList renders a single Message-ID as the JMAP List<String> RFC 8621 uses
-// for messageId/inReplyTo (null when absent).
-func msgIDList(id string) any {
-	if id == "" {
+// messageIDsProperty renders a stored header value as the RFC 8621 §4.1.2.3
+// MessageIds form: the ids WITHOUT their angle brackets (the same form
+// trimMsgIDs and firstMsgID accept back on a draft, so a client can round-trip
+// what it read), or null when the header is absent or holds no id. Never [].
+func messageIDsProperty(ids []string) any {
+	out := trimMsgIDs(ids)
+	if len(out) == 0 {
 		return nil
 	}
-	return []string{id}
+	return out
 }
 
 // nonNilStrings renders a possibly-nil id list as a JSON array (never null).

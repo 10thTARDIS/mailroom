@@ -12,18 +12,9 @@
 # The job is red when a step fails and is NOT listed here (a regression), and
 # also when a listed step starts passing (delete its line: the fix landed).
 # Add a line only with a reference; a line without one is rejected.
-session.urls-are-absolute	#100	session apiUrl/downloadUrl/uploadUrl/eventSourceUrl are relative; go-jmap hands them to net/http unresolved
-session.readonly-key-account-is-readonly	#101	account.isReadOnly is false for a key with only read scopes
 mailbox.query-by-role	#102	Mailbox/query ignores its filter (role=inbox returns every mailbox) instead of unsupportedFilter
 email.query.anchor	#103	Email/query ignores anchor
-email.query.negative-position	#104	Email/query position=-1 is echoed back as -1 (invalid) and the list is not offset from the end
-email.get.malformed-id	#105	Email/get drops a malformed id: it is in neither list nor notFound
-email.get.message-id-properties	#106	Email.messageId keeps the angle brackets; absent inReplyTo/references are [] not null
-email.get.ids-null	#107	Email/get without ids answers invalidArguments; RFC 8620 5.1 allows null ids (or requestTooLarge)
 blob.download-attachment	limit-adr042	API keys cannot reach /jmap/download (ADR-042 3), yet the session a key receives advertises downloadUrl
-email.querychanges	limit-adr042	Email/queryChanges is not available to API keys, yet Email/query tells a key canCalculateChanges=true
-error.not-json	#108	invalid JSON body is answered notRequest; RFC 8620 3.6.1 says notJSON
-email.query.filter.inMailboxOtherThan	#109	Email/query inMailboxOtherThan is unsupportedFilter
 email.query.filter.from-name	#110	from filter is search-engine matching (tokenised/fuzzy), not RFC substring: other senders at the same domain match
 email.query.filter.from-ignores-to-header	#110	from filter is search-engine matching (tokenised/fuzzy), not RFC substring: other senders at the same domain match
 email.query.filter.hasAttachment	#111	Email/query filter condition not implemented (unsupportedFilter)

@@ -4,6 +4,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"mailroom/internal/pgpkeys"
@@ -46,6 +47,10 @@ type Account struct {
 	AccountCapabilities map[string]any `json:"accountCapabilities"`
 }
 
+// maxObjectsInGet is the RFC 8620 §2 limit advertised AND the bound a /get with
+// ids: null is held to (getAllTooLarge): the same number in both places.
+const maxObjectsInGet = 500
+
 // coreCapability advertises the RFC 8620 core limits (§2). The values are
 // conservative, honest bounds for the 0.5 server, and each one is the SAME const
 // the server actually enforces (maxSizeUpload / maxSizeRequestObject).
@@ -56,7 +61,7 @@ func coreCapability() map[string]any {
 		"maxSizeRequestObject":  maxRequestBytes,
 		"maxConcurrentRequests": 4,
 		"maxCallsInRequest":     maxCallsInRequest,
-		"maxObjectsInGet":       500,
+		"maxObjectsInGet":       maxObjectsInGet,
 		"maxObjectsInSet":       500,
 		"collationAlgorithms":   []string{"i;ascii-casemap", "i;octet"},
 	}
@@ -243,27 +248,86 @@ func (a *API) SessionHandler(w http.ResponseWriter, r *http.Request) {
 	acct := Account{
 		Name:                profile.Email,
 		IsPersonal:          true,
-		IsReadOnly:          false,
+		IsReadOnly:          keyIsReadOnly(principalFrom(r.Context())),
 		AccountCapabilities: acctCaps,
 	}
 	primary := make(map[string]string, len(capabilities))
 	for urn := range capabilities {
 		primary[urn] = accountID
 	}
+	// The four RFC 8620 §2 URLs are ABSOLUTE: a stock client (go-jmap, the
+	// library aerc is built on) hands apiUrl to net/http unresolved, and
+	// "/jmap" is not something net/http can POST to. The templates keep their
+	// {variables}; only the origin in front is added.
+	origin := sessionOrigin(r, a.publicOrigin)
 	session := Session{
 		Capabilities:    capabilities,
 		Accounts:        map[string]Account{accountID: acct},
 		PrimaryAccounts: primary,
 		Username:        profile.Email,
-		APIURL:          "/jmap",
-		DownloadURL:     "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
-		UploadURL:       "/jmap/upload/{accountId}/",
+		APIURL:          origin + "/jmap",
+		DownloadURL:     origin + "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
+		UploadURL:       origin + "/jmap/upload/{accountId}/",
 		// No {type} placeholder, deliberately: the preview route chooses the type
 		// itself from its own short allowlist and refuses everything else, so there
 		// is nothing for a client to ask for.
-		PreviewURL:     "/jmap/preview/{accountId}/{blobId}/{name}",
-		EventSourceURL: "/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
+		PreviewURL:     origin + "/jmap/preview/{accountId}/{blobId}/{name}",
+		EventSourceURL: origin + "/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
 		State:          a.sessionState,
 	}
 	writeJSON(w, http.StatusOK, session)
+}
+
+// sessionOrigin is the scheme://host the session's URLs are built on (#100).
+//
+// The configured public origin wins (MAILROOM_PUBLIC_URL, or the OIDC redirect
+// URL's origin: the same one OAuth discovery advertises), because behind a
+// reverse proxy it is the only origin a client outside can reach. With none
+// configured the origin is the request's own: https when this connection is
+// TLS, otherwise http, with the Host header the client itself sent.
+//
+// ⚠ NO FORWARDED HEADER IS READ. X-Forwarded-Proto and X-Forwarded-Host are
+// attacker-controlled unless a proxy is trusted to set them, and the only
+// trusted-proxy setting this server has covers X-Forwarded-For for the devices
+// list. A deployment behind a TLS-terminating proxy therefore sets the public
+// URL; without it the session says http, which is what the server actually saw.
+// Empty (a request with no Host) leaves the URLs relative rather than invent one.
+func sessionOrigin(r *http.Request, configured string) string {
+	if configured != "" {
+		return strings.TrimRight(configured, "/")
+	}
+	if r.Host == "" {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// writeScopes are the scopes under which a key can change something. A key with
+// none of them can only read, and its account says so (#101).
+var writeScopes = []string{scopeMailSend, scopeMailDraft, scopeMailMove, scopeMailDelete,
+	scopeLabelsWrite, scopeContactsWrite}
+
+// keyIsReadOnly is Account.isReadOnly for the caller: false for a signed-in
+// session (nil principal) and for any key holding at least one write scope.
+func keyIsReadOnly(p *keyPrincipal) bool {
+	if p == nil {
+		return false
+	}
+	for _, s := range writeScopes {
+		if p.scopes[s] {
+			return false
+		}
+	}
+	return true
+}
+
+// WithPublicOrigin sets the origin (scheme://host[:port], no path) the session's
+// apiUrl, downloadUrl, uploadUrl and eventSourceUrl are built on. Empty means
+// each session is built on the origin of the request that asked for it.
+func WithPublicOrigin(origin string) Option {
+	return func(a *API) { a.publicOrigin = origin }
 }

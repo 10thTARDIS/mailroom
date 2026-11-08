@@ -1089,6 +1089,9 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 	}), logger)))
 	opts = append(opts, api.WithRequestTiming(jmapTimingObserver(m, logger)))
 	opts = append(opts, api.WithVersion(version))
+	// The origin the JMAP session's URLs are built on: the same one OAuth
+	// discovery uses. Empty falls back to each request's own origin.
+	opts = append(opts, api.WithPublicOrigin(cfg.PublicOrigin()))
 	// Image-proxy refusals by reason (#674): counters at /metrics and one INFO
 	// line per refusal. Report-only; it changes no response.
 	opts = append(opts, api.WithProxyObserver(logger, proxyObserver(m)))

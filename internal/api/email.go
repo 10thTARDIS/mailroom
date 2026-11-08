@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,7 +111,13 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 		return nil, mErr
 	}
 	if args.IDs == nil {
-		return nil, &MethodError{Type: errInvalidArguments, Description: "Email/get requires ids"}
+		// ids: null is every Email (RFC 8620 §5.1), or requestTooLarge when
+		// that is more than maxObjectsInGet.
+		all, mErr := a.allEmailIDs(ctx, userID)
+		if mErr != nil {
+			return nil, mErr
+		}
+		args.IDs = &all
 	}
 
 	valid, notFound, requested := parseIDs(*args.IDs)
@@ -285,6 +292,40 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 		List:      list,
 		NotFound:  notFound,
 	}), nil
+}
+
+// getAllTooLarge is the answer to a /get with ids: null on an account holding
+// more objects than the advertised maxObjectsInGet (RFC 8620 §5.1).
+func getAllTooLarge(method string) *MethodError {
+	return &MethodError{Type: errRequestTooLarge, Description: method + " with ids: null is refused for more than " +
+		strconv.Itoa(maxObjectsInGet) + " objects (maxObjectsInGet); page through Email/query instead"}
+}
+
+// allEmailIDs is the id list of an Email/get with ids: null: every Email that
+// Email/query lists by default (so deleted mail, which Email/set reported as
+// destroyed, is not an object), confined to a restricted key's accounts exactly
+// as Email/query confines it. More than maxObjectsInGet is requestTooLarge.
+func (a *API) allEmailIDs(ctx context.Context, userID ulid.ULID) ([]string, *MethodError) {
+	var (
+		ids   []ulid.ULID
+		total int
+	)
+	mErr := a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
+		var err error
+		ids, total, err = tx.QueryEmails(ctx, store.EmailQuery{
+			RestrictAccounts: keyAccounts(ctx), Limit: maxObjectsInGet, LimitSet: true})
+		if err != nil {
+			return &MethodError{Type: errServerFail, Description: err.Error()}
+		}
+		return nil
+	})
+	if mErr != nil {
+		return nil, mErr
+	}
+	if total > maxObjectsInGet {
+		return nil, getAllTooLarge("Email/get")
+	}
+	return ulidStrings(ids), nil
 }
 
 // loadBodies decrypts and parses the message bytes for the requested views —
@@ -477,9 +518,9 @@ func emailObject(ev store.EmailView, props map[string]bool, body *emailBody) map
 		// Threading headers (RFC 8621 §4.1.3). A client composing a reply reads
 		// these off the parent and hands them back on the draft it creates,
 		// which is how In-Reply-To/References come out right (spec §5).
-		"messageId":  msgIDList(ev.MessageIDHint),
-		"inReplyTo":  msgIDList(ev.InReplyTo),
-		"references": nonNilStrings(ev.References),
+		"messageId":  messageIDsProperty([]string{ev.MessageIDHint}),
+		"inReplyTo":  messageIDsProperty([]string{ev.InReplyTo}),
+		"references": messageIDsProperty(ev.References),
 		// Mailroom extension (urn:mailroom:compose), spec §5's alias story:
 		// deliveredTo is the exact address this message was delivered to — what
 		// a reply should come FROM — and identityId is the verified identity it
@@ -929,15 +970,18 @@ type sortComparator struct {
 }
 
 type emailFilter struct {
-	InMailbox   *string `json:"inMailbox"`
-	InThread    *string `json:"inThread"`
-	InAccount   *string `json:"inAccount"`
-	HasKeyword  string  `json:"hasKeyword"`
-	NotKeyword  string  `json:"notKeyword"`
-	Before      string  `json:"before"`
-	After       string  `json:"after"`
-	IsSnoozed   *bool   `json:"isSnoozed"`
-	IsImportant *bool   `json:"isImportant"`
+	InMailbox *string `json:"inMailbox"`
+	// InMailboxOtherThan (RFC 8621 §4.4.1): in at least one mailbox NOT in this
+	// list. Ids are validated like inMailbox's.
+	InMailboxOtherThan []string `json:"inMailboxOtherThan"`
+	InThread           *string  `json:"inThread"`
+	InAccount          *string  `json:"inAccount"`
+	HasKeyword         string   `json:"hasKeyword"`
+	NotKeyword         string   `json:"notKeyword"`
+	Before             string   `json:"before"`
+	After              string   `json:"after"`
+	IsSnoozed          *bool    `json:"isSnoozed"`
+	IsImportant        *bool    `json:"isImportant"`
 	// NeedsCategory selects mail the classifier declined to judge (#169).
 	NeedsCategory *bool `json:"needsCategory"`
 	// InTab selects mail whose resolved category tab is this one (#228). The
@@ -982,7 +1026,7 @@ type emailFilter struct {
 // dropped — the query then returned the whole mailbox. See the report on #20.)
 var emailFilterConditions = map[string]bool{
 	// structured (Postgres)
-	"inMailbox": true, "inThread": true, "inAccount": true,
+	"inMailbox": true, "inMailboxOtherThan": true, "inThread": true, "inAccount": true,
 	"hasKeyword": true, "notKeyword": true,
 	"before": true, "after": true,
 	// Mailroom extension (urn:mailroom:organize, #51): the Snoozed view, and the
@@ -1085,9 +1129,10 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 	q.RestrictIDs = found.candidates
 
 	var (
-		ids   []ulid.ULID
-		total int
-		state int64
+		ids      []ulid.ULID
+		total    int
+		state    int64
+		position int // the offset actually applied; a negative request is resolved
 	)
 	mErr = a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
 		var err error
@@ -1111,6 +1156,21 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 			}
 			q.LineThreshold = prefs.LineThreshold
 		}
+		// RFC 8620 §5.5: a negative position counts from the end of the
+		// result, so it cannot be applied until the total is known. A
+		// zero-length page costs the count and nothing else (QueryEmails
+		// answers a LIMIT 0 from its count statement), and the window is then
+		// asked for at the resolved offset: max(0, total + position).
+		if q.Position < 0 {
+			count := q
+			count.Position, count.Limit, count.LimitSet = 0, 0, true
+			_, n, cerr := tx.QueryEmails(ctx, count)
+			if cerr != nil {
+				return &MethodError{Type: errServerFail, Description: cerr.Error()}
+			}
+			q.Position = max(0, n+q.Position)
+		}
+		position = q.Position
 		ids, total, err = tx.QueryEmails(ctx, q)
 		if err != nil {
 			return &MethodError{Type: errServerFail, Description: err.Error()}
@@ -1126,10 +1186,14 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 	}
 
 	res := queryResult{
-		AccountID:           userID.String(),
-		QueryState:          encodeState(state),
-		CanCalculateChanges: plan.stable, // Email/queryChanges returns a real delta only for delta-stable filters
-		Position:            args.Position,
+		AccountID:  userID.String(),
+		QueryState: encodeState(state),
+		// Email/queryChanges returns a real delta only for delta-stable filters,
+		// and not at all to an API key (keyPolicies: notForKeys), so a key is
+		// never told it can calculate changes it would be refused (RFC 8620
+		// §5.5: canCalculateChanges says whether queryChanges can be used).
+		CanCalculateChanges: plan.stable && principalFrom(ctx) == nil,
+		Position:            position,
 		Total:               total,
 		IDs:                 ulidStrings(ids),
 		Limit:               serverLimit,
@@ -1188,7 +1252,9 @@ type emailQueryPlan struct {
 // deltaStableConditions are the Email/query FilterCondition keys whose result-set
 // membership is reconstructable from the Email change log (see emailQueryPlan).
 var deltaStableConditions = map[string]bool{
-	"inMailbox": true, "hasKeyword": true, "notKeyword": true,
+	// inMailboxOtherThan is stable for inMailbox's reason: a message enters or
+	// leaves a mailbox only through a change that appends an Email change row.
+	"inMailbox": true, "inMailboxOtherThan": true, "hasKeyword": true, "notKeyword": true,
 	"before": true, "after": true,
 	// ⚠ `inTab` IS DELIBERATELY ABSENT and must stay absent (#228). A message's
 	// tab can change with NO Email change_log row behind it — the operator
@@ -1307,6 +1373,18 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "inMailbox is not a valid id"}
 			}
 			q.InMailbox = &id
+		}
+		if f.InMailboxOtherThan != nil {
+			other := make([]ulid.ULID, 0, len(f.InMailboxOtherThan))
+			for _, raw := range f.InMailboxOtherThan {
+				id, err := ulid.Parse(raw)
+				if err != nil {
+					return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
+						Description: "inMailboxOtherThan holds an id that is not valid"}
+				}
+				other = append(other, id)
+			}
+			q.InMailboxOtherThan = other
 		}
 		if f.InThread != nil {
 			id, err := ulid.Parse(*f.InThread)
@@ -2318,11 +2396,17 @@ func (r requestedID) parsed() (ulid.ULID, bool) { return r.id, r.ok }
 // parseIDs splits requested id strings into the valid ULIDs (for the store
 // query), the immediately-not-found (unparseable) strings, and the ordered
 // request list used to assemble the response.
+//
+// An id that does not parse cannot name an object, so it is reported in notFound
+// HERE, once, for every /get that shares this (RFC 8620 §5.1: every requested id
+// is accounted for in list or notFound). The callers' own loops skip the
+// unparsed ones and must not add them again.
 func parseIDs(raw []string) (valid []ulid.ULID, notFound []string, requested []requestedID) {
 	notFound = []string{}
 	for _, s := range raw {
 		id, err := ulid.Parse(s)
 		if err != nil {
+			notFound = append(notFound, s)
 			requested = append(requested, requestedID{raw: s, ok: false})
 			continue
 		}

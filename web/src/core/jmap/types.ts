@@ -1628,7 +1628,7 @@ export interface Email {
   from: EmailAddress[] | null;
   messageId: string[] | null;
   inReplyTo: string[] | null;
-  references: string[];
+  references: string[] | null;
   /** Mailroom extension (urn:mailroom:compose): the address this message was
    * delivered to — what a reply should come FROM (spec §5's catchall story). */
   deliveredTo: string | null;

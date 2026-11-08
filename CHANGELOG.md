@@ -9,6 +9,55 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+Mail clients that speak standard JMAP, such as aerc, get a more accurate server:
+a batch of conformance fixes found by running a real third-party JMAP client
+against Mailroom, plus an API key's session that describes what the key can
+actually do.
+
+### JMAP clients
+
+- **The session now gives full web addresses.** The API, download, upload and
+  event-stream addresses in the session are complete (scheme, host and path), so
+  a stock client can use them as they are instead of failing on its first call.
+  They are built from the public address you have configured, the same one
+  sign-in and OAuth use, or from the address the client reached the server on
+  when none is set. The `{...}` placeholders in them are unchanged.
+- **A read-only API key is shown as read-only.** The account in a key's session
+  is marked read-only when the key holds only read permissions, so a client does
+  not offer compose and delete actions that would be refused. Keys that can
+  write, and signed-in sessions, are unchanged.
+- **An API key is no longer told it can ask for changes.** The email list
+  query tells an API key that it cannot calculate changes, because the
+  changes call is not available to keys. Signed-in sessions still get the
+  answer they got before.
+- **Counting from the end of a list works.** A negative `position` in an email
+  query now means "that many from the end", and the reply reports where the page
+  actually started.
+- **Asking for ids that do not exist is answered fully.** An id that is not a
+  valid id now appears in `notFound` in every "get" call instead of silently
+  vanishing.
+- **Message ids and references are in standard form.** The message id, the
+  in-reply-to id and the references of an email no longer carry angle brackets, and
+  a message without those headers reports nothing (null) rather than an empty
+  list. Replies and drafts made by Mailroom's own web app and by API keys are
+  unaffected.
+- **"Get everything" is bounded.** Asking for all emails (or all threads) with no
+  list of ids returns them all when the account holds no more than the advertised
+  per-request limit, and a clear "request too large" error beyond it, rather than
+  an argument error.
+- **Malformed requests are named correctly.** A request body that is not JSON is
+  answered "not JSON", separately from JSON that is not a valid request, and these
+  errors are now sent with the standard problem-details content type.
+- **A new email search condition.** `inMailboxOtherThan` finds email that is in
+  at least one mailbox outside the list you give. It follows the same view of
+  where a message lives as `inMailbox`, and an API key restricted to some
+  accounts only ever sees those accounts' mail through it.
+
+### Under the hood
+
+- The web app accepts the full addresses the session now sends and keeps sending
+  its requests to the address the page was loaded from.
+
 ## [1.101.0] — 2026-11-07
 
 **v1.101 is the new composer.** Writing a message now has a full formatting bar:
