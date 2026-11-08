@@ -1222,7 +1222,7 @@ components:
         emailQuerySortOptions:
           type: array
           items: { type: string }
-          example: ["receivedAt", "sentAt"]
+          example: ["receivedAt", "sentAt", "size", "from", "subject", "hasKeyword"]
         mayCreateTopLevelMailbox: { type: boolean, example: false }
 
     SubmissionCapability:

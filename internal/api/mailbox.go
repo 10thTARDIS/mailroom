@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/oklog/ulid/v2"
 
@@ -198,15 +199,20 @@ func mailboxObject(mv store.MailboxView, props map[string]bool) map[string]any {
 
 func (a *API) mailboxQuery(ctx context.Context, userID ulid.ULID, rawArgs json.RawMessage) (json.RawMessage, *MethodError) {
 	var probe struct {
-		AccountID string `json:"accountId"`
-		Position  int    `json:"position"`
-		Limit     *int   `json:"limit"`
+		AccountID string          `json:"accountId"`
+		Position  int             `json:"position"`
+		Limit     *int            `json:"limit"`
+		Filter    json.RawMessage `json:"filter"`
 	}
 	if err := json.Unmarshal(rawArgs, &probe); err != nil {
 		return nil, &MethodError{Type: errInvalidArguments, Description: err.Error()}
 	}
 	if mErr := resolveAccount(userID, probe.AccountID); mErr != nil {
 		return nil, mErr
+	}
+	keep, fErr := parseMailboxFilter(probe.Filter)
+	if fErr != nil {
+		return nil, fErr
 	}
 
 	var (
@@ -219,14 +225,17 @@ func (a *API) mailboxQuery(ctx context.Context, userID ulid.ULID, rawArgs json.R
 		if err != nil {
 			return &MethodError{Type: errServerFail, Description: err.Error()}
 		}
-		if keyAccounts(ctx) != nil {
+		if keyAccounts(ctx) != nil || keep != nil {
 			views, verr := tx.GetMailboxes(ctx, ids)
 			if verr != nil {
 				return &MethodError{Type: errServerFail, Description: verr.Error()}
 			}
+			// The key's account scoping and the filter are both applied here, to
+			// the same view of each mailbox: a filter can only narrow what a key
+			// is allowed to see, never widen it.
 			allowed := map[ulid.ULID]bool{}
 			for _, v := range views {
-				if keyAllowsAccount(ctx, v.AccountID) {
+				if keyAllowsAccount(ctx, v.AccountID) && (keep == nil || keep(v)) {
 					allowed[v.ID] = true
 				}
 			}
@@ -422,4 +431,90 @@ func updateMailboxPatch(ctx context.Context, tx *store.UserTx, id string, raw js
 		}
 	}
 	return nil
+}
+
+// mailboxFilterConditions are the Mailbox/query FilterCondition keys (RFC 8621
+// 2.3) this server answers. Anything else is unsupportedFilter: ignoring a
+// condition would return a superset of what the client asked for.
+var mailboxFilterConditions = map[string]bool{
+	"role": true, "parentId": true, "name": true, "hasAnyRole": true, "isSubscribed": true,
+}
+
+// parseMailboxFilter turns a Mailbox/query filter into a predicate over the
+// mailbox as Mailbox/get reports it, or nil for no filter. Because it reads the
+// same projection the object is rendered from, a filter and the object can never
+// disagree: parentId is always null and isSubscribed always true there (this
+// server's mailboxes are flat and always subscribed), so parentId:<id> and
+// isSubscribed:false match nothing.
+func parseMailboxFilter(raw json.RawMessage) (func(store.MailboxView) bool, *MethodError) {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return nil, nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return nil, &MethodError{Type: errInvalidArguments, Description: "filter must be an object"}
+	}
+	for k := range obj {
+		if !mailboxFilterConditions[k] {
+			return nil, &MethodError{Type: errUnsupportedFilter, Description: "unsupported filter condition: " + k}
+		}
+	}
+	var preds []func(store.MailboxView) bool
+	bad := func(k string) *MethodError {
+		return &MethodError{Type: errInvalidArguments, Description: k + " has the wrong type"}
+	}
+	if v, ok := obj["role"]; ok {
+		if isJSONNull(v) {
+			preds = append(preds, func(m store.MailboxView) bool { return m.Role == "" })
+		} else {
+			var role string
+			if err := json.Unmarshal(v, &role); err != nil {
+				return nil, bad("role")
+			}
+			preds = append(preds, func(m store.MailboxView) bool { return m.Role == role })
+		}
+	}
+	if v, ok := obj["parentId"]; ok {
+		if isJSONNull(v) {
+			// Every mailbox is top-level (the object's parentId is always null).
+			preds = append(preds, func(store.MailboxView) bool { return true })
+		} else {
+			var id string
+			if err := json.Unmarshal(v, &id); err != nil {
+				return nil, bad("parentId")
+			}
+			preds = append(preds, func(store.MailboxView) bool { return false })
+		}
+	}
+	if v, ok := obj["name"]; ok {
+		var name string
+		if err := json.Unmarshal(v, &name); err != nil {
+			return nil, bad("name")
+		}
+		want := strings.ToLower(name)
+		preds = append(preds, func(m store.MailboxView) bool { return strings.Contains(strings.ToLower(m.Name), want) })
+	}
+	if v, ok := obj["hasAnyRole"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return nil, bad("hasAnyRole")
+		}
+		preds = append(preds, func(m store.MailboxView) bool { return (m.Role != "") == b })
+	}
+	if v, ok := obj["isSubscribed"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return nil, bad("isSubscribed")
+		}
+		// Reported as true for every mailbox (mailboxObject).
+		preds = append(preds, func(store.MailboxView) bool { return b })
+	}
+	return func(m store.MailboxView) bool {
+		for _, p := range preds {
+			if !p(m) {
+				return false
+			}
+		}
+		return true
+	}, nil
 }

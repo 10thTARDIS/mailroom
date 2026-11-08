@@ -576,8 +576,12 @@ func stepMailCapability(e *jcEnv) error {
 	opts, _ := m["emailQuerySortOptions"].([]any)
 	for _, o := range opts {
 		name := fmt.Sprint(o)
+		cmp := map[string]any{"property": name, "isAscending": true}
+		if name == "hasKeyword" {
+			cmp["keyword"] = "$seen" // RFC 8621 4.4.2: the keyword is part of the comparator
+		}
 		if _, err := e.rawOne(e.roToken, "Email/query", map[string]any{
-			"sort": []any{map[string]any{"property": name, "isAscending": true}}, "limit": 1}); err != nil {
+			"sort": []any{cmp}, "limit": 1}); err != nil {
 			return jcFail("advertised sort option %q is refused: %v", name, err)
 		}
 	}
@@ -1554,8 +1558,10 @@ func jcFilterCases() []jcFilterCase {
 			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m1, e.m3} }},
 		{"hasAttachment", "8621 §4.4.1", fc(jemail.FilterCondition{HasAttachment: true}), m1},
 		{"minSize", "8621 §4.4.1", fc(jemail.FilterCondition{MinSize: uint64(len(jcAltSize()))}), m1},
+		// maxSize is EXCLUSIVE (RFC 8621 4.4.1: the size must be less than it): the
+		// plain fixture's own size is the boundary and does not match itself.
 		{"maxSize", "8621 §4.4.1", fc(jemail.FilterCondition{MaxSize: uint64(len(jcPlain))}),
-			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m2} }},
+			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m3} }},
 		{"header", "8621 §4.4.1", fc(jemail.FilterCondition{Header: []string{"List-Id", "plans.example.net"}}), m2},
 		{"someInThreadHaveKeyword", "8621 §4.4.1", fc(jemail.FilterCondition{SomeInThreadHaveKeyword: "$flagged"}), m2},
 		{"noneInThreadHaveKeyword", "8621 §4.4.1", fc(jemail.FilterCondition{NoneInThreadHaveKeyword: "$flagged"}),

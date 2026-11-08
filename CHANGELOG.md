@@ -9,6 +9,55 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**Search and sorting for mail clients.** Standard JMAP clients can combine search
+conditions, find mail by sender and subject exactly as typed, filter by attachment,
+size and conversation flags, sort by size, sender, subject and keyword, and jump
+to a message in a list.
+
+### Search and sorting
+
+- **Combined searches work.** A mail client can now combine email search
+  conditions with AND, OR and NOT, nested inside one another, up to 8 levels deep
+  and 64 conditions in all. Each condition counts, so an entry that carries
+  several conditions counts once for each of them. A search may use at most 4
+  conversation-keyword conditions in all, and a mailbox list (`inMailbox`,
+  `inMailboxOtherThan`) at most 256 ids. Anything beyond that is refused with a
+  clear error. Asking for the Trash folder through an OR is
+  refused as unsupported instead of quietly widening the answer; Trash combined
+  with AND still shows the Trash view, and "not in Trash" (under NOT) works. Conversation-keyword conditions ignore
+  messages another mail app has moved to Trash. Oversized `position` and
+  `anchorOffset` values are refused. Sorting by subject looks only at the first
+  1000 characters of a subject.
+  An API key restricted to some accounts still only ever sees those accounts'
+  mail: a NOT or OR can never reach mail outside them, and the totals never count
+  it. Text searches (`text`, `body`, `to`, `cc` and the search syntax) can be
+  combined with AND but not placed under an OR or a NOT; a client that tries is
+  told that combination is unsupported rather than given a wrong answer.
+- **Sender and subject searches match what you typed.** The `from` and `subject`
+  conditions now find mail whose sender (name or address) or subject contains the
+  text, ignoring case, as the standard says, instead of fuzzy word matching. A
+  search for one address no longer finds mail that only has it in the To line.
+- **More email search conditions.** Clients can filter by `hasAttachment`,
+  `minSize` and `maxSize` (the size must be at least the minimum and below the
+  maximum), and by whether some, none or all of the messages in a conversation
+  carry a keyword. For an API key, "the conversation" means the messages that key
+  can see. Searching by an arbitrary header (`header`) and by `bcc` is still not
+  available and is refused as unsupported.
+- **More ways to sort.** Email lists can be sorted by `size`, `from` (display
+  name, else address), `subject` (ignoring "Re:" and "Fwd:" prefixes) and
+  `hasKeyword` (mail with the keyword first when descending), ascending or
+  descending, in either of the standard letter-case rules. Ties fall back to the
+  newest-first order. They work together with thread collapsing and are listed in
+  the session. Sorting by `to` is not yet available.
+- **Jump to a message in a list.** An email query can now be anchored on a
+  message with `anchor` and `anchorOffset`: the page starts at that message (plus
+  the offset) and `position` is ignored. If the message is not in the results the
+  server answers `anchorNotFound`. This works with thread collapsing and with API
+  keys.
+- **Mailbox lists can be filtered.** `Mailbox/query` honours `role`, `parentId`,
+  `name` (contains the text, any case), `hasAnyRole` and `isSubscribed`, and
+  refuses any other condition instead of returning every mailbox.
+
 ## [1.102.0-beta.1] — 2026-11-08
 
 **The first beta of v1.102 makes Mailroom work with standard JMAP mail clients.** Clients such as aerc can now connect and get accurate answers:

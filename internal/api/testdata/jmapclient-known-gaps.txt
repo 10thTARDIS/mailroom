@@ -12,27 +12,9 @@
 # The job is red when a step fails and is NOT listed here (a regression), and
 # also when a listed step starts passing (delete its line: the fix landed).
 # Add a line only with a reference; a line without one is rejected.
-mailbox.query-by-role	#102	Mailbox/query ignores its filter (role=inbox returns every mailbox) instead of unsupportedFilter
-email.query.anchor	#103	Email/query ignores anchor
 blob.download-attachment	limit-adr042	API keys cannot reach /jmap/download (ADR-042 3), yet the session a key receives advertises downloadUrl
-email.query.filter.from-name	#110	from filter is search-engine matching (tokenised/fuzzy), not RFC substring: other senders at the same domain match
-email.query.filter.from-ignores-to-header	#110	from filter is search-engine matching (tokenised/fuzzy), not RFC substring: other senders at the same domain match
-email.query.filter.hasAttachment	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.minSize	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.maxSize	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.header	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.someInThreadHaveKeyword	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.noneInThreadHaveKeyword	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.filter.allInThreadHaveKeyword	#111	Email/query filter condition not implemented (unsupportedFilter)
-email.query.operator.AND	#112	Email/query FilterOperator (AND/OR/NOT) is not implemented (unsupportedFilter)
-email.query.operator.OR	#112	Email/query FilterOperator (AND/OR/NOT) is not implemented (unsupportedFilter)
-email.query.operator.NOT	#112	Email/query FilterOperator (AND/OR/NOT) is not implemented (unsupportedFilter)
-email.query.operator.nested	#112	Email/query FilterOperator (AND/OR/NOT) is not implemented (unsupportedFilter)
-email.query.sort.size	#113	Email/query sort property not implemented (invalidArguments); RFC 8621 4.4.2 requires it
-email.query.sort.from	#113	Email/query sort property not implemented (invalidArguments); RFC 8621 4.4.2 requires it
-email.query.sort.to	#113	Email/query sort property not implemented (invalidArguments); RFC 8621 4.4.2 requires it
-email.query.sort.subject	#113	Email/query sort property not implemented (invalidArguments); RFC 8621 4.4.2 requires it
-email.query.sort.hasKeyword	#113	Email/query sort property not implemented (invalidArguments); RFC 8621 4.4.2 requires it
+email.query.filter.header	#111	header needs the raw header block, which is stored only in the encrypted message; no queryable storage exists, so it stays unsupportedFilter
+email.query.sort.to	#113	the To addresses are not stored in queryable form (only the From is), so sorting by them needs recipient columns and a backfill; refused with invalidArguments until then
 email.get.property.header:List-Id:asText	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
 email.get.property.header:Message-ID:asMessageIds	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
 email.get.property.header:From:asAddresses	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them

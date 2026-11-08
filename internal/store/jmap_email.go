@@ -601,12 +601,18 @@ func inOtherThanSQL(bind func(any) string, userID ulid.ULID, mailboxIDs []ulid.U
 // Still three-valued-logic-free (see inMailboxSQL): m.id is a primary key and
 // p.message_id is NOT NULL, so the IN is strictly true or false.
 func mailboxMembershipSQL(userPH, match string) string {
-	return `(CASE WHEN m.moved_mailbox_id IS NOT NULL
-		 THEN m.moved_mailbox_id ` + match + `
-		 ELSE (m.id IN (SELECT p.message_id FROM app.message_provenance p
+	return mailboxMembershipFor("m", userPH, match)
+}
+
+// mailboxMembershipFor is mailboxMembershipSQL over a message alias other than
+// `m` (a thread's other messages, `tm`): the same derivation, written once.
+func mailboxMembershipFor(a, userPH, match string) string {
+	return `(CASE WHEN ` + a + `.moved_mailbox_id IS NOT NULL
+		 THEN ` + a + `.moved_mailbox_id ` + match + `
+		 ELSE (` + a + `.id IN (SELECT p.message_id FROM app.message_provenance p
 		        WHERE p.user_id = ` + userPH + `
 		          AND p.state = 'live' AND p.mailbox_id ` + match + `)
-		       OR (m.local_mailbox_id IS NOT NULL AND m.local_mailbox_id ` + match + `)) END)`
+		       OR (` + a + `.local_mailbox_id IS NOT NULL AND ` + a + `.local_mailbox_id ` + match + `)) END)`
 }
 
 // effectiveMembershipSQL is THE derivation of "which mailboxes is a message in",
@@ -902,6 +908,40 @@ type EmailQuery struct {
 	OnlyJunk    bool
 	ExcludeJunk bool
 
+	// The RFC 8621 4.4.1 conditions below are STANDARD CONDITIONS: the only ones a
+	// FilterOperator leaf may carry (EmailFilterNode), compiled by standardConds
+	// for the query's own flat filter and for every leaf of its Tree alike, so a
+	// condition means the same thing at the top and nested.
+	//
+	// FromContains / SubjectContains: the header value CONTAINS the string,
+	// case-insensitively (RFC 8621 4.4.1). The sender is matched on the stored
+	// display name and address, the subject on the stored subject. These are
+	// substring matches, deliberately not the search index's tokenised ones.
+	FromContains    string
+	SubjectContains string
+	// HasAttachment: true keeps mail with an attachment, false mail without.
+	HasAttachment *bool
+	// MinSize keeps size >= MinSize; MaxSize keeps size < MaxSize (RFC 8621 4.4.1).
+	MinSize *int64
+	MaxSize *int64
+	// SomeInThreadHaveKeyword, NoneInThreadHaveKeyword, AllInThreadHaveKeyword:
+	// the thread-wide keyword conditions. A message with no thread is a thread of
+	// one. The thread's members are its undeleted messages plus the message itself.
+	SomeInThreadHaveKeyword string
+	NoneInThreadHaveKeyword string
+	AllInThreadHaveKeyword  string
+
+	// Tree, when non-nil, is a FilterOperator tree (RFC 8620 5.5, AND/OR/NOT)
+	// ANDed with every other condition of this query. It is the ONLY place a
+	// boolean combination can come from: no second compiler exists.
+	Tree *EmailFilterNode
+
+	// SortKeys, when non-empty, is the ordered sort of an Email/query that asked
+	// for a property beyond the date ones (size, from, subject, hasKeyword). Each
+	// key carries its own direction; the date key and the id break any tie, in
+	// the direction SortAscending gives them. Empty means the historical order.
+	SortKeys []EmailSortKey
+
 	// Search is the store half of a search query (#722/#723): a boolean tree of
 	// predicates the index cannot answer (area:, is:snoozed, is:muted,
 	// is:pinned, is:important), ANDed with every other condition. nil means
@@ -924,6 +964,10 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		return "$" + strconv.Itoa(len(args))
 	}
 	from, where, err := tx.emailQueryWhere(ctx, q, bind, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	keyTerms, err := tx.sortKeyTerms(ctx, q, bind)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -955,7 +999,7 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 		// uncollapsed branch below), because collapsing ranks every candidate
 		// row by this exact order first: `total` is "how many threads have a
 		// rank-1 row", which needs the window computed.
-		body, outerOrder := collapsedRankSQL(from, where, emailOrderTerms(q, bind))
+		body, outerOrder := collapsedRankSQL(from, where, emailOrderTermsWith(q, bind, keyTerms))
 		ranked := `WITH ranked AS (` + body + `) `
 		countSQL = ranked + `SELECT count(*) FROM ranked WHERE rn = 1`
 		// One pass: count(*) OVER () is evaluated before LIMIT/OFFSET, so every
@@ -965,7 +1009,7 @@ func (tx *UserTx) QueryEmails(ctx context.Context, q EmailQuery) (ids []ulid.ULI
 	} else {
 		countSQL = `SELECT count(*) FROM ` + from + ` WHERE ` + where
 
-		terms := emailOrderTerms(q, bind)
+		terms := emailOrderTermsWith(q, bind, keyTerms)
 		orderByParts := make([]string, len(terms))
 		for i, t := range terms {
 			orderByParts[i] = t.render(t.expr)
@@ -1099,9 +1143,6 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 			areaCond = func(areaID *ulid.ULID) string { return AreaPredicate(areaID, bind) }
 		}
 	}
-	if q.InThread != nil {
-		conds = append(conds, "m.thread_id = "+bind(q.InThread.String()))
-	}
 	if len(q.InTab) > 0 {
 		// The twin of store.resolveOne — see tab_resolve.go, which holds both and
 		// explains why a differential test rather than shared code.
@@ -1173,31 +1214,26 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 			conds = append(conds, "("+side+" = 'drawer')")
 		}
 	}
-	if q.InMailbox != nil {
-		conds = append(conds, inMailboxSQL(bind, tx.userID, *q.InMailbox))
-	}
-	if q.InMailboxOtherThan != nil {
-		conds = append(conds, inOtherThanSQL(bind, tx.userID, q.InMailboxOtherThan))
-	}
+	// THE ACCOUNT RESTRICTION OF AN API KEY IS ANDed HERE, AT THE TOP, OUTSIDE
+	// EVERY FilterOperator TREE (#112). A tree is compiled as ONE parenthesised
+	// conjunct below; nothing inside it, NOT and OR included, can widen what this
+	// predicate admits, because the tree can only ever intersect with it.
 	if q.RestrictAccounts != nil {
 		conds = append(conds, keyAccountsSQL("m", bind(ulidStrings(q.RestrictAccounts))))
 	}
-	if q.InAccount != nil {
-		// "Lives in the account" is EXACTLY liveAccountIDs' definition — a LIVE
-		// provenance row for this message in that account — so an index-independent
-		// per-account view (spec §7) matches the writeback fan-out set. It reads
-		// provenance directly and deliberately ignores moved_mailbox_id: a message
-		// the user moved still physically belongs to the account whose folder holds
-		// the bytes, which is the account the mutation writes back to.
-		//
-		// RLS-safe by construction: app.message_provenance is RLS-scoped to the
-		// user (and we bind p.user_id = m.user_id = tx.userID), so a foreign or
-		// other-user account id matches ZERO rows — fail-closed, with no separate
-		// ownership check that could error (500) on a valid request.
-		a := bind(q.InAccount.String())
-		conds = append(conds, `EXISTS (SELECT 1 FROM app.message_provenance p
-			 WHERE p.user_id = m.user_id AND p.message_id = m.id
-			   AND p.state = 'live' AND p.account_id = `+a+`)`)
+	// The standard (RFC 8621 4.4.1) conditions of the query's own flat filter, and
+	// then its FilterOperator tree, both from the same compiler (jmap_email_filter.go).
+	std, err := tx.standardConds(ctx, q, q.RestrictAccounts, bind)
+	if err != nil {
+		return "", "", err
+	}
+	conds = append(conds, std...)
+	if q.Tree != nil {
+		sql, err := tx.filterTreeSQL(ctx, *q.Tree, q.RestrictAccounts, bind)
+		if err != nil {
+			return "", "", err
+		}
+		conds = append(conds, sql)
 	}
 	// DELETED MAIL HAS ONE DEFINITION (#631): trashed_at is set, OR the message
 	// is effectively in a trash-role mailbox. A deleted message is visible only
@@ -1235,6 +1271,38 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 		trashQuery = role == "trash"
 		junkQuery = role == "junk"
 	}
+	if q.Tree != nil {
+		// A FilterOperator tree is a Trash view only when a Trash-role inMailbox
+		// leaf is reached from the root through AND alone, exactly as a flat
+		// inMailbox is. A Trash-role inMailbox under an OR or a NOT would lift the
+		// deleted-mail exclusion for every branch of the query, silently widening
+		// the answer, so it is refused instead.
+		conj, other := q.Tree.mailboxLeaves()
+		for _, id := range other {
+			role, _, err := tx.MailboxRole(ctx, id)
+			if err != nil {
+				return "", "", err
+			}
+			if role == "trash" {
+				return "", "", ErrUnsupportedTrashFilter
+			}
+		}
+		for _, id := range conj {
+			if trashQuery {
+				break
+			}
+			role, _, err := tx.MailboxRole(ctx, id)
+			if err != nil {
+				return "", "", err
+			}
+			if role == "trash" {
+				trashQuery = true
+			}
+		}
+	}
+	if q.ThreadKeywordCount()+treeThreadKeywords(q.Tree) > MaxThreadKeywordConds {
+		return "", "", ErrFilterTooComplex
+	}
 	switch {
 	case q.OnlyTrashed:
 		trash, err := tx.trashRoleMailboxIDs(ctx)
@@ -1258,20 +1326,6 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 			// NOT is a true complement: no row escapes both halves as NULL.
 			conds = append(conds, "NOT "+inAnyMailboxSQL(bind, tx.userID, trash))
 		}
-	}
-	if q.HasKeyword != "" {
-		cond, err := tx.keywordPredicate(ctx, "m", q.HasKeyword, true, bind)
-		if err != nil {
-			return "", "", err
-		}
-		conds = append(conds, cond)
-	}
-	if q.NotKeyword != "" {
-		cond, err := tx.keywordPredicate(ctx, "m", q.NotKeyword, false, bind)
-		if err != nil {
-			return "", "", err
-		}
-		conds = append(conds, cond)
 	}
 	if q.RestrictIDs != nil {
 		// An empty candidate set is a real answer ("the text matched nothing"),
@@ -1365,13 +1419,6 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 			conds = append(conds, "NOT "+needs)
 		}
 	}
-	if q.After != nil {
-		conds = append(conds, "m.received_at >= "+bind(q.After.UTC()))
-	}
-	if q.Before != nil {
-		conds = append(conds, "m.received_at < "+bind(q.Before.UTC()))
-	}
-
 	return from, strings.Join(conds, " AND "), nil
 }
 
@@ -1413,6 +1460,16 @@ func (t orderTerm) render(name string) string {
 // (the priority bucket's threshold), so it must be called exactly once per
 // statement it is rendered into.
 func emailOrderTerms(q EmailQuery, bind func(any) string) []orderTerm {
+	return emailOrderTermsWith(q, bind, nil)
+}
+
+// emailOrderTermsWith is emailOrderTerms with the terms of q.SortKeys (from
+// sortKeyTerms) spliced in. keyTerms is nil for the historical order, which is
+// then byte-for-byte what it always was. A date marker (empty expr) takes the
+// date key's place; without one the date key follows the sort keys, in the
+// direction SortAscending gives, and the id breaks the final tie in the date
+// key's direction, so every new sort ties to the existing stable order.
+func emailOrderTermsWith(q EmailQuery, bind func(any) string, keyTerms []orderTerm) []orderTerm {
 	dir := "DESC"
 	if q.SortAscending {
 		dir = "ASC"
@@ -1466,6 +1523,20 @@ func emailOrderTerms(q EmailQuery, bind func(any) string) []orderTerm {
 			dir:       dir,
 			nullsLast: true,
 		})
+	}
+	if len(keyTerms) > 0 {
+		dateSeen := false
+		for _, t := range keyTerms {
+			if t.expr == "" {
+				t.expr, dateSeen, dir = sortKey, true, t.dir
+			}
+			terms = append(terms, t)
+		}
+		if !dateSeen {
+			terms = append(terms, orderTerm{expr: sortKey, dir: dir})
+		}
+		terms = append(terms, orderTerm{expr: "m.id", dir: dir})
+		return terms
 	}
 	terms = append(terms, orderTerm{expr: sortKey, dir: dir})
 	terms = append(terms, orderTerm{expr: "m.id", dir: dir})
@@ -2550,4 +2621,12 @@ func (tx *UserTx) enqueueEmailIntent(ctx context.Context, action ulid.ULID, sour
 		}
 	}
 	return nil
+}
+
+// treeThreadKeywords is the thread-keyword conditions of an optional tree.
+func treeThreadKeywords(t *EmailFilterNode) int {
+	if t == nil {
+		return 0
+	}
+	return t.ThreadKeywordCount()
 }
