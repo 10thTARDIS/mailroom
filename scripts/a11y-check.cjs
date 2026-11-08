@@ -7525,8 +7525,20 @@ async function main() {
     // merely slow, and `waitForSelectorD` folds both into the same timeout line.
     page.on("console", (msg) => {
       if (msg.type() !== "error") return;
-      console.log("consoleerror " + msg.text());
-      recentPageIssues.push("console.error: " + msg.text());
+      // msg.text() renders a logged Error object as "JSHandle@error", which hid
+      // the cause of a composer crash React reported this way. Resolve each
+      // argument in the page: an Error gives its message and stack.
+      void Promise.all(
+        msg.args().map((a) =>
+          a
+            .evaluate((v) => (v instanceof Error ? v.message + "\n" + (v.stack || "") : String(v)))
+            .catch(() => a.toString()),
+        ),
+      ).then((parts) => {
+        const text = parts.join(" ").slice(0, 2000) || msg.text();
+        console.log("consoleerror " + text);
+        recentPageIssues.push("console.error: " + text);
+      });
     });
     // Cleared on every TOP-LEVEL navigation, so a diagnostic printed after a
     // `load()`/`reload()` reports issues from the document that is actually on
