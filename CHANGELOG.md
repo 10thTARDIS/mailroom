@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**Search and sorting for mail clients.** Standard JMAP clients can combine search
+## [1.102.0-beta.2] — 2026-11-09
+
+**The second beta of v1.102 brings search and sorting for mail clients.** Standard JMAP clients can combine search
 conditions, find mail by sender and subject exactly as typed, filter by attachment,
 size and conversation flags, sort by size, sender, subject and keyword, and jump
 to a message in a list.
