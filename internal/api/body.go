@@ -194,6 +194,11 @@ type emailBody struct {
 	// message would lose its body silently.
 	unreadable bool
 
+	// fields and headersTruncated are the message's header fields for the
+	// header:* and headers properties (ADR-052), set only when one was asked.
+	fields           []mime.Field
+	headersTruncated bool
+
 	// authTrusted is the Authentication-Results headers parsed under RFC 8601
 	// §5: only those bearing an authserv-id this deployment names
 	// (MAILROOM_AUTHSERV_IDS) survive. It is the ONLY auth input a SECURITY
