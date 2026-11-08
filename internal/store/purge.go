@@ -539,6 +539,10 @@ func (tx *UserTx) HardDeleteMessage(ctx context.Context, messageID ulid.ULID, no
 		return nil, false, false, nil
 	}
 
+	// A purged message leaves the mailbox it was placed in (ADR-052).
+	if err := tx.NoteMailboxCountsBefore(ctx, messageID); err != nil {
+		return nil, false, false, err
+	}
 	if _, err := tx.tx.Exec(ctx,
 		`DELETE FROM app.messages WHERE user_id = $1 AND id = $2`,
 		tx.userID.String(), messageID.String()); err != nil {

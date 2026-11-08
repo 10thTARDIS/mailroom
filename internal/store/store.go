@@ -123,6 +123,10 @@ type UserTx struct {
 	writebackDisabled bool
 	// areaReady caches areaIndexReady for this transaction (nil = not read).
 	areaReady *bool
+	// counts is this transaction's note of the mailboxes whose counts may have
+	// moved, flushed as Mailbox change rows just before commit (mailbox_counts.go,
+	// ADR-052). Nil until the first note.
+	counts *mailboxCountNotes
 }
 
 // UserID returns the identity this transaction is scoped to.
@@ -147,8 +151,14 @@ func (s *Store) UserTx(ctx context.Context, userID ulid.ULID, fn func(tx *UserTx
 		if retention <= 0 {
 			retention = DefaultTrashRetention
 		}
-		return fn(&UserTx{tx: ptx, userID: userID, trashRetention: retention,
-			writebackDisabled: s.writebackDisabled})
+		utx := &UserTx{tx: ptx, userID: userID, trashRetention: retention,
+			writebackDisabled: s.writebackDisabled, counts: newMailboxCountNotes()}
+		if err := fn(utx); err != nil {
+			return err
+		}
+		// The Mailbox count rows go in the SAME transaction as the mutations that
+		// noted them (the load-bearing invariant), and only when fn succeeded.
+		return utx.flushMailboxCounts(ctx)
 	})
 }
 

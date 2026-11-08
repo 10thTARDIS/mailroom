@@ -564,6 +564,10 @@ func (tx *UserTx) RetireDraft(ctx context.Context, id ulid.ULID) (reclaim [][]by
 		}
 	}
 
+	// The draft leaves its mailbox: note it before the row goes (ADR-052).
+	if err := tx.NoteMailboxCountsBefore(ctx, id); err != nil {
+		return nil, err
+	}
 	if _, err := tx.tx.Exec(ctx,
 		`DELETE FROM app.messages WHERE user_id = $1 AND id = $2`,
 		tx.userID.String(), id.String()); err != nil {
@@ -878,6 +882,11 @@ func (tx *UserTx) RetireSentDraftCopy(ctx context.Context, id, accountID ulid.UL
 	// (a `mailboxIds` change) with zero Email rows in the transaction. Hence
 	// provenanceDropped, and hence RepairSentDraft, which owns that pairing.
 	if queued > 0 {
+		// The local Drafts locations go: note the mailbox before they do (ADR-052).
+		if err := tx.NoteMailboxCountsBefore(ctx, id); err != nil {
+			return 0, 0, err
+		}
+		tx.NoteMailboxCountsAfter(id)
 		for _, provenanceID := range drop {
 			if _, err := tx.tx.Exec(ctx,
 				`DELETE FROM app.message_provenance WHERE user_id = $1 AND id = $2`,
@@ -1152,6 +1161,11 @@ func (tx *UserTx) heldContentHashes(ctx context.Context, id ulid.ULID, current [
 // mailbox, and appends the Email change_log row. The IMAP side is handled by the
 // Sent APPEND intent, not by this row.
 func (tx *UserTx) MarkMessageSent(ctx context.Context, id, sentMailboxID ulid.ULID) error {
+	// Drafts -> Sent, and unseen -> seen: both mailboxes' counts move (ADR-052).
+	if err := tx.NoteMailboxCountsBefore(ctx, id); err != nil {
+		return err
+	}
+	tx.NoteMailboxCountsAfter(id)
 	tag, err := tx.tx.Exec(ctx, `
 		UPDATE app.messages
 		   SET is_draft = false, is_seen = true, local_mailbox_id = $3::app.ulid

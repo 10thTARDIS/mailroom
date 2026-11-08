@@ -287,6 +287,12 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 				return res, err
 			}
 			if target != moved {
+				// A placement change moves the message between mailboxes
+				// (ADR-052): the source is noted now, the destination at flush.
+				if err := tx.NoteMailboxCountsBefore(ctx, msgID); err != nil {
+					return res, err
+				}
+				tx.NoteMailboxCountsAfter(msgID)
 				if _, err := tx.tx.Exec(ctx, `
 					UPDATE app.messages SET moved_mailbox_id = NULLIF($3, '')
 					 WHERE user_id = $1 AND id = $2`,
@@ -302,6 +308,10 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 		// hide it there, so it goes; the message is then a member of
 		// Spam/Trash through its provenance.
 		if moved != "" {
+			if err := tx.NoteMailboxCountsBefore(ctx, msgID); err != nil {
+				return res, err
+			}
+			tx.NoteMailboxCountsAfter(msgID)
 			tag, err := tx.tx.Exec(ctx, `
 				UPDATE app.messages m SET moved_mailbox_id = NULL
 				 WHERE m.user_id = $1 AND m.id = $2

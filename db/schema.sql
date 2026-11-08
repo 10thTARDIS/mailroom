@@ -538,6 +538,12 @@ CREATE TABLE app.change_log (
   object_id   app.ulid NOT NULL,
   op          app.change_op NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now(),
+  -- A Mailbox `updated` row that only says the mailbox's counts may have moved
+  -- (migration 00090, ADR-052, #115): Mailbox/changes names just the count
+  -- properties in `updatedProperties` when every row for a mailbox in the
+  -- window is one. Declared last to match the column order the migration
+  -- produces (ADD COLUMN appends); migrate-check diffs the two schemas.
+  counts_only boolean NOT NULL DEFAULT false,
   PRIMARY KEY (user_id, object_type, seq)
 );
 -- /changes scans: (user, type, seq > since) — covered by the PK.

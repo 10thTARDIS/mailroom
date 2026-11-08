@@ -309,6 +309,12 @@ func (tx *UserTx) reapMessage(ctx context.Context, msgID, mailboxID ulid.ULID) (
 	// the soft-delete, when it happened — they are one update from JMAP's point of
 	// view). This is the invariant, and it is what drives both the client's
 	// /changes cursor and the search index.
+	//
+	// The reaped mailbox lost a message (and a soft-delete moves counts too):
+	// its Mailbox state must move with it (ADR-052). The post-write membership no
+	// longer names it, which is why it is noted by id here.
+	tx.NoteMailboxes(mailboxID)
+	tx.NoteMailboxCountsAfter(msgID)
 	if _, err := tx.AppendChange(ctx, ObjectEmail, msgID, OpUpdated); err != nil {
 		return false, false, err
 	}
@@ -587,6 +593,10 @@ func (tx *UserTx) RetractVanished(ctx context.Context, messageID ulid.ULID) (boo
 		tx.userID.String(), messageID.String())
 	if err != nil {
 		return false, fmt.Errorf("store: retract vanished %s: %w", messageID, err)
+	}
+	if tag.RowsAffected() > 0 {
+		// The message counts as unread again where it lives (ADR-052).
+		tx.NoteMailboxCountsAfter(messageID)
 	}
 	return tag.RowsAffected() > 0, nil
 }

@@ -200,6 +200,15 @@ func (tx *UserTx) ChangeState(ctx context.Context, t ObjectType) (int64, error) 
 // increasing per (user, type) exactly as the one-at-a-time path produces — a
 // client's `/changes` cursor cannot tell the two apart.
 func (tx *UserTx) AppendChanges(ctx context.Context, t ObjectType, objectIDs []ulid.ULID, op ChangeOp) error {
+	return tx.appendChanges(ctx, t, objectIDs, op, false)
+}
+
+// appendChanges is AppendChanges with the counts_only mark (migration 00090,
+// ADR-052): set only by the end-of-transaction Mailbox count flush
+// (mailbox_counts.go), so a Mailbox row that merely says "the counts may have
+// moved" is distinguishable from a rename. It is the SAME write path, not a
+// second one.
+func (tx *UserTx) appendChanges(ctx context.Context, t ObjectType, objectIDs []ulid.ULID, op ChangeOp, countsOnly bool) error {
 	if len(objectIDs) == 0 {
 		return nil
 	}
@@ -223,10 +232,10 @@ func (tx *UserTx) AppendChanges(ctx context.Context, t ObjectType, objectIDs []u
 	// And one statement for the rows: generate_series pairs each id with its
 	// sequence, so the ordering of the block matches the ordering of the slice.
 	if _, err := tx.tx.Exec(ctx, `
-		INSERT INTO app.change_log (user_id, object_type, seq, object_id, op)
-		SELECT $1, $2, $3::bigint - $4::bigint + i, id, $5
+		INSERT INTO app.change_log (user_id, object_type, seq, object_id, op, counts_only)
+		SELECT $1, $2, $3::bigint - $4::bigint + i, id, $5, $7
 		  FROM unnest($6::text[]) WITH ORDINALITY AS t(id, i)`,
-		tx.userID.String(), t, last, n, op, ids); err != nil {
+		tx.userID.String(), t, last, n, op, ids, countsOnly); err != nil {
 		return fmt.Errorf("store: append %d change rows (%s): %w", n, t, err)
 	}
 	return nil

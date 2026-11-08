@@ -33,6 +33,11 @@ type ChangesPage struct {
 	Created   []ulid.ULID
 	Updated   []ulid.ULID
 	Destroyed []ulid.ULID
+	// UpdatedCountsOnly holds the Updated ids for which EVERY change row in the
+	// window is a count row (change_log.counts_only, ADR-052): Mailbox/changes
+	// names just the count properties in updatedProperties for those, and null
+	// for the rest. Empty for any other type.
+	UpdatedCountsOnly map[ulid.ULID]bool
 }
 
 // Changes computes the JMAP `Foo/changes` delta for object type t between
@@ -89,7 +94,7 @@ func (tx *UserTx) Changes(ctx context.Context, t ObjectType, since int64, maxCha
 				(SELECT last_seq FROM app.change_seq
 				  WHERE user_id = $1 AND object_type = $2), 0) AS cur
 		)
-		SELECT f.floor_seq, c.cur, l.seq, l.object_id, l.op
+		SELECT f.floor_seq, c.cur, l.seq, l.object_id, l.op, l.counts_only
 		  FROM f CROSS JOIN c
 		  LEFT JOIN app.change_log l
 		    ON l.user_id = $1 AND l.object_type = $2 AND l.seq > $3
@@ -112,8 +117,9 @@ func (tx *UserTx) Changes(ctx context.Context, t ObjectType, since int64, maxCha
 			seq   *int64
 			objID *string
 			op    *string
+			cnt   *bool
 		)
-		if err := rows.Scan(&f, &c, &seq, &objID, &op); err != nil {
+		if err := rows.Scan(&f, &c, &seq, &objID, &op, &cnt); err != nil {
 			return ChangesPage{}, fmt.Errorf("store: scan change row (%s): %w", t, err)
 		}
 		floor, current, seenRow = f, c, true
@@ -129,6 +135,7 @@ func (tx *UserTx) Changes(ctx context.Context, t ObjectType, since int64, maxCha
 			return ChangesPage{}, fmt.Errorf("store: parse change object id %q: %w", *objID, err)
 		}
 		e.op = ChangeOp(*op)
+		e.countsOnly = cnt != nil && *cnt
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -155,6 +162,8 @@ type changeEntry struct {
 	seq      int64
 	objectID ulid.ULID
 	op       ChangeOp
+	// countsOnly is the row's counts_only mark (ADR-052).
+	countsOnly bool
 }
 
 // collapseChanges is the pure, database-free core of the §3.2 algorithm: given
@@ -165,6 +174,7 @@ type changeEntry struct {
 func collapseChanges(entries []changeEntry, since, current int64, maxChanges int) ChangesPage {
 	type collapsed struct {
 		first, last ChangeOp
+		allCounts   bool // every row so far is a counts_only row
 	}
 	order := make([]ulid.ULID, 0, len(entries))
 	seen := make(map[ulid.ULID]*collapsed, len(entries))
@@ -181,11 +191,12 @@ func collapseChanges(entries []changeEntry, since, current int64, maxChanges int
 				capped = true
 				break
 			}
-			c = &collapsed{first: e.op, last: e.op}
+			c = &collapsed{first: e.op, last: e.op, allCounts: e.countsOnly}
 			seen[e.objectID] = c
 			order = append(order, e.objectID)
 		} else {
 			c.last = e.op
+			c.allCounts = c.allCounts && e.countsOnly
 		}
 		newState = e.seq
 	}
@@ -208,6 +219,12 @@ func collapseChanges(entries []changeEntry, since, current int64, maxChanges int
 			page.Destroyed = append(page.Destroyed, oid)
 		default:
 			page.Updated = append(page.Updated, oid)
+			if c.allCounts {
+				if page.UpdatedCountsOnly == nil {
+					page.UpdatedCountsOnly = map[ulid.ULID]bool{}
+				}
+				page.UpdatedCountsOnly[oid] = true
+			}
 		}
 	}
 	return page

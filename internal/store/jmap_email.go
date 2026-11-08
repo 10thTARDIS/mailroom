@@ -1920,6 +1920,11 @@ func (tx *UserTx) applyEmailUpdate(ctx context.Context, id ulid.ULID, up EmailUp
 		setTrash = ", trashed_at = NULL, purge_after = NULL"
 		restored = true
 	}
+	// A seen or trash change moves a mailbox's counts in place (ADR-052); only
+	// the After note is needed, as the message stays where it is.
+	if nSeen != seen || nTrashed != trashed {
+		tx.NoteMailboxCountsAfter(id)
+	}
 	var touched string
 	// flagged_at rides this UPDATE in SQL, not a follow-up Go write (#444): it
 	// becomes now() the instant is_flagged goes false->true, NULL the instant it
@@ -2270,6 +2275,12 @@ func (tx *UserTx) applyEmailUpdate(ctx context.Context, id ulid.ULID, up EmailUp
 			// no-op, not another IMAP move.
 			moveRole, moveTarget = "", nil
 		case placement != nil:
+			// The source mailbox stops holding the message the moment this
+			// commits, and is not derivable afterwards: note it NOW (ADR-052).
+			if err := tx.NoteMailboxCountsBefore(ctx, id); err != nil {
+				return false, 0, err
+			}
+			tx.NoteMailboxCountsAfter(id)
 			if _, err := tx.tx.Exec(ctx, `
 				UPDATE app.messages SET moved_mailbox_id = $3
 				 WHERE user_id = $1 AND id = $2`,

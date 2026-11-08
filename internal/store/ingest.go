@@ -333,6 +333,8 @@ func (tx *UserTx) InsertMessage(ctx context.Context, m MessageRow) error {
 	); err != nil {
 		return fmt.Errorf("store: insert message: %w", err)
 	}
+	// A new message is one more in whichever mailbox it lands in (ADR-052).
+	tx.NoteMailboxCountsAfter(m.ID)
 	return nil
 }
 
@@ -346,8 +348,16 @@ func (tx *UserTx) InsertMessage(ctx context.Context, m MessageRow) error {
 // otherwise. The IS DISTINCT FROM guard already limits the whole statement to
 // real changes, so an unchanged flag never re-evaluates the CASE at all.
 func (tx *UserTx) UpdateMessageFlagsIfChanged(ctx context.Context, messageID ulid.ULID, f MessageFlags) (bool, error) {
-	var id string
+	var (
+		id       string
+		seenMove bool
+	)
+	// seenMove: the seen flag itself moved, which is what moves a mailbox's
+	// unread count (ADR-052). The SET clause reads the pre-update row, so
+	// `is_seen <> $3` in RETURNING is evaluated on the NEW row; compare against
+	// the value the statement was given instead.
 	err := tx.tx.QueryRow(ctx, `
+		WITH old AS (SELECT is_seen FROM app.messages WHERE user_id = $1 AND id = $2)
 		UPDATE app.messages
 		   SET is_seen = $3, is_flagged = $4, is_answered = $5, is_draft = $6, is_junk = $7, keywords = $8,
 		       flagged_at = CASE WHEN $4 AND NOT is_flagged THEN now()
@@ -356,14 +366,17 @@ func (tx *UserTx) UpdateMessageFlagsIfChanged(ctx context.Context, messageID uli
 		 WHERE user_id = $1 AND id = $2
 		   AND (is_seen, is_flagged, is_answered, is_draft, is_junk, keywords)
 		       IS DISTINCT FROM ($3, $4, $5, $6, $7, $8)
-		RETURNING id`,
+		RETURNING id, COALESCE((SELECT is_seen FROM old) <> $3, false)`,
 		tx.userID.String(), messageID.String(),
-		f.Seen, f.Flagged, f.Answered, f.Draft, f.Junk, f.Keywords).Scan(&id)
+		f.Seen, f.Flagged, f.Answered, f.Draft, f.Junk, f.Keywords).Scan(&id, &seenMove)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("store: update message flags: %w", err)
+	}
+	if seenMove {
+		tx.NoteMailboxCountsAfter(messageID)
 	}
 	return true, nil
 }
@@ -437,6 +450,10 @@ func (tx *UserTx) UpsertProvenance(ctx context.Context, p ProvenanceRow) (bool, 
 		p.MailboxID.String(), p.UID, p.UIDValidity, nullStr(p.GmMsgID), p.RemoteFlags).Scan(&nowLive)
 	if err != nil {
 		return false, fmt.Errorf("store: upsert provenance: %w", err)
+	}
+	if nowLive {
+		// A copy that became live puts the message in this mailbox (ADR-052).
+		tx.NoteMailboxCountsAfter(p.MessageID)
 	}
 	return nowLive, nil
 }
