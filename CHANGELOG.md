@@ -58,6 +58,14 @@ actually do.
 - The web app accepts the full addresses the session now sends and keeps sending
   its requests to the address the page was loaded from.
 
+### Upgrading
+
+- If Mailroom sits behind a proxy that handles HTTPS, make sure its public address
+  is known: set `MAILROOM_PUBLIC_URL`, or sign in through OIDC, whose redirect
+  address supplies it. Without either, the session's addresses are built from the
+  connection the proxy makes, and a mail client would be told `http://`. The web
+  app is not affected.
+
 ## [1.101.0] — 2026-11-07
 
 **v1.101 is the new composer.** Writing a message now has a full formatting bar:
