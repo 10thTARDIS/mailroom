@@ -64,3 +64,4 @@ superseding the old one — see `CLAUDE.md`.
 One file per decision: `ADR-NNN-slug.md` with Status / Context / Decision /
 Consequences / References. Statuses: Proposed, Accepted, Superseded by
 ADR-NNN, Open.
+| [ADR-052](ADR-052-mailbox-state-and-header-properties.md) | Mailbox state advances when counts change: counts stay computed on read, count-affecting writes note their mailboxes on the transaction and the store appends one Mailbox `updated` row per distinct mailbox at commit (`change_log.counts_only` marks them so `updatedProperties` can name only the counts); Email/get answers `header:Name[:asForm][:all]` and `headers` from the decrypted stored message, bounded per message (128 KiB header block, reported by `headersTruncated`) and per request (200 ids), needs exactly `mail:read`, never logs or indexes values, and refuses unknown properties with `invalidArguments` | Proposed |
