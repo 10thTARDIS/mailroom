@@ -1194,11 +1194,11 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 				// An id that cannot be a message id is not in any result.
 				return &MethodError{Type: errAnchorNotFound}
 			}
-			idx, found, aerr := tx.EmailAnchorIndex(ctx, q, anchor)
+			idx, anchorFound, aerr := tx.EmailAnchorIndex(ctx, q, anchor)
 			if aerr != nil {
 				return &MethodError{Type: errServerFail, Description: aerr.Error()}
 			}
-			if !found {
+			if !anchorFound {
 				return &MethodError{Type: errAnchorNotFound}
 			}
 			q.Position = max(0, idx+args.AnchorOffset)
@@ -1220,7 +1220,7 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 		position = q.Position
 		ids, total, err = tx.QueryEmails(ctx, q)
 		if err != nil {
-			return &MethodError{Type: errServerFail, Description: err.Error()}
+			return queryErrToMethodError(err)
 		}
 		state, err = tx.ChangeState(ctx, store.ObjectEmail)
 		if err != nil {
@@ -1361,6 +1361,22 @@ var deltaStableConditions = map[string]bool{
 // Email/queryChanges so the two agree on which filters are structured, which are
 // search-backed, and how a filter maps to store.EmailQuery — the queryState and
 // result ordering chain between them only because they parse identically.
+// maxWindowOffset bounds |position| and |anchorOffset| (2^31).
+const maxWindowOffset = 1 << 31
+
+// queryErrToMethodError maps a filter the store refused to the JMAP error the
+// client can act on; anything else is a server failure.
+func queryErrToMethodError(err error) *MethodError {
+	switch {
+	case errors.Is(err, store.ErrFilterTooComplex):
+		return &MethodError{Type: errInvalidArguments, Description: "the filter is too large or too complex"}
+	case errors.Is(err, store.ErrUnsupportedTrashFilter):
+		return &MethodError{Type: errUnsupportedFilter,
+			Description: "a Trash mailbox condition cannot be combined under OR or NOT"}
+	}
+	return &MethodError{Type: errServerFail, Description: err.Error()}
+}
+
 func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 	var plan emailQueryPlan
 	plan.searchLimit = search.DefaultLimit
@@ -1369,6 +1385,13 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 			return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "searchLimit must be >= 0"}
 		}
 		plan.searchLimit = min(max(*args.SearchLimit, search.DefaultLimit), search.MaxLimit)
+	}
+	// Bounded so idx+anchorOffset and total+position cannot overflow an int.
+	if args.Position > maxWindowOffset || args.Position < -maxWindowOffset {
+		return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "position is out of range"}
+	}
+	if args.AnchorOffset > maxWindowOffset || args.AnchorOffset < -maxWindowOffset {
+		return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "anchorOffset is out of range"}
 	}
 	q := store.EmailQuery{Position: args.Position}
 	if args.Limit != nil {
@@ -1668,7 +1691,7 @@ func (a *API) emailQueryChanges(ctx context.Context, userID ulid.ULID, rawArgs j
 		// consistent with page.NewState (data-model §3.1).
 		ids, total, cErr = tx.QueryEmails(ctx, plan.query)
 		if cErr != nil {
-			return &MethodError{Type: errServerFail, Description: cErr.Error()}
+			return queryErrToMethodError(cErr)
 		}
 		return nil
 	})

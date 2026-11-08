@@ -601,12 +601,18 @@ func inOtherThanSQL(bind func(any) string, userID ulid.ULID, mailboxIDs []ulid.U
 // Still three-valued-logic-free (see inMailboxSQL): m.id is a primary key and
 // p.message_id is NOT NULL, so the IN is strictly true or false.
 func mailboxMembershipSQL(userPH, match string) string {
-	return `(CASE WHEN m.moved_mailbox_id IS NOT NULL
-		 THEN m.moved_mailbox_id ` + match + `
-		 ELSE (m.id IN (SELECT p.message_id FROM app.message_provenance p
+	return mailboxMembershipFor("m", userPH, match)
+}
+
+// mailboxMembershipFor is mailboxMembershipSQL over a message alias other than
+// `m` (a thread's other messages, `tm`): the same derivation, written once.
+func mailboxMembershipFor(a, userPH, match string) string {
+	return `(CASE WHEN ` + a + `.moved_mailbox_id IS NOT NULL
+		 THEN ` + a + `.moved_mailbox_id ` + match + `
+		 ELSE (` + a + `.id IN (SELECT p.message_id FROM app.message_provenance p
 		        WHERE p.user_id = ` + userPH + `
 		          AND p.state = 'live' AND p.mailbox_id ` + match + `)
-		       OR (m.local_mailbox_id IS NOT NULL AND m.local_mailbox_id ` + match + `)) END)`
+		       OR (` + a + `.local_mailbox_id IS NOT NULL AND ` + a + `.local_mailbox_id ` + match + `)) END)`
 }
 
 // effectiveMembershipSQL is THE derivation of "which mailboxes is a message in",
@@ -1265,11 +1271,26 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 		trashQuery = role == "trash"
 		junkQuery = role == "junk"
 	}
-	if q.Tree != nil && !trashQuery {
-		// A FilterOperator tree that asks for a Trash mailbox where the answer must
-		// BE in it (a leaf under no NOT) is a Trash view, exactly as a flat
-		// inMailbox is; a tree that only excludes Trash is not.
-		for _, id := range q.Tree.positiveMailboxes() {
+	if q.Tree != nil {
+		// A FilterOperator tree is a Trash view only when a Trash-role inMailbox
+		// leaf is reached from the root through AND alone, exactly as a flat
+		// inMailbox is. A Trash-role inMailbox under an OR or a NOT would lift the
+		// deleted-mail exclusion for every branch of the query, silently widening
+		// the answer, so it is refused instead.
+		conj, other := q.Tree.mailboxLeaves()
+		for _, id := range other {
+			role, _, err := tx.MailboxRole(ctx, id)
+			if err != nil {
+				return "", "", err
+			}
+			if role == "trash" {
+				return "", "", ErrUnsupportedTrashFilter
+			}
+		}
+		for _, id := range conj {
+			if trashQuery {
+				break
+			}
 			role, _, err := tx.MailboxRole(ctx, id)
 			if err != nil {
 				return "", "", err
@@ -1278,6 +1299,9 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 				trashQuery = true
 			}
 		}
+	}
+	if q.ThreadKeywordCount()+treeThreadKeywords(q.Tree) > MaxThreadKeywordConds {
+		return "", "", ErrFilterTooComplex
 	}
 	switch {
 	case q.OnlyTrashed:
@@ -2597,4 +2621,12 @@ func (tx *UserTx) enqueueEmailIntent(ctx context.Context, action ulid.ULID, sour
 		}
 	}
 	return nil
+}
+
+// treeThreadKeywords is the thread-keyword conditions of an optional tree.
+func treeThreadKeywords(t *EmailFilterNode) int {
+	if t == nil {
+		return 0
+	}
+	return t.ThreadKeywordCount()
 }

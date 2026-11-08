@@ -27,7 +27,65 @@ const (
 	// MaxFilterNodes is the most nodes (operators and conditions together) one
 	// filter may hold.
 	MaxFilterNodes = 64
+	// MaxThreadKeywordConds is the most thread-keyword conditions (some, none and
+	// allInThreadHaveKeyword, all together) one query may carry: each is a
+	// per-message subquery over the thread's messages.
+	MaxThreadKeywordConds = 4
+	// MaxMailboxIDs is the longest inMailbox / inMailboxOtherThan id list one
+	// condition may carry.
+	MaxMailboxIDs = 256
 )
+
+// ConditionCount is how many standard conditions this query carries, which is
+// what a FilterOperator leaf costs toward MaxFilterNodes (a leaf with three
+// conditions is three, not one). It reads the SAME fields standardConds
+// compiles, and the API counts with it too, so the two bounds are identical.
+func (q EmailQuery) ConditionCount() int {
+	n := 0
+	for _, set := range []bool{
+		q.InThread != nil, q.InMailbox != nil, q.InMailboxOtherThan != nil, q.InAccount != nil,
+		q.HasKeyword != "", q.NotKeyword != "", q.After != nil, q.Before != nil,
+		q.FromContains != "", q.SubjectContains != "", q.HasAttachment != nil,
+		q.MinSize != nil, q.MaxSize != nil,
+		q.SomeInThreadHaveKeyword != "", q.NoneInThreadHaveKeyword != "", q.AllInThreadHaveKeyword != "",
+	} {
+		if set {
+			n++
+		}
+	}
+	return n
+}
+
+// ThreadKeywordCount is how many thread-keyword conditions this query carries.
+func (q EmailQuery) ThreadKeywordCount() int {
+	n := 0
+	for _, kw := range []string{q.SomeInThreadHaveKeyword, q.NoneInThreadHaveKeyword, q.AllInThreadHaveKeyword} {
+		if kw != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// MailboxListTooLong reports whether a mailbox id list on this query is past
+// MaxMailboxIDs.
+func (q EmailQuery) MailboxListTooLong() bool {
+	return len(q.InMailboxOtherThan) > MaxMailboxIDs
+}
+
+// ThreadKeywordCount is the thread-keyword conditions in the whole tree.
+func (n EmailFilterNode) ThreadKeywordCount() int {
+	c := n.Leaf.ThreadKeywordCount()
+	for _, k := range n.Conditions {
+		c += k.ThreadKeywordCount()
+	}
+	return c
+}
+
+// ErrUnsupportedTrashFilter is returned for a Trash-role inMailbox in a FilterOperator
+// tree anywhere but a leaf reached from the root through AND alone. The API
+// answers unsupportedFilter.
+var ErrUnsupportedTrashFilter = errors.New("store: a Trash mailbox condition is supported only in a conjunction")
 
 // ErrFilterTooComplex is returned for a filter tree beyond the bounds above.
 var ErrFilterTooComplex = errors.New("store: filter tree exceeds the depth or size bound")
@@ -50,30 +108,31 @@ type EmailFilterNode struct {
 	Leaf       EmailQuery
 }
 
-// positiveMailboxes lists the inMailbox ids a message matching this tree MUST be
-// in: leaves reached through no NOT. They decide whether the query is a view of
-// Trash (which lifts the default "deleted mail is gone").
-func (n EmailFilterNode) positiveMailboxes() []ulid.ULID {
-	var out []ulid.ULID
-	var walk func(n EmailFilterNode, positive bool)
-	walk = func(n EmailFilterNode, positive bool) {
-		switch n.Operator {
-		case "":
-			if positive && n.Leaf.InMailbox != nil {
-				out = append(out, *n.Leaf.InMailbox)
+// mailboxLeaves lists the inMailbox ids of this tree's leaves, split by where
+// they sit: conjunctive are reached from the root through AND operators alone
+// (so a matching message MUST be in them); other are under an OR or a NOT. The
+// first decide whether the query is a view of Trash (which lifts the default
+// "deleted mail is gone"); a Trash mailbox in the second is refused, because
+// lifting the exclusion for the whole query would widen every other branch.
+func (n EmailFilterNode) mailboxLeaves() (conjunctive, other []ulid.ULID) {
+	var walk func(n EmailFilterNode, conj bool)
+	walk = func(n EmailFilterNode, conj bool) {
+		if n.Operator == "" {
+			if n.Leaf.InMailbox != nil {
+				if conj {
+					conjunctive = append(conjunctive, *n.Leaf.InMailbox)
+				} else {
+					other = append(other, *n.Leaf.InMailbox)
+				}
 			}
-		case FilterNOT:
-			for _, c := range n.Conditions {
-				walk(c, !positive)
-			}
-		default:
-			for _, c := range n.Conditions {
-				walk(c, positive)
-			}
+			return
+		}
+		for _, c := range n.Conditions {
+			walk(c, conj && n.Operator == FilterAND)
 		}
 	}
 	walk(n, true)
-	return out
+	return conjunctive, other
 }
 
 // filterTreeSQL compiles a FilterOperator tree to ONE parenthesised boolean
@@ -90,7 +149,12 @@ func (tx *UserTx) filterTreeSQL(ctx context.Context, root EmailFilterNode, restr
 	nodes := 0
 	var walk func(n EmailFilterNode, depth int) (string, error)
 	walk = func(n EmailFilterNode, depth int) (string, error) {
-		nodes++
+		// A leaf costs one node per condition it carries (at least one).
+		if n.Operator == "" {
+			nodes += max(1, n.Leaf.ConditionCount())
+		} else {
+			nodes++
+		}
 		if depth > MaxFilterDepth || nodes > MaxFilterNodes {
 			return "", ErrFilterTooComplex
 		}
@@ -151,6 +215,9 @@ func likeContains(v string) string {
 // and live in emailQueryWhere, outside any tree.
 func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, restrict []ulid.ULID, bind func(any) string) ([]string, error) {
 	var conds []string
+	if q.MailboxListTooLong() {
+		return nil, ErrFilterTooComplex
+	}
 	if q.InThread != nil {
 		conds = append(conds, "m.thread_id = "+bind(q.InThread.String()))
 	}
@@ -260,6 +327,15 @@ func (tx *UserTx) threadKeywordSQL(ctx context.Context, keyword string, want boo
 	if err != nil {
 		return "", err
 	}
+	// The thread's OTHER messages count only if not deleted by the one definition
+	// Email/query's default uses (#631): trashed_at set, or effectively in a
+	// trash-role mailbox (mailbox moved by another client included).
+	folderTrashed := ""
+	if trash, err := tx.trashRoleMailboxIDs(ctx); err != nil {
+		return "", err
+	} else if len(trash) > 0 {
+		folderTrashed = " AND NOT " + mailboxMembershipFor("tm", bind(tx.userID.String()), "= ANY("+bind(ulidStrings(trash))+")")
+	}
 	// restrict is the API key's account restriction (EmailQuery.RestrictAccounts),
 	// passed down by emailQueryWhere and NOT read from the leaf, because a tree
 	// leaf compiles through here too. A thread can span accounts; "in the thread"
@@ -273,7 +349,7 @@ func (tx *UserTx) threadKeywordSQL(ctx context.Context, keyword string, want boo
 	return `(CASE WHEN m.thread_id IS NULL THEN ` + own + `
 		ELSE EXISTS (SELECT 1 FROM app.messages tm
 		   WHERE tm.user_id = m.user_id AND tm.thread_id = m.thread_id
-		     AND (tm.id = m.id OR tm.trashed_at IS NULL)` + vis + ` AND ` + member + `) END)`, nil
+		     AND (tm.id = m.id OR (tm.trashed_at IS NULL` + folderTrashed + `))` + vis + ` AND ` + member + `) END)`, nil
 }
 
 // EmailSortKind names an Email/query sort key beyond the historical date ones.
@@ -297,9 +373,12 @@ type EmailSortKey struct {
 	Octet bool
 }
 
-// Sort expressions. They are written once, here, and the migration that indexes
-// them quotes the same text (db/schema.sql, messages_user_sort_*), because an
-// expression index is used only when the query's expression matches it exactly.
+// Sort expressions, written once, here. NO index covers them: the query's
+// count(*) OVER () reads every row of the user's result anyway, so a sort by
+// subject or sender costs a pass over the user's matching messages plus a sort,
+// linear in their mail rather than in the page size. The subject functions cap
+// their input at 1000 characters (migration 00089), so the per-row work is
+// bounded however long a sender-controlled subject is.
 const (
 	// sortFromExpr: the first From address's display name, else its address,
 	// lowercased (RFC 8621 4.4.2). COLLATE "C" so the order is the octet order of

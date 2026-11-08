@@ -165,3 +165,66 @@ func TestMailboxFilterParsing(t *testing.T) {
 		t.Errorf("operator on Mailbox/query: %v", mErr)
 	}
 }
+
+func TestFilterLeafConditionsCountTowardTheNodeBound(t *testing.T) {
+	leaf := `{"hasAttachment":true,"minSize":0,"maxSize":100}` // three conditions
+	or := func(n int) string {
+		return `{"operator":"OR","conditions":[` + strings.TrimSuffix(strings.Repeat(leaf+",", n), ",") + `]}`
+	}
+	// 21 x 3 + the operator = 64: at the bound.
+	if _, mErr := parseFilter(t, or(21), ""); mErr != nil {
+		t.Fatalf("a tree at the bound: %v", mErr)
+	}
+	// 22 objects, 67 conditions.
+	if _, mErr := parseFilter(t, or(22), ""); mErr == nil || mErr.Type != errInvalidArguments {
+		t.Fatalf("a tree past the bound by conditions: %v, want invalidArguments", mErr)
+	}
+}
+
+func TestFilterThreadKeywordConditionsAreCapped(t *testing.T) {
+	three := `{"someInThreadHaveKeyword":"a","noneInThreadHaveKeyword":"b","allInThreadHaveKeyword":"c"}`
+	one := `{"someInThreadHaveKeyword":"a"}`
+	if _, mErr := parseFilter(t, `{"operator":"OR","conditions":[`+three+`,`+one+`]}`, ""); mErr != nil {
+		t.Fatalf("at the cap: %v", mErr)
+	}
+	if _, mErr := parseFilter(t, `{"operator":"OR","conditions":[`+three+`,`+one+`,`+one+`]}`, ""); mErr == nil || mErr.Type != errInvalidArguments {
+		t.Fatalf("past the cap: %v, want invalidArguments", mErr)
+	}
+}
+
+func TestFilterMailboxListsAreCapped(t *testing.T) {
+	ids := func(n int) string {
+		return `["` + strings.TrimSuffix(strings.Repeat(`0000000000000000000000000A","`, n), `,"`) + `]`
+	}
+	for _, shape := range []string{`{"inMailboxOtherThan":%s}`, `{"operator":"OR","conditions":[{"inMailboxOtherThan":%s}]}`} {
+		ok := strings.Replace(shape, "%s", ids(store.MaxMailboxIDs), 1)
+		if _, mErr := parseFilter(t, ok, ""); mErr != nil {
+			t.Fatalf("a list at the cap (%s): %v", shape, mErr)
+		}
+		over := strings.Replace(shape, "%s", ids(store.MaxMailboxIDs+1), 1)
+		if _, mErr := parseFilter(t, over, ""); mErr == nil || mErr.Type != errInvalidArguments {
+			t.Fatalf("a list past the cap (%s): %v, want invalidArguments", shape, mErr)
+		}
+	}
+}
+
+func TestEmailQueryWindowOffsetsAreBounded(t *testing.T) {
+	for name, args := range map[string]emailQueryArgs{
+		"anchorOffset high": {AnchorOffset: maxWindowOffset + 1},
+		"anchorOffset low":  {AnchorOffset: -maxWindowOffset - 1},
+		"position high":     {Position: maxWindowOffset + 1},
+		"position low":      {Position: -maxWindowOffset - 1},
+	} {
+		if _, mErr := parseEmailQuery(args); mErr == nil || mErr.Type != errInvalidArguments {
+			t.Errorf("%s: %v, want invalidArguments", name, mErr)
+		}
+	}
+	for name, args := range map[string]emailQueryArgs{
+		"anchorOffset at the bound": {AnchorOffset: -maxWindowOffset},
+		"position at the bound":     {Position: maxWindowOffset},
+	} {
+		if _, mErr := parseEmailQuery(args); mErr != nil {
+			t.Errorf("%s: %v", name, mErr)
+		}
+	}
+}

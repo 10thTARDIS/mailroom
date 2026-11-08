@@ -4638,14 +4638,14 @@ GRANT EXECUTE ON FUNCTION app.hard_delete_user(app.ulid, text) TO mailroom_app;
 ALTER FUNCTION app.hard_delete_user(app.ulid, text) OWNER TO mailroom_owner;
 
 -- SORT KEYS FOR Email/query (migration 00089): the RFC 5256 base subject, as
--- one function used by both the query and the index on it.
+-- one function the query's ORDER BY calls. No index covers it (see 00089).
 CREATE FUNCTION app.base_subject_raw(p_subject text) RETURNS text
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
   SELECT btrim(
     regexp_replace(
       regexp_replace(
         regexp_replace(
-          regexp_replace(p_subject, '\s+', ' ', 'g'),
+          regexp_replace(left(p_subject, 1000), '\s+', ' ', 'g'),
           '^ ?\[fwd: ?(.*)\] ?$', '\1', 'i'),
         '^(?:\s*(?:re|fwd?)\s*(?:\[[^\]]*\])?\s*:|\s*\[[^\]]*\]\s*(?=\S))*', '', 'i'),
       '(?:\s*\(fwd\))*\s*$', '', 'i'))
@@ -4656,4 +4656,5 @@ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
   SELECT lower(app.base_subject_raw(p_subject))
 $$;
 
+REVOKE ALL ON FUNCTION app.base_subject_raw(text), app.base_subject(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.base_subject_raw(text), app.base_subject(text) TO mailroom_app, mailroom_admin;

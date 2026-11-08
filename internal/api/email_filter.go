@@ -71,6 +71,10 @@ func parseFilterCondition(rawFilter json.RawMessage, base store.EmailQuery) (fil
 		}
 		q.InMailbox = &id
 	}
+	if len(f.InMailboxOtherThan) > store.MaxMailboxIDs {
+		return c, &MethodError{Type: errInvalidArguments,
+			Description: fmt.Sprintf("inMailboxOtherThan holds more than %d ids", store.MaxMailboxIDs)}
+	}
 	if f.InMailboxOtherThan != nil {
 		other := make([]ulid.ULID, 0, len(f.InMailboxOtherThan))
 		for _, raw := range f.InMailboxOtherThan {
@@ -285,9 +289,10 @@ func (a *rootAcc) add(root store.EmailQuery, text searchFilter, tab tabs.Tab) *M
 // or a NOT they are refused with unsupportedFilter, never approximated. A filter
 // with two such leaves for the same condition is refused too.
 type filterTree struct {
-	nodes  int
-	root   rootAcc
-	stable bool
+	nodes          int
+	threadKeywords int
+	root           rootAcc
+	stable         bool
 }
 
 func (t *filterTree) parse(raw json.RawMessage, depth int, conjunctive bool) (store.EmailFilterNode, *MethodError) {
@@ -346,6 +351,18 @@ func (t *filterTree) parse(raw json.RawMessage, depth int, conjunctive bool) (st
 		t.stable = false
 	}
 	std, root := splitRootOnly(c.q)
+	// A leaf costs one node per condition it carries (the node itself was counted
+	// on entry), the same count the store compiler applies.
+	t.nodes += max(1, std.ConditionCount()) - 1
+	if t.nodes > store.MaxFilterNodes {
+		return store.EmailFilterNode{}, &MethodError{Type: errInvalidArguments,
+			Description: fmt.Sprintf("the filter has more than %d conditions and operators", store.MaxFilterNodes)}
+	}
+	t.threadKeywords += std.ThreadKeywordCount()
+	if t.threadKeywords > store.MaxThreadKeywordConds {
+		return store.EmailFilterNode{}, &MethodError{Type: errInvalidArguments,
+			Description: fmt.Sprintf("the filter has more than %d thread-keyword conditions", store.MaxThreadKeywordConds)}
+	}
 	if !rootEmpty(root, c.text, c.tab) {
 		if !conjunctive {
 			return store.EmailFilterNode{}, &MethodError{Type: errUnsupportedFilter,
