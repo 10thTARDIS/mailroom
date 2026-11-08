@@ -82,7 +82,7 @@ import { RichEditor } from "./editor/LazyRichEditor";
 import { MAX_PREVIEW_BYTES, createPreviewStore, isPreviewableType } from "./editor/previewStore";
 import { blobToDataUrl } from "./inlineImages";
 import { htmlToText } from "./editor/plainText";
-import { editorHtml } from "./editor/editorHtml";
+import { editorHtml, liveEditor } from "./editor/editorHtml";
 import type { Editor } from "@tiptap/core";
 import { formatQuote } from "./compose/quote";
 import type { CarriedPicture } from "./compose/quote";
@@ -622,7 +622,10 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
   // that window would ship the seed rather than the editor's document).
   const [quoteSeedReady, setQuoteSeedReady] = useState(() => !quote || !!resumed);
   const normaliseQuoteSeed = useCallback(
-    (ed: Editor | null): void => {
+    (handed: Editor | null): void => {
+      // A destroyed instance is not ready: the live one that replaces it calls
+      // again (reading a destroyed editor crashed the reply composer).
+      const ed = liveEditor(handed);
       if (!ed) return;
       setQuoteSeedReady(true);
       if (!quote || resumed) return;
