@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-Mail clients that speak standard JMAP, such as aerc, get a more accurate server:
+## [1.102.0-beta.1] — 2026-11-08
+
+**The first beta of v1.102 makes Mailroom work with standard JMAP mail clients.** Clients such as aerc can now connect and get accurate answers:
 a batch of conformance fixes found by running a real third-party JMAP client
 against Mailroom, plus an API key's session that describes what the key can
 actually do.
