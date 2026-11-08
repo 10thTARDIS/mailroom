@@ -1,6 +1,6 @@
 # ADR-052: Mailbox state advances when counts change, and Email/get answers header properties
 
-**Status:** Proposed (v1.102.0 beta 3; #114, #115). Both came from the
+**Status:** Accepted (v1.102.0 beta 3; #114, #115). Both came from the
 third-party JMAP client check (`internal/api/jmapclient_integration_test.go`).
 No operator decision is needed: neither part changes what is stored about a
 message, and the one migration is additive.
@@ -43,9 +43,11 @@ message, and the one migration is additive.
    keywords) note nothing: otherwise every flag toggle would wake every client.
 4. **`Mailbox/changes` lists the mailboxes under `updated`.** `updatedProperties`
    (RFC 8621 §2.2) is `["totalEmails","unreadEmails","totalThreads","unreadThreads"]`
-   when every row for that mailbox in the window is a count row, and `null`
-   otherwise (a rename, a role or scope change) - null is the RFC's own answer
-   when the server cannot say.
+   when EVERY updated mailbox in the window changed only in its counts (every
+   change row for it is a count row), and `null` otherwise (a rename, a role or
+   scope change in the window). The RFC defines the property for the whole
+   response, not per mailbox, and null is its own answer when the server cannot
+   say.
 5. **One migration, additive:** `app.change_log.counts_only boolean NOT NULL
    DEFAULT false` (PostgreSQL 18 stores a constant default in the catalogue, so
    no table rewrite). Existing rows read as "not counts-only", which yields
@@ -53,7 +55,11 @@ message, and the one migration is additive.
    (ADR-008); compaction is unaffected (it deletes a seq prefix). `db/schema.sql`
    gets the column last.
 6. **Cost.** O(mailboxes touched) rows per transaction, never O(messages).
-   Each note is one indexed membership query for the ids it is given. The
+   The membership query for noted ids is `effectiveMembershipSQL` with the id
+   restriction pushed into every branch (one derivation, rewritten). Measured on
+   synthetic data, a 5,000-message move in one transaction took 44 s with the
+   notes against 31 s without: the per-message pre-image lookup is the added cost,
+   and the Mailbox rows themselves are four. The
    per-`(user, Mailbox)` sequence row lock is taken once at flush, so a bulk
    move holds it for the commit only.
 7. **Consumers.** `Mailbox/get ids:null` is cached under the `(Email, Mailbox)`
@@ -125,6 +131,8 @@ message, and the one migration is additive.
   hang; a client with more ids pages.
 - `headersTruncated` and `updatedProperties` are new in responses; neither
   changes an existing property.
-- A count-affecting write path added later must call `NoteMailboxCounts`. A
-  test walks the existing paths so a missed one is a red test, not a stale
-  badge.
+- A count-affecting write path added later must note its mailboxes
+  (`NoteMailboxCountsBefore`/`After`, `NoteMailboxes`). Tests cover move, read,
+  bulk move, rollback and the other users' isolation; a path not listed there
+  (an account removal that clears a placement, for one) is a known edge that
+  falls back to the next change of that mailbox.

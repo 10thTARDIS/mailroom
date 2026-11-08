@@ -15,4 +15,3 @@
 blob.download-attachment	limit-adr042	API keys cannot reach /jmap/download (ADR-042 3), yet the session a key receives advertises downloadUrl
 email.query.filter.header	#111	header needs the raw header block, which is stored only in the encrypted message; no queryable storage exists, so it stays unsupportedFilter
 email.query.sort.to	#113	the To addresses are not stored in queryable form (only the From is), so sorting by them needs recipient columns and a backfill; refused with invalidArguments until then
-mailbox.changes.after-move	#115	Mailbox state and Mailbox/changes do not move when a message move changes mailbox counts

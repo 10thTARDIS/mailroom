@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -233,5 +234,31 @@ func TestEmailGetHeaderResponseBudget(t *testing.T) {
 	// Negative control: the same ids with ONE small property fit.
 	if _, mErr := getHeaderProps(t, h, a.UserID, ids, "header:X-Absent"); mErr != nil {
 		t.Fatalf("a small request was refused: %+v", mErr)
+	}
+}
+
+// A hang guard with a timing report: Email/get with five header properties for
+// the largest permitted id list. The ceiling is generous (a slow shared runner
+// is not a regression); the logged figures are the measurement.
+func TestEmailGetHeaderTimingAtTheIDBound(t *testing.T) {
+	h := newComposeHarness(t)
+	a, _ := seedTwo(t, h.super)
+	ids := make([]string, 0, maxHeaderPropertyIDs)
+	for i := 0; i < maxHeaderPropertyIDs; i++ {
+		raw := fmt.Sprintf("X-N: %d\r\n%s\r\n%s", i, headerFixture, strings.Repeat("body line\r\n", 2000))
+		ids = append(ids, seedRawMessage(t, h, a, []byte(raw)).String())
+	}
+	props := []string{"header:Subject:asText", "header:From:asAddresses", "header:To:asGroupedAddresses:all",
+		"header:Received:all", "header:Date:asDate"}
+	for _, n := range []int{50, maxHeaderPropertyIDs} {
+		start := time.Now()
+		if _, mErr := getHeaderProps(t, h, a.UserID, ids[:n], props...); mErr != nil {
+			t.Fatalf("%d ids: %+v", n, mErr)
+		}
+		took := time.Since(start)
+		t.Logf("Email/get, %d ids, 5 header properties: %v", n, took)
+		if took > 20*time.Second {
+			t.Errorf("%d ids took %v", n, took)
+		}
 	}
 }

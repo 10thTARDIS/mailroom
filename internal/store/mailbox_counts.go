@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/oklog/ulid/v2"
 )
@@ -97,13 +98,30 @@ func (tx *UserTx) NoteMailboxCountsBefore(ctx context.Context, ids ...ulid.ULID)
 	return nil
 }
 
+// membershipOfMessagesSQL is effectiveMembershipSQL restricted to $2 (a text
+// array of message ids), by rewriting each branch's user predicate rather than
+// copying the derivation: there is still ONE statement of "which mailboxes is a
+// message in".
+//
+// ⚠ THE RESTRICTION MUST BE INSIDE EACH BRANCH. Filtering the whole relation
+// from outside (`WHERE message_id = ANY($2)` over the CTE) read every one of the
+// user's messages per call: MEASURED, a 5,000-message move took 66 s against 31 s
+// without the note, because the pre-image query ran once per message. Pushed
+// into the branches it is an index lookup by primary key or by message id.
+var membershipOfMessagesSQL = strings.NewReplacer(
+	"m.user_id = $1", "m.user_id = $1 AND m.id = ANY($2)",
+	// The provenance branch joins messages: restrict BOTH sides, or the planner
+	// scans every message of the user and probes provenance for each (MEASURED:
+	// 7.3 s for 300 ids over 5,000 messages, against 0.4 ms for one).
+	"p.user_id = $1", "p.user_id = $1 AND p.message_id = ANY($2) AND m.id = ANY($2)",
+).Replace(effectiveMembershipSQL)
+
 // mailboxesOfMessages resolves the effective mailboxes of messages, over the
 // same derivation the counts use (effectiveMembershipSQL, filtered to the ids).
 func (tx *UserTx) mailboxesOfMessages(ctx context.Context, ids []ulid.ULID) ([]ulid.ULID, error) {
 	rows, err := tx.tx.Query(ctx, `
-		WITH membership AS (`+effectiveMembershipSQL+`)
-		SELECT DISTINCT mailbox_id FROM membership
-		 WHERE message_id = ANY($2)`,
+		WITH membership AS (`+membershipOfMessagesSQL+`)
+		SELECT DISTINCT mailbox_id FROM membership`,
 		tx.userID.String(), ulidStrings(ids))
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve mailboxes of messages: %w", err)
