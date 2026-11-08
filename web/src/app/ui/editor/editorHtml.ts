@@ -5,6 +5,15 @@
 
 import type { Editor } from "@tiptap/core";
 
+/** The editor when it is still usable, else null. Tiptap can hand a component an
+ * instance it has already destroyed while it rebuilds one (an identity change
+ * remounts the composer's editor as it opens), and reading a destroyed editor
+ * throws ("Cannot read properties of null (reading 'cached')"), which crashed the
+ * reply composer intermittently. Every reader of a handed-over editor checks this. */
+export function liveEditor(editor: Editor | null | undefined): Editor | null {
+  return editor && !editor.isDestroyed ? editor : null;
+}
+
 /** The editor's HTML for the draft. An empty paragraph is written `<p><br></p>`:
  * mail clients draw a bare `<p></p>` with no height, which would lose the blank
  * lines the writer typed. (The serializer's output escapes all text, so a literal

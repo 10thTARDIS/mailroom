@@ -68,6 +68,13 @@ actually do.
   connection the proxy makes, and a mail client would be told `http://`. The web
   app is not affected.
 
+### Fixes
+
+- **Replying no longer sometimes opens a broken composer.** Now and then, opening
+  a reply showed an error where the message body should be, because the composer
+  read its editor while the editor was being rebuilt. It now waits for the editor
+  that is actually in use.
+
 ## [1.101.0] — 2026-11-07
 
 **v1.101 is the new composer.** Writing a message now has a full formatting bar:

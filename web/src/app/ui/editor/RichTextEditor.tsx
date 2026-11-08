@@ -22,7 +22,7 @@ import type { Editor } from "@tiptap/core";
 import { t, type MessageKey } from "../../i18n";
 import { buildEditorProps, buildExtensions } from "./extensions";
 import type { PreviewStore } from "./previewStore";
-import { editorHtml } from "./editorHtml";
+import { editorHtml, liveEditor } from "./editorHtml";
 import { FONT_FAMILIES, FONT_SIZES } from "./styleValues";
 import type { EditorHooks } from "./extensions";
 import { isAllowedLinkUri, linkFromPrompt } from "./uri";
@@ -204,7 +204,8 @@ export default function RichTextEditor({
   });
   editorRef.current = editor;
   useEffect(() => {
-    onReady?.(editor);
+    // Never hand over a destroyed instance (see liveEditor).
+    onReady?.(liveEditor(editor));
     return () => onReady?.(null);
     // Only when the editor instance changes; onReady is a test hook.
     // eslint-disable-next-line react-hooks/exhaustive-deps
