@@ -18,7 +18,16 @@ to a message in a list.
 
 - **Combined searches work.** A mail client can now combine email search
   conditions with AND, OR and NOT, nested inside one another, up to 8 levels deep
-  and 64 conditions in all. Anything beyond that is refused with a clear error.
+  and 64 conditions in all. Each condition counts, so an entry that carries
+  several conditions counts once for each of them. A search may use at most 4
+  conversation-keyword conditions in all, and a mailbox list (`inMailbox`,
+  `inMailboxOtherThan`) at most 256 ids. Anything beyond that is refused with a
+  clear error. Combining the Trash folder with OR (or placing it under NOT) is
+  refused as unsupported instead of quietly widening the answer; Trash combined
+  with AND still shows the Trash view. Conversation-keyword conditions ignore
+  messages another mail app has moved to Trash. Oversized `position` and
+  `anchorOffset` values are refused. Sorting by subject looks only at the first
+  1000 characters of a subject.
   An API key restricted to some accounts still only ever sees those accounts'
   mail: a NOT or OR can never reach mail outside them, and the totals never count
   it. Text searches (`text`, `body`, `to`, `cc` and the search syntax) can be
