@@ -81,15 +81,28 @@ message, and the one migration is additive.
    property, and header properties share that read. A header-only request skips
    the MIME body walk. The headers of an RFC 3156 encrypted message are the
    outer ones.
-3. **Bounds.** Per message: the header block is cut at the first blank line and
-   at `maxHeaderBlockBytes` (128 KiB; real headers are a few KiB); a longer
-   block is parsed up to the last whole field before the cap and the object
-   carries `headersTruncated: true` (a Mailroom extension, present whenever a
-   header property was asked), so a bound is reported, never silent. Per
-   request: header properties on more than `maxHeaderPropertyIDs` (200) ids are
-   `requestTooLarge`, and more than 64 header properties are `invalidArguments`.
-   A message whose blob cannot be read comes back with `bodyUnavailable: true`
-   and no header values, as for body properties.
+3. **Bounds.** Input and output are bounded separately, each by a constant.
+   - Per message, input: the header block is cut at the first blank line and
+     at `maxHeaderBlockBytes` (128 KiB; real headers are a few KiB). Fields are
+     sliced out of the block by offset (never concatenated line by line, which
+     is quadratic for a header folded into one-byte lines), at most
+     `MaxHeaderFields` (5,000) fields are returned and at most `MaxFieldLines`
+     (1,000) lines of one field are kept. Whenever any of the three bites, the
+     parse stops there (a field the byte cut may have split is dropped) and the
+     object carries `headersTruncated: true` (a Mailroom extension, present
+     whenever a header property was asked), so a bound is reported, never
+     silent.
+   - Per request, work: header properties on more than `maxHeaderPropertyIDs`
+     (100) ids are `requestTooLarge`, refused before any blob is read. More than
+     `maxHeaderProperties` (32) distinct property names are `invalidArguments`.
+     Names that mean the same thing (same lower-cased field, form and `:all`)
+     are computed once per message and share the value.
+   - Per request, output: the encoded size of all header values over all ids is
+     held to `maxHeaderResponseBytes` (8 MiB); over it the call is
+     `requestTooLarge` (RFC 8620 §5.1 lets a method say so). The input caps do
+     not bound this on their own: properties times ids multiplies the response.
+   - A message whose blob cannot be read comes back with `bodyUnavailable: true`
+     and no header values, as for body properties.
 4. **Unknown properties are refused.** Any property name that is neither in the
    known set nor a well-formed header property is `invalidArguments` naming the
    property; it is never dropped. The known set is derived from the object the
@@ -108,7 +121,7 @@ message, and the one migration is additive.
 
 - A client can sync mailbox counts by state, and read any header.
 - Email/get with header properties costs one blob read per message (the same as
-  a body property). The 200-id bound is what keeps one call from becoming a
+  a body property). The 100-id bound is what keeps one call from becoming a
   hang; a client with more ids pages.
 - `headersTruncated` and `updatedProperties` are new in responses; neither
   changes an existing property.
