@@ -352,9 +352,11 @@ func (tx *UserTx) sortKeyTerms(ctx context.Context, q EmailQuery, bind func(any)
 			if err != nil {
 				return nil, err
 			}
-			// Mail that has the keyword sorts BEFORE mail that does not when
-			// ascending (RFC 8621 4.4.2).
-			out = append(out, orderTerm{expr: "(CASE WHEN " + pred + " THEN 0 ELSE 1 END)", dir: dirOf(k.Ascending)})
+			// A boolean key: false before true when ascending, so mail that HAS
+			// the keyword sorts first when descending. RFC 8621 4.4.2 does not
+			// spell the order out, but its own example sorts flagged mail first
+			// with "isAscending": false, which only this reading satisfies.
+			out = append(out, orderTerm{expr: "(CASE WHEN " + pred + " THEN 1 ELSE 0 END)", dir: dirOf(k.Ascending)})
 		default:
 			return nil, fmt.Errorf("store: unknown sort key %q", k.Kind)
 		}

@@ -450,14 +450,26 @@ func TestSortKeysOrderAndTieBreak(t *testing.T) {
 			func() []string {
 				return f.refOrder(t, func(m *fxMsg) string { return baseSubject(m.subject) }, true, false)
 			}},
+		// false before true ascending (RFC 8621's example: flagged first with
+		// isAscending false), so mail WITHOUT the keyword leads here...
 		{"hasKeyword asc", []EmailSortKey{{Kind: SortKeyHasKeyword, Keyword: "kwx", Ascending: true}}, false,
 			func() []string {
 				return f.refOrder(t, func(m *fxMsg) string {
 					if slices.Contains(m.kw, "kwx") {
-						return "0"
+						return "1"
 					}
-					return "1"
+					return "0"
 				}, true, false)
+			}},
+		// ...and mail WITH it leads descending, as in the RFC's example.
+		{"hasKeyword desc (flagged first)", []EmailSortKey{{Kind: SortKeyHasKeyword, Keyword: "kwx"}}, false,
+			func() []string {
+				return f.refOrder(t, func(m *fxMsg) string {
+					if slices.Contains(m.kw, "kwx") {
+						return "1"
+					}
+					return "0"
+				}, false, false)
 			}},
 	}
 	for _, c := range scs {
