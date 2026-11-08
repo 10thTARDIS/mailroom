@@ -473,7 +473,7 @@ func TestSearchLimitArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := func(extra map[string]any) (opsResult, *MethodError) {
-		args := map[string]any{"filter": map[string]any{"from": "bulk@example.com"}, "calculateTotal": true}
+		args := map[string]any{"filter": map[string]any{"query": "from:bulk@example.com"}, "calculateTotal": true}
 		for k, v := range extra {
 			args[k] = v
 		}
