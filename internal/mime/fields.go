@@ -25,6 +25,16 @@ import (
 // next to it, behind Mailroom-owned types (no go-message types leave the
 // package).
 
+const (
+	// MaxFieldLines bounds the lines (the first plus continuations) kept for one
+	// field. Past it the rest of that field is dropped and the block reports
+	// truncated, the same rule as the byte cap.
+	MaxFieldLines = 1000
+	// MaxHeaderFields bounds the fields returned for one block. Past it, parsing
+	// stops and the block reports truncated.
+	MaxHeaderFields = 5000
+)
+
 // Field is one header field exactly as the message carried it.
 type Field struct {
 	// Name is the field name as written (case preserved).
@@ -37,7 +47,8 @@ type Field struct {
 
 // SplitHeaderFields splits the header block at the start of raw into fields, in
 // message order. The block ends at the first blank line. At most maxBytes of it
-// are read: a longer block is cut at the end of the last WHOLE field that fits
+// are read, at most MaxHeaderFields fields are returned and at most MaxFieldLines
+// lines of one field are kept (all three report truncated): a longer block is cut at the end of the last WHOLE field that fits
 // and truncated is true, so a caller can say the answer is bounded rather than
 // present a prefix as the whole.
 //
@@ -66,8 +77,9 @@ func SplitHeaderFields(raw []byte, maxBytes int) (fields []Field, truncated bool
 		i += nl + 1
 	}
 	block := raw[:end]
+	cutByBytes := false
 	if maxBytes > 0 && len(block) > maxBytes {
-		truncated = true
+		truncated, cutByBytes = true, true
 		block = block[:maxBytes]
 		// Cut at a line boundary, and drop a trailing field that the cut may
 		// have split: everything after the last line break is partial.
@@ -78,24 +90,39 @@ func SplitHeaderFields(raw []byte, maxBytes int) (fields []Field, truncated bool
 		}
 	}
 
-	var cur *Field
+	// Offsets, not concatenation: a field's Raw is sliced out of the block ONCE.
+	// Appending each continuation line to a string is quadratic in the number of
+	// lines, and a header folded into one-byte lines makes that the cost of the
+	// whole block even under the byte cap.
+	var (
+		name         string
+		fStart, fEnd = -1, 0 // Raw span of the open field in block; fStart < 0 = none
+		lines        int     // lines in the open field
+		pos          int
+	)
 	flush := func() {
-		if cur != nil {
-			cur.Raw = strings.TrimRight(cur.Raw, "\r\n")
-			fields = append(fields, *cur)
-			cur = nil
+		if fStart >= 0 {
+			fields = append(fields, Field{Name: name,
+				Raw: strings.TrimRight(string(block[fStart:fEnd]), "\r\n")})
+			fStart = -1
 		}
 	}
-	for len(block) > 0 {
-		var line []byte
-		if nl := bytes.IndexByte(block, '\n'); nl >= 0 {
-			line, block = block[:nl+1], block[nl+1:]
-		} else {
-			line, block = block, nil
+	for pos < len(block) {
+		next := len(block)
+		if nl := bytes.IndexByte(block[pos:], '\n'); nl >= 0 {
+			next = pos + nl + 1
 		}
+		line := block[pos:next]
+		lineStart := pos
+		pos = next
 		if line[0] == ' ' || line[0] == '\t' {
-			if cur != nil {
-				cur.Raw += string(line)
+			if fStart >= 0 {
+				if lines >= MaxFieldLines {
+					truncated = true // the rest of this field is dropped
+					continue
+				}
+				lines++
+				fEnd = pos
 			}
 			continue
 		}
@@ -104,10 +131,14 @@ func SplitHeaderFields(raw []byte, maxBytes int) (fields []Field, truncated bool
 		if colon <= 0 || !validFieldName(line[:colon]) {
 			continue
 		}
-		cur = &Field{Name: string(line[:colon]), Raw: string(line[colon+1:])}
+		if len(fields) >= MaxHeaderFields {
+			truncated = true
+			break
+		}
+		name, fStart, fEnd, lines = string(line[:colon]), lineStart+colon+1, pos, 1
 	}
 	flush()
-	if truncated && len(fields) > 0 {
+	if cutByBytes && len(fields) > 0 {
 		// The last field before the cut may itself continue past it; we cannot
 		// know, so it is dropped rather than returned partial.
 		fields = fields[:len(fields)-1]

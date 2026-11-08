@@ -3,8 +3,11 @@
 package api
 
 import (
+	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"mailroom/internal/mime"
 	"mailroom/internal/store"
@@ -27,10 +30,19 @@ const (
 	// maxHeaderPropertyIDs bounds Email/get with header properties by ids: each
 	// id costs one blob read, decrypt and integrity check. More is
 	// requestTooLarge, so a client pages instead of one call becoming a hang.
-	maxHeaderPropertyIDs = 200
+	maxHeaderPropertyIDs = 100
 
-	// maxHeaderProperties bounds the distinct header properties of one request.
-	maxHeaderProperties = 64
+	// maxHeaderResponseBytes bounds the header values of ONE response across all
+	// ids and properties (the encoded size of what is added). The per-message
+	// cap bounds the input; this bounds the OUTPUT, which many properties (every
+	// form, :all variants) times many ids would otherwise multiply. Over it the
+	// call is requestTooLarge, and the client asks for fewer ids or properties.
+	maxHeaderResponseBytes = 8 << 20
+
+	// maxHeaderProperties bounds the distinct header property names (spellings)
+	// of one request. Spellings that mean the same thing (same lower-cased field,
+	// form and :all) are computed once and share the value.
+	maxHeaderProperties = 32
 )
 
 // The parsed forms of RFC 8621 §4.1.2.
@@ -148,7 +160,7 @@ func emailPropertySpecs(properties []string) ([]headerSpec, *MethodError) {
 	}
 	if len(specs) > maxHeaderProperties {
 		return nil, &MethodError{Type: errInvalidArguments,
-			Description: "at most 64 header properties per request"}
+			Description: "at most " + strconv.Itoa(maxHeaderProperties) + " header properties per request"}
 	}
 	return specs, nil
 }
@@ -180,34 +192,69 @@ func wantsHeaders(props map[string]bool) bool {
 }
 
 // addHeaderProperties adds the requested header properties to obj from the
-// message's fields. body is nil when the instance has no blob store.
-func addHeaderProperties(obj map[string]any, props map[string]bool, body *emailBody) {
+// message's fields and returns the encoded size of what it added, so the caller
+// can hold the whole response to maxHeaderResponseBytes. body is nil when the
+// instance has no blob store. Properties that mean the same thing (same
+// lower-cased field name, form and :all) are computed once.
+func addHeaderProperties(obj map[string]any, props map[string]bool, body *emailBody) int {
 	if body == nil || !wantsHeaders(props) {
-		return
+		return 0
 	}
 	if body.unreadable {
 		// Same honesty as the body properties (#419): no values, and the
 		// reason, even if the client did not name bodyUnavailable.
 		obj["bodyUnavailable"] = true
-		return
+		return 0
 	}
 	obj["headersTruncated"] = body.headersTruncated
+	size := 0
 	if props[headersProp] {
 		list := make([]map[string]any, 0, len(body.fields))
 		for _, f := range body.fields {
 			list = append(list, map[string]any{"name": f.Name, "value": f.Raw})
 		}
 		obj[headersProp] = list
+		size += encodedSize(list)
 	}
+	type canon struct {
+		lname, form string
+		all         bool
+	}
+	computed := map[canon]any{}
+	sizes := map[canon]int{}
 	for _, sp := range headerSpecsOf(props) {
-		obj[sp.prop] = headerValue(sp, body.fields)
+		k := canon{sp.lname, sp.form, sp.all}
+		v, ok := computed[k]
+		if !ok {
+			v = headerValue(sp, body.fields)
+			computed[k] = v
+			sizes[k] = encodedSize(v)
+		}
+		obj[sp.prop] = v
+		size += sizes[k] + len(sp.prop)
 	}
+	return size
 }
+
+// encodedSize is the JSON size of a value; a value that cannot be encoded
+// (never, for our own types) counts as zero.
+func encodedSize(v any) int {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return 0
+	}
+	return len(b)
+}
+
+// headerValueComputations counts headerValue calls: a test asserts that
+// properties meaning the same thing are computed once.
+var headerValueComputations atomic.Int64
 
 // headerValue answers one header property: the last matching field, or every
 // one in order for `:all` (RFC 8621 §4.1.2). A missing field is null (`[]` for
 // :all); a value that does not parse in the asked form is null.
 func headerValue(sp headerSpec, fields []mime.Field) any {
+	headerValueComputations.Add(1)
 	var raws []string
 	for _, f := range fields {
 		if strings.EqualFold(f.Name, headerNameOf(sp)) {

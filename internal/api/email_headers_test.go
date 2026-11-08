@@ -200,3 +200,49 @@ func TestAddHeaderPropertiesLeavesOtherRequestsAlone(t *testing.T) {
 		t.Fatalf("unreadable message: %v", obj)
 	}
 }
+
+// Spellings that mean the same thing are computed once and share the value;
+// the size reported counts every key that is emitted.
+func TestAddHeaderPropertiesComputesEachMeaningOnce(t *testing.T) {
+	body := &emailBody{fields: fieldsOf(t, "Received: a\r\nReceived: b\r\nSubject: s")}
+	props := map[string]bool{"id": true}
+	spellings := []string{"header:Received:all", "header:received:all", "header:RECEIVED:all", "header:ReCeIvEd:all",
+		"header:Received:asRaw:all", "header:Received", "header:received"}
+	for _, p := range spellings {
+		props[p] = true
+	}
+	before := headerValueComputations.Load()
+	obj := map[string]any{"id": "x"}
+	size := addHeaderProperties(obj, props, body)
+	// Three meanings: Received:all (x5 spellings, asRaw is the default form) and
+	// Received last-instance (x2).
+	if n := headerValueComputations.Load() - before; n != 2 {
+		t.Errorf("%d computations for 2 distinct meanings", n)
+	}
+	for _, p := range spellings[:5] {
+		if got, _ := obj[p].([]any); len(got) != 2 {
+			t.Errorf("%s = %#v", p, obj[p])
+		}
+	}
+	if size <= 0 {
+		t.Error("no size reported")
+	}
+}
+
+func TestHeaderPropertyCapCountsSpellings(t *testing.T) {
+	var ps []string
+	for i := 0; i <= maxHeaderProperties; i++ {
+		ps = append(ps, "header:"+strings.Repeat("A", 1+i)+":all")
+	}
+	if _, mErr := emailPropertySpecs(ps[:maxHeaderProperties]); mErr != nil {
+		t.Fatalf("at the cap: %+v", mErr)
+	}
+	if _, mErr := emailPropertySpecs(ps); mErr == nil || mErr.Type != errInvalidArguments {
+		t.Fatalf("over the cap: %+v", mErr)
+	}
+	// An exact duplicate is not a new spelling.
+	dup := []string{"header:Subject", "header:Subject", "header:Subject"}
+	if specs, mErr := emailPropertySpecs(dup); mErr != nil || len(specs) != 1 {
+		t.Fatalf("duplicates: %v %+v", specs, mErr)
+	}
+}

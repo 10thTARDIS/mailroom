@@ -245,6 +245,7 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 		return nil, mErr
 	}
 
+	headerBytes := 0 // header values added so far, against maxHeaderResponseBytes
 	for _, req := range requested {
 		id, ok := req.parsed()
 		if !ok {
@@ -256,7 +257,11 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 			continue
 		}
 		obj := emailObject(ev, props, bodies[id])
-		addHeaderProperties(obj, props, bodies[id])
+		headerBytes += addHeaderProperties(obj, props, bodies[id])
+		if headerBytes > maxHeaderResponseBytes {
+			return nil, &MethodError{Type: errRequestTooLarge, Description: "the header values requested exceed " +
+				strconv.Itoa(maxHeaderResponseBytes>>20) + " MiB for one response; ask for fewer ids or header properties"}
+		}
 		if catTabs != nil {
 			r, found := catTabs[id]
 			obj["categoryTab"] = emailCategoryTab(r, found)

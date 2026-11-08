@@ -80,6 +80,41 @@ func (a *API) handleChanges(ctx context.Context, userID ulid.ULID, rawArgs json.
 		return nil, mErr
 	}
 
+	if t == store.ObjectMailbox {
+		return mustMarshal(mailboxChangesResult{changesResult: changesFrom(userID, page), UpdatedProperties: mailboxUpdatedProperties(page)}), nil
+	}
+	return mustMarshal(changesFrom(userID, page)), nil
+}
+
+// mailboxChangesResult is Mailbox/changes (RFC 8621 §2.2): the generic result
+// plus updatedProperties.
+type mailboxChangesResult struct {
+	changesResult
+	UpdatedProperties []string `json:"updatedProperties"`
+}
+
+// mailboxCountProperties are the Mailbox properties a count row may change.
+var mailboxCountProperties = []string{"totalEmails", "unreadEmails", "totalThreads", "unreadThreads"}
+
+// mailboxUpdatedProperties is RFC 8621 §2.2's updatedProperties: the count
+// properties when EVERY updated mailbox in the window changed only in its counts
+// (store.ChangesPage.UpdatedCountsOnly, ADR-052), and null otherwise: null is the
+// RFC's answer for "the server cannot say", which is also the answer for a
+// window that holds a rename, a role or scope change, or rows older than the
+// counts_only mark.
+func mailboxUpdatedProperties(page store.ChangesPage) []string {
+	if len(page.Updated) == 0 {
+		return nil
+	}
+	for _, id := range page.Updated {
+		if !page.UpdatedCountsOnly[id] {
+			return nil
+		}
+	}
+	return mailboxCountProperties
+}
+
+func changesFrom(userID ulid.ULID, page store.ChangesPage) changesResult {
 	res := changesResult{
 		AccountID:      userID.String(),
 		OldState:       encodeState(page.OldState),
@@ -89,7 +124,7 @@ func (a *API) handleChanges(ctx context.Context, userID ulid.ULID, rawArgs json.
 		Updated:        ulidStrings(page.Updated),
 		Destroyed:      ulidStrings(page.Destroyed),
 	}
-	return mustMarshal(res), nil
+	return res
 }
 
 // ulidStrings renders a ULID slice as a JSON-friendly []string, never nil (JMAP

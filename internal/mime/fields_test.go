@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSplitHeaderFieldsKeepsOrderFoldingAndRaw(t *testing.T) {
@@ -160,5 +161,44 @@ func TestFieldDate(t *testing.T) {
 	}
 	if _, ok := FieldDate(" yesterday-ish"); ok {
 		t.Error("garbage date parsed")
+	}
+}
+
+// A header folded into 1-byte continuation lines must parse in linear time:
+// the cost may not depend on the line count beyond the byte cap.
+func TestSplitHeaderFieldsManyContinuationLinesIsLinear(t *testing.T) {
+	const max = 128 << 10
+	var b strings.Builder
+	b.WriteString("X-Folded:")
+	for b.Len() < max-8 {
+		b.WriteString("\r\n x") // 4 bytes per line
+	}
+	b.WriteString("\r\n\r\n")
+	raw := []byte(b.String())
+
+	start := time.Now()
+	got, _ := SplitHeaderFields(raw, max)
+	elapsed := time.Since(start)
+	if elapsed > 200*time.Millisecond {
+		t.Fatalf("parsing a %d byte block of 1-byte folds took %v (quadratic?)", len(raw), elapsed)
+	}
+	if len(got) != 1 || got[0].Name != "X-Folded" {
+		t.Fatalf("fields = %d", len(got))
+	}
+	// The per-field line cap keeps MaxFieldLines lines, first included, and says so.
+	want := "" + strings.Repeat("\r\n x", MaxFieldLines-1)
+	if got[0].Raw != want {
+		t.Fatalf("Raw is %d bytes, want %d (first %d lines kept)", len(got[0].Raw), len(want), MaxFieldLines)
+	}
+	if _, trunc := SplitHeaderFields(raw, max); !trunc {
+		t.Fatal("dropping lines past the cap must report truncated")
+	}
+}
+
+func TestSplitHeaderFieldsCapsFieldCount(t *testing.T) {
+	raw := []byte(strings.Repeat("A: 1\r\n", MaxHeaderFields+10) + "\r\nbody")
+	got, trunc := SplitHeaderFields(raw, 0)
+	if len(got) != MaxHeaderFields || !trunc {
+		t.Fatalf("got %d fields, truncated=%v; want %d and true", len(got), trunc, MaxHeaderFields)
 	}
 }

@@ -206,3 +206,32 @@ func TestEmailGetHeaderPropertiesNeedMailRead(t *testing.T) {
 	name, res = h.keyCall(t, other, "Email/get", args)
 	wantForbidden(t, "key without mail:read", name, res)
 }
+
+// The response, not just the input, is bounded: many ids each at the per-message
+// cap, asked for twice over, exceed maxHeaderResponseBytes and get requestTooLarge.
+func TestEmailGetHeaderResponseBudget(t *testing.T) {
+	h := newComposeHarness(t)
+	a, _ := seedTwo(t, h.super)
+	var sb strings.Builder
+	for sb.Len() < maxHeaderBlockBytes-2000 {
+		fmt.Fprintf(&sb, "X-Pad: %s\r\n", strings.Repeat("p", 100))
+	}
+	raw := []byte(sb.String() + "\r\nbody\r\n")
+	var ids []string
+	for len(ids)*2*len(raw) <= maxHeaderResponseBytes*2 && len(ids) < maxHeaderPropertyIDs {
+		// Distinct bytes per message: identical content is one blob.
+		uniq := append([]byte(fmt.Sprintf("X-N: %d\r\n", len(ids))), raw...)
+		ids = append(ids, seedRawMessage(t, h, a, uniq).String())
+	}
+	if len(ids)*2*len(raw) <= maxHeaderResponseBytes {
+		t.Fatalf("fixture too small to reach the budget: %d ids", len(ids))
+	}
+	_, mErr := getHeaderProps(t, h, a.UserID, ids, "headers", "header:X-Pad:all")
+	if mErr == nil || mErr.Type != errRequestTooLarge || !strings.Contains(mErr.Description, "MiB") {
+		t.Fatalf("over the byte budget: %+v, want requestTooLarge", mErr)
+	}
+	// Negative control: the same ids with ONE small property fit.
+	if _, mErr := getHeaderProps(t, h, a.UserID, ids, "header:X-Absent"); mErr != nil {
+		t.Fatalf("a small request was refused: %+v", mErr)
+	}
+}
