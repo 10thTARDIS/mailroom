@@ -1558,8 +1558,10 @@ func jcFilterCases() []jcFilterCase {
 			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m1, e.m3} }},
 		{"hasAttachment", "8621 §4.4.1", fc(jemail.FilterCondition{HasAttachment: true}), m1},
 		{"minSize", "8621 §4.4.1", fc(jemail.FilterCondition{MinSize: uint64(len(jcAltSize()))}), m1},
+		// maxSize is EXCLUSIVE (RFC 8621 4.4.1: the size must be less than it): the
+		// plain fixture's own size is the boundary and does not match itself.
 		{"maxSize", "8621 §4.4.1", fc(jemail.FilterCondition{MaxSize: uint64(len(jcPlain))}),
-			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m2} }},
+			func(e *jcEnv) []ulid.ULID { return []ulid.ULID{e.m0, e.m3} }},
 		{"header", "8621 §4.4.1", fc(jemail.FilterCondition{Header: []string{"List-Id", "plans.example.net"}}), m2},
 		{"someInThreadHaveKeyword", "8621 §4.4.1", fc(jemail.FilterCondition{SomeInThreadHaveKeyword: "$flagged"}), m2},
 		{"noneInThreadHaveKeyword", "8621 §4.4.1", fc(jemail.FilterCondition{NoneInThreadHaveKeyword: "$flagged"}),
