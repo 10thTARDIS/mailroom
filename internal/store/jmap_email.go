@@ -1217,13 +1217,13 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 	}
 	// The standard (RFC 8621 4.4.1) conditions of the query's own flat filter, and
 	// then its FilterOperator tree, both from the same compiler (jmap_email_filter.go).
-	std, err := tx.standardConds(ctx, q, bind)
+	std, err := tx.standardConds(ctx, q, q.RestrictAccounts, bind)
 	if err != nil {
 		return "", "", err
 	}
 	conds = append(conds, std...)
 	if q.Tree != nil {
-		sql, err := tx.filterTreeSQL(ctx, *q.Tree, bind)
+		sql, err := tx.filterTreeSQL(ctx, *q.Tree, q.RestrictAccounts, bind)
 		if err != nil {
 			return "", "", err
 		}

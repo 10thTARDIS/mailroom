@@ -41,6 +41,8 @@ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
 $$;
 -- +goose StatementEnd
 
+GRANT EXECUTE ON FUNCTION app.base_subject_raw(text), app.base_subject(text) TO mailroom_app, mailroom_admin;
+
 -- +goose Down
 DROP FUNCTION IF EXISTS app.base_subject(text);
 DROP FUNCTION IF EXISTS app.base_subject_raw(text);

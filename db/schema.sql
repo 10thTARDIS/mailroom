@@ -4655,3 +4655,5 @@ CREATE FUNCTION app.base_subject(p_subject text) RETURNS text
 LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
   SELECT lower(app.base_subject_raw(p_subject))
 $$;
+
+GRANT EXECUTE ON FUNCTION app.base_subject_raw(text), app.base_subject(text) TO mailroom_app, mailroom_admin;

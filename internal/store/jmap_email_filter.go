@@ -86,7 +86,7 @@ func (n EmailFilterNode) positiveMailboxes() []ulid.ULID {
 //
 // RFC 8620 5.5: AND = all conditions match, OR = at least one, NOT = none of
 // them (that is NOT (c1 OR c2 …)). Empty AND is true, empty OR is false.
-func (tx *UserTx) filterTreeSQL(ctx context.Context, root EmailFilterNode, bind func(any) string) (string, error) {
+func (tx *UserTx) filterTreeSQL(ctx context.Context, root EmailFilterNode, restrict []ulid.ULID, bind func(any) string) (string, error) {
 	nodes := 0
 	var walk func(n EmailFilterNode, depth int) (string, error)
 	walk = func(n EmailFilterNode, depth int) (string, error) {
@@ -95,7 +95,7 @@ func (tx *UserTx) filterTreeSQL(ctx context.Context, root EmailFilterNode, bind 
 			return "", ErrFilterTooComplex
 		}
 		if n.Operator == "" {
-			conds, err := tx.standardConds(ctx, n.Leaf, bind)
+			conds, err := tx.standardConds(ctx, n.Leaf, restrict, bind)
 			if err != nil {
 				return "", err
 			}
@@ -149,7 +149,7 @@ func likeContains(v string) string {
 // It never reads RestrictAccounts, the trash/junk defaults, the search
 // candidates or the Mailroom extension conditions: those are the query's POLICY
 // and live in emailQueryWhere, outside any tree.
-func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, bind func(any) string) ([]string, error) {
+func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, restrict []ulid.ULID, bind func(any) string) ([]string, error) {
 	var conds []string
 	if q.InThread != nil {
 		conds = append(conds, "m.thread_id = "+bind(q.InThread.String()))
@@ -220,21 +220,21 @@ func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, bind func(any
 		conds = append(conds, "m.size_bytes < "+bind(*q.MaxSize))
 	}
 	if q.SomeInThreadHaveKeyword != "" {
-		c, err := tx.threadKeywordSQL(ctx, q.SomeInThreadHaveKeyword, true, bind)
+		c, err := tx.threadKeywordSQL(ctx, q.SomeInThreadHaveKeyword, true, restrict, bind)
 		if err != nil {
 			return nil, err
 		}
 		conds = append(conds, c)
 	}
 	if q.NoneInThreadHaveKeyword != "" {
-		c, err := tx.threadKeywordSQL(ctx, q.NoneInThreadHaveKeyword, true, bind)
+		c, err := tx.threadKeywordSQL(ctx, q.NoneInThreadHaveKeyword, true, restrict, bind)
 		if err != nil {
 			return nil, err
 		}
 		conds = append(conds, "NOT "+c)
 	}
 	if q.AllInThreadHaveKeyword != "" {
-		c, err := tx.threadKeywordSQL(ctx, q.AllInThreadHaveKeyword, false, bind)
+		c, err := tx.threadKeywordSQL(ctx, q.AllInThreadHaveKeyword, false, restrict, bind)
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +251,7 @@ func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, bind func(any
 // view of a deleted message still counts the message). A message with no thread
 // is a thread of one: the CASE reads m alone, because `tm.thread_id = NULL` is
 // never true. Strictly boolean, so NOT is a true complement.
-func (tx *UserTx) threadKeywordSQL(ctx context.Context, keyword string, want bool, bind func(any) string) (string, error) {
+func (tx *UserTx) threadKeywordSQL(ctx context.Context, keyword string, want bool, restrict []ulid.ULID, bind func(any) string) (string, error) {
 	own, err := tx.keywordPredicate(ctx, "m", keyword, want, bind)
 	if err != nil {
 		return "", err
@@ -260,10 +260,20 @@ func (tx *UserTx) threadKeywordSQL(ctx context.Context, keyword string, want boo
 	if err != nil {
 		return "", err
 	}
+	// restrict is the API key's account restriction (EmailQuery.RestrictAccounts),
+	// passed down by emailQueryWhere and NOT read from the leaf, because a tree
+	// leaf compiles through here too. A thread can span accounts; "in the thread"
+	// for a key means among the thread's messages the key can see, or the
+	// keyword of a message in an account it cannot see would be disclosed by the
+	// result and its total.
+	vis := ""
+	if restrict != nil {
+		vis = " AND (tm.id = m.id OR " + keyAccountsSQL("tm", bind(ulidStrings(restrict))) + ")"
+	}
 	return `(CASE WHEN m.thread_id IS NULL THEN ` + own + `
 		ELSE EXISTS (SELECT 1 FROM app.messages tm
 		   WHERE tm.user_id = m.user_id AND tm.thread_id = m.thread_id
-		     AND (tm.id = m.id OR tm.trashed_at IS NULL) AND ` + member + `) END)`, nil
+		     AND (tm.id = m.id OR tm.trashed_at IS NULL)` + vis + ` AND ` + member + `) END)`, nil
 }
 
 // EmailSortKind names an Email/query sort key beyond the historical date ones.
