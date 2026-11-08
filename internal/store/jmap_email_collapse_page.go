@@ -65,7 +65,7 @@ func collapseBoundedEligible(q EmailQuery) bool {
 	if q.SortByPriority || q.SortBySuggestionConfidence {
 		return false
 	}
-	if q.SortByRank {
+	if q.SortByRank || len(q.SortKeys) > 0 {
 		return false
 	}
 	// The order the area index holds, and so the one a range scan can walk.

@@ -943,12 +943,17 @@ type queryResult struct {
 }
 
 type emailQueryArgs struct {
-	AccountID      string           `json:"accountId"`
-	Filter         json.RawMessage  `json:"filter"`
-	Sort           []sortComparator `json:"sort"`
-	Position       int              `json:"position"`
-	Limit          *int             `json:"limit"`
-	CalculateTotal bool             `json:"calculateTotal"`
+	AccountID string           `json:"accountId"`
+	Filter    json.RawMessage  `json:"filter"`
+	Sort      []sortComparator `json:"sort"`
+	Position  int              `json:"position"`
+	// Anchor and AnchorOffset (RFC 8620 5.5): when Anchor is set the window starts
+	// at the anchor's index in the result plus AnchorOffset, and Position is
+	// ignored. The anchor must be in the result (anchorNotFound otherwise).
+	Anchor         *string `json:"anchor"`
+	AnchorOffset   int     `json:"anchorOffset"`
+	Limit          *int    `json:"limit"`
+	CalculateTotal bool    `json:"calculateTotal"`
 	// CollapseThreads is RFC 8621 §4.4.4: keep only the first Email of each
 	// Thread in the query's own sort order, for both the page and the total.
 	// It is a top-level Email/query argument, not a FilterCondition, so it is
@@ -967,6 +972,10 @@ type emailQueryArgs struct {
 type sortComparator struct {
 	Property    string `json:"property"`
 	IsAscending *bool  `json:"isAscending"`
+	// Keyword is the keyword of a hasKeyword sort (RFC 8621 4.4.2).
+	Keyword string `json:"keyword"`
+	// Collation is RFC 8620 5.5's: i;ascii-casemap (the default) or i;octet.
+	Collation string `json:"collation"`
 }
 
 type emailFilter struct {
@@ -1014,6 +1023,18 @@ type emailFilter struct {
 	// can render — that mail is in no folder anybody moved it to and carries no
 	// keyword, so nothing else can name the set.
 	DeskArchived *bool `json:"deskArchived"`
+
+	// The RFC 8621 4.4.1 conditions answered from stored columns (not by the
+	// search index): the sender and subject CONTAIN the string, attachments, size
+	// bounds and the thread-wide keyword tests.
+	From                    string `json:"from"`
+	Subject                 string `json:"subject"`
+	HasAttachment           *bool  `json:"hasAttachment"`
+	MinSize                 *int64 `json:"minSize"`
+	MaxSize                 *int64 `json:"maxSize"`
+	SomeInThreadHaveKeyword string `json:"someInThreadHaveKeyword"`
+	NoneInThreadHaveKeyword string `json:"noneInThreadHaveKeyword"`
+	AllInThreadHaveKeyword  string `json:"allInThreadHaveKeyword"`
 }
 
 // emailFilterConditions is every FilterCondition property Email/query honors —
@@ -1053,8 +1074,14 @@ var emailFilterConditions = map[string]bool{
 	// Mailroom extension (urn:mailroom:desk, #446): mail day-one setup archived
 	// IN MAILROOM — filed away without anything moving on the server.
 	"deskArchived": true,
+	// stored columns (Postgres): RFC 8621 4.4.1 conditions that need no search
+	// index. from/subject are SUBSTRING matches on the stored sender and subject;
+	// `header` and `bcc` are NOT here (no queryable storage for them), so they are
+	// answered with unsupportedFilter rather than ignored.
+	"from": true, "subject": true, "hasAttachment": true, "minSize": true, "maxSize": true,
+	"someInThreadHaveKeyword": true, "noneInThreadHaveKeyword": true, "allInThreadHaveKeyword": true,
 	// text (the search index)
-	"text": true, "from": true, "to": true, "cc": true, "subject": true, "body": true,
+	"text": true, "to": true, "cc": true, "body": true,
 	// Mailroom extension: the operator syntax (capSearch), and its as-you-type
 	// modifier (#724)
 	"query": true, "queryPrefix": true,
@@ -1156,6 +1183,26 @@ func (a *API) emailQueryWith(ctx context.Context, svc *search.Service, userID ul
 			}
 			q.LineThreshold = prefs.LineThreshold
 		}
+		// RFC 8620 §5.5 anchor: the window starts at the anchor's index in THIS
+		// result plus anchorOffset, and position is ignored. The index is asked of
+		// Postgres over the same predicate and order the page will use (so the
+		// two cannot disagree, and a key's account restriction bounds it like
+		// every other path); nothing is paged into memory to find it.
+		if args.Anchor != nil {
+			anchor, perr := ulid.Parse(*args.Anchor)
+			if perr != nil {
+				// An id that cannot be a message id is not in any result.
+				return &MethodError{Type: errAnchorNotFound}
+			}
+			idx, found, aerr := tx.EmailAnchorIndex(ctx, q, anchor)
+			if aerr != nil {
+				return &MethodError{Type: errServerFail, Description: aerr.Error()}
+			}
+			if !found {
+				return &MethodError{Type: errAnchorNotFound}
+			}
+			q.Position = max(0, idx+args.AnchorOffset)
+		}
 		// RFC 8620 §5.5: a negative position counts from the end of the
 		// result, so it cannot be applied until the total is known. A
 		// zero-length page costs the count and nothing else (QueryEmails
@@ -1256,6 +1303,12 @@ var deltaStableConditions = map[string]bool{
 	// leaves a mailbox only through a change that appends an Email change row.
 	"inMailbox": true, "inMailboxOtherThan": true, "hasKeyword": true, "notKeyword": true,
 	"before": true, "after": true,
+	// Columns written once when a message is ingested or composed; any later
+	// change to one appends an Email change row, so a delta can replay them. The
+	// thread-wide keyword conditions are ABSENT on purpose: a keyword change on
+	// ONE message changes the membership of every OTHER message in its thread,
+	// and those messages get no change row.
+	"from": true, "subject": true, "hasAttachment": true, "minSize": true, "maxSize": true,
 	// ⚠ `inTab` IS DELIBERATELY ABSENT and must stay absent (#228). A message's
 	// tab can change with NO Email change_log row behind it — the operator
 	// re-points a label, or a classifier version bump re-runs the verdicts — so
@@ -1343,116 +1396,33 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 		if err := json.Unmarshal(args.Filter, &raw); err != nil {
 			return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "filter must be an object"}
 		}
-		for k := range raw {
-			if !emailFilterConditions[k] {
-				return emailQueryPlan{}, &MethodError{Type: errUnsupportedFilter,
-					Description: "unsupported filter condition: " + k}
+		if _, isOperator := raw["operator"]; isOperator {
+			// A FilterOperator tree (RFC 8620 5.5). It is compiled by the same
+			// store compiler as a flat filter; see parseFilterTree for what may sit
+			// where.
+			t := filterTree{stable: true}
+			node, mErr := t.parse(args.Filter, 1, true)
+			if mErr != nil {
+				return emailQueryPlan{}, mErr
 			}
-			// A single search-backed or thread/account condition makes the whole
-			// filter volatile: its delta cannot be reconstructed from the change log.
-			if !deltaStableConditions[k] {
+			q.Tree = &node
+			q.Snoozed, q.Important, q.NeedsCategory = t.root.q.Snoozed, t.root.q.Important, t.root.q.NeedsCategory
+			q.OnDesk, q.OnSurface, q.DeskArchived = t.root.q.OnDesk, t.root.q.OnSurface, t.root.q.DeskArchived
+			q.InArea, q.Unsorted = t.root.q.InArea, t.root.q.Unsorted
+			plan.requestedTab, text = t.root.tab, t.root.text
+			if !t.stable {
+				stable = false
+			}
+		} else {
+			c, mErr := parseFilterCondition(args.Filter, q)
+			if mErr != nil {
+				return emailQueryPlan{}, mErr
+			}
+			q, text, plan.requestedTab = c.q, c.text, c.tab
+			if !c.stable {
 				stable = false
 			}
 		}
-
-		var f emailFilter
-		if err := json.Unmarshal(args.Filter, &f); err != nil {
-			return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "unsupported filter"}
-		}
-		if err := json.Unmarshal(args.Filter, &text); err != nil {
-			return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "unsupported filter"}
-		}
-		// A query clause whose syntax can match nothing (`from:*foo`) is the
-		// caller's mistake, not an empty mailbox (#712).
-		if mErr := text.validate(); mErr != nil {
-			return emailQueryPlan{}, mErr
-		}
-		if f.InMailbox != nil {
-			id, err := ulid.Parse(*f.InMailbox)
-			if err != nil {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "inMailbox is not a valid id"}
-			}
-			q.InMailbox = &id
-		}
-		if f.InMailboxOtherThan != nil {
-			other := make([]ulid.ULID, 0, len(f.InMailboxOtherThan))
-			for _, raw := range f.InMailboxOtherThan {
-				id, err := ulid.Parse(raw)
-				if err != nil {
-					return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
-						Description: "inMailboxOtherThan holds an id that is not valid"}
-				}
-				other = append(other, id)
-			}
-			q.InMailboxOtherThan = other
-		}
-		if f.InThread != nil {
-			id, err := ulid.Parse(*f.InThread)
-			if err != nil {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "inThread is not a valid id"}
-			}
-			q.InThread = &id
-		}
-		if f.InAccount != nil {
-			id, err := ulid.Parse(*f.InAccount)
-			if err != nil {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "inAccount is not a valid id"}
-			}
-			q.InAccount = &id
-		}
-		if f.InTab != nil {
-			// Validated here (an unknown tab is a filter error, not a silently
-			// empty result) but EXPANDED by the caller, which has the user's
-			// enabled set. See emailQueryPlan.requestedTab.
-			t, ok := tabs.Parse(*f.InTab)
-			if !ok {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
-					Description: "inTab is not a category tab"}
-			}
-			plan.requestedTab = t
-		}
-		unsorted := f.Unsorted != nil && *f.Unsorted
-		if f.InArea != nil {
-			id, err := ulid.Parse(*f.InArea)
-			if err != nil {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
-					Description: "inArea is not an area id"}
-			}
-			if unsorted {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
-					Description: "inArea and unsorted are mutually exclusive"}
-			}
-			// EXISTENCE is checked by the caller (emailQueryWith calling
-			// checkAreaExists), which has store access; this parse stays pure.
-			// An area that does not exist must be invalidArguments, not a
-			// silently empty result — the same reasoning expandTabFilter gives
-			// for a disabled tab.
-			q.InArea = &id
-		} else if unsorted {
-			q.Unsorted = true
-		}
-		if f.Before != "" {
-			t, ok := jmapTime(f.Before)
-			if !ok {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "before is not a valid UTCDate"}
-			}
-			q.Before = &t
-		}
-		if f.After != "" {
-			t, ok := jmapTime(f.After)
-			if !ok {
-				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "after is not a valid UTCDate"}
-			}
-			q.After = &t
-		}
-		q.Snoozed = f.IsSnoozed
-		q.Important = f.IsImportant
-		q.NeedsCategory = f.NeedsCategory
-		q.HasKeyword = f.HasKeyword
-		q.NotKeyword = f.NotKeyword
-		q.OnDesk = f.OnDesk
-		q.OnSurface = f.OnSurface
-		q.DeskArchived = f.DeskArchived
 	}
 	// The cutoff travels with the query: the store does not get to decide what
 	// "important" means, and spec §8 makes it per-user adjustable.
@@ -1460,10 +1430,38 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 	// receivedAt/sentAt (RFC 8621) plus Mailroom's returnedAt; default is
 	// receivedAt desc. The two RFC keys are immutable, so they never introduce
 	// volatility — returnedAt does, and says so below.
+	var keys []store.EmailSortKey
+	newSort := false
 	for _, s := range args.Sort {
+		asc := s.IsAscending != nil && *s.IsAscending
 		switch s.Property {
 		case "receivedAt", "sentAt":
+			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
+		case "size", "from", "subject", "hasKeyword":
+			// RFC 8621 4.4.2. They sort immutable per-message values (or, for
+			// hasKeyword, one message's own keyword), so a change to any of them
+			// appends that message's Email change row and a delta can replay the
+			// order: stable.
+			k := store.EmailSortKey{Kind: store.EmailSortKind(s.Property), Ascending: asc}
+			switch s.Collation {
+			case "", "i;ascii-casemap":
+			case "i;octet":
+				k.Octet = true
+			default:
+				return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
+					Description: "unsupported collation " + s.Collation}
+			}
+			if s.Property == "hasKeyword" {
+				if !validJMAPKeyword(s.Keyword) {
+					return emailQueryPlan{}, &MethodError{Type: errInvalidArguments,
+						Description: "a hasKeyword sort needs a valid keyword"}
+				}
+				k.Keyword = s.Keyword
+			}
+			keys = append(keys, k)
+			newSort = true
 		case "returnedAt":
+			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
 			// urn:mailroom:organize (#152): order by EFFECTIVE ARRIVAL —
 			// COALESCE(snooze_woke_at, received_at) — so a message that came back
 			// from a snooze returns to the top of the list instead of to the
@@ -1481,6 +1479,7 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 			q.SortByEffectiveArrival = true
 			stable = false
 		case "priority":
+			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
 			// urn:mailroom:triage (#154): spec §6's Priority Inbox order — the
 			// important bucket first, then everything else, each newest-first.
 			// Grouping in SQL rather than in the client is what makes the view page
@@ -1492,6 +1491,7 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 			q.SortByEffectiveArrival = true
 			stable = false
 		case "suggestionConfidence":
+			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
 			// urn:mailroom:rules (#176): the needs-a-category queue's order —
 			// highest open-suggestion confidence first, then effective arrival.
 			//
@@ -1510,6 +1510,7 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 			q.SortByEffectiveArrival = true
 			stable = false
 		case "relevance":
+			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
 			// urn:mailroom:search (#724): best match first — the order the search
 			// index ranked its candidates in (search.RankHits, a total order), with
 			// Postgres still choosing the window: the candidate list is passed down
@@ -1526,9 +1527,15 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 		default:
 			return emailQueryPlan{}, &MethodError{Type: errInvalidArguments, Description: "unsupported sort property " + s.Property}
 		}
-		if s.IsAscending != nil && *s.IsAscending {
+		// The direction the date key and the id follow when the sort names no
+		// date key of its own. Only the date-like sorts speak for it: a new
+		// property carries its own direction in its key.
+		if asc && s.Property != "size" && s.Property != "from" && s.Property != "subject" && s.Property != "hasKeyword" {
 			q.SortAscending = true
 		}
+	}
+	if newSort {
+		q.SortKeys = keys
 	}
 	// A search for `is:trashed` / `is:junk` is answered here, in Postgres, not
 	// by the index (#623, #723), and a search's scope (`in:anywhere`, the junk

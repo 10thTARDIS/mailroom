@@ -20,6 +20,7 @@ const (
 	errInvalidResultReference = "invalidResultReference"
 	errAccountNotFound        = "accountNotFound"
 	errCannotCalculateChanges = "cannotCalculateChanges"
+	errAnchorNotFound         = "anchorNotFound"
 	errStateMismatch          = "stateMismatch"
 	errServerFail             = "serverFail"
 	errRequestTooLarge        = "requestTooLarge"

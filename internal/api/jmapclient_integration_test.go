@@ -576,8 +576,12 @@ func stepMailCapability(e *jcEnv) error {
 	opts, _ := m["emailQuerySortOptions"].([]any)
 	for _, o := range opts {
 		name := fmt.Sprint(o)
+		cmp := map[string]any{"property": name, "isAscending": true}
+		if name == "hasKeyword" {
+			cmp["keyword"] = "$seen" // RFC 8621 4.4.2: the keyword is part of the comparator
+		}
 		if _, err := e.rawOne(e.roToken, "Email/query", map[string]any{
-			"sort": []any{map[string]any{"property": name, "isAscending": true}}, "limit": 1}); err != nil {
+			"sort": []any{cmp}, "limit": 1}); err != nil {
 			return jcFail("advertised sort option %q is refused: %v", name, err)
 		}
 	}
