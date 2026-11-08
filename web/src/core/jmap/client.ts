@@ -114,7 +114,7 @@ import {
   uploadUrl,
 } from "./blobs";
 import type { BlobBlocked, BlobFetch, BlobProbe } from "./blobs";
-import type { JmapSession } from "../session";
+import { sameOriginSession, type JmapSession } from "../session";
 
 /** The session was rejected: the caller must re-authenticate (401/403). */
 export class JmapAuthError extends Error {
@@ -312,6 +312,7 @@ export class JmapClient {
     } catch (err) {
       throw new JmapTransportError(`session: malformed JSON: ${String(err)}`);
     }
+    session = sameOriginSession(session);
     this.session = session;
     return session;
   }

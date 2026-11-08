@@ -572,6 +572,16 @@ func inAnyMailboxSQL(bind func(any) string, userID ulid.ULID, mailboxIDs []ulid.
 	return mailboxMembershipSQL(bind(userID.String()), "= ANY("+bind(ulidStrings(mailboxIDs))+")")
 }
 
+// inOtherThanSQL is inMailboxSQL's complement-by-membership for RFC 8621
+// inMailboxOtherThan: the message is in at least one mailbox that is NOT in the
+// list. It is the SAME mailboxMembershipSQL with the comparison inverted
+// (`<> ALL`), so "which mailboxes is a message in" has one derivation: a
+// moved message has one placement, an unmoved one is in every live provenance
+// mailbox (and its local mailbox), and the question is asked of each.
+func inOtherThanSQL(bind func(any) string, userID ulid.ULID, mailboxIDs []ulid.ULID) string {
+	return mailboxMembershipSQL(bind(userID.String()), "<> ALL("+bind(ulidStrings(mailboxIDs))+")")
+}
+
 // mailboxMembershipSQL is the body inMailboxSQL and inAnyMailboxSQL share, so
 // the membership derivation is written once. userPH is the caller's
 // placeholder for its own user id; match is the comparison applied to each
@@ -632,11 +642,18 @@ const effectiveMembershipSQL = `
 // A nil filter field is "no constraint". Sort is by received_at; SortAscending
 // flips the default newest-first order.
 type EmailQuery struct {
-	InMailbox  *ulid.ULID
-	InThread   *ulid.ULID
-	InAccount  *ulid.ULID
-	HasKeyword string
-	NotKeyword string
+	InMailbox *ulid.ULID
+	// InMailboxOtherThan (RFC 8621 §4.4.1), when non-nil: the message is in at
+	// least one mailbox NOT in this list, over the same effective membership
+	// InMailbox reads (mailboxMembershipSQL). A non-nil EMPTY list excludes
+	// nothing, so every message that is in any mailbox matches. Like InMailbox
+	// it is ANDed with RestrictAccounts in the one WHERE every query builds, so
+	// an API key's account restriction bounds it identically.
+	InMailboxOtherThan []ulid.ULID
+	InThread           *ulid.ULID
+	InAccount          *ulid.ULID
+	HasKeyword         string
+	NotKeyword         string
 
 	// RestrictAccounts, when non-nil, confines the query to messages in these
 	// accounts — the account restriction of an API key (#49, ADR-042 §5),
@@ -1158,6 +1175,9 @@ func (tx *UserTx) emailQueryWhere(ctx context.Context, q EmailQuery, bind func(a
 	}
 	if q.InMailbox != nil {
 		conds = append(conds, inMailboxSQL(bind, tx.userID, *q.InMailbox))
+	}
+	if q.InMailboxOtherThan != nil {
+		conds = append(conds, inOtherThanSQL(bind, tx.userID, q.InMailboxOtherThan))
 	}
 	if q.RestrictAccounts != nil {
 		conds = append(conds, keyAccountsSQL("m", bind(ulidStrings(q.RestrictAccounts))))

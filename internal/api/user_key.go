@@ -261,8 +261,7 @@ func (a *API) userKeyGet(ctx context.Context, userID ulid.ULID, rawArgs json.Raw
 	out := make([]map[string]any, 0, len(requested))
 	for _, req := range requested {
 		if !req.ok {
-			notFound = append(notFound, req.raw)
-			continue
+			continue // already in notFound (parseIDs)
 		}
 		k, ok := byID[req.id]
 		if !ok {

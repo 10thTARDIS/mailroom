@@ -28,7 +28,24 @@ func (a *API) threadGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawM
 		return nil, mErr
 	}
 	if args.IDs == nil {
-		return nil, &MethodError{Type: errInvalidArguments, Description: "Thread/get requires ids"}
+		// ids: null is every Thread (RFC 8620 §5.1), or requestTooLarge when
+		// that is more than maxObjectsInGet.
+		var all []string
+		mErr := a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
+			ids, total, err := tx.ThreadIDs(ctx, maxObjectsInGet)
+			if err != nil {
+				return &MethodError{Type: errServerFail, Description: err.Error()}
+			}
+			if total > maxObjectsInGet {
+				return getAllTooLarge("Thread/get")
+			}
+			all = ulidStrings(ids)
+			return nil
+		})
+		if mErr != nil {
+			return nil, mErr
+		}
+		args.IDs = &all
 	}
 
 	valid, notFound, requested := parseIDs(*args.IDs)

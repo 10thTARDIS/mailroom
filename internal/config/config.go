@@ -901,6 +901,16 @@ func (c *Config) OAuthIssuer() string {
 	return origin
 }
 
+// PublicOrigin is the origin the JMAP session's URLs are built on: the same
+// origin OAuth discovery uses (MAILROOM_PUBLIC_URL, defaulting to the OIDC
+// redirect URL's origin), whether or not the OAuth surface is switched off, or
+// "" when neither is set or the value is not a usable origin. The session then
+// falls back to the origin of the request.
+func (c *Config) PublicOrigin() string {
+	origin, _ := c.oauthIssuer()
+	return origin
+}
+
 // OAuthIssuerError says why OAuthIssuer is empty although a URL was given, or ""
 // when it is simply not configured or is fine.
 func (c *Config) OAuthIssuerError() string {

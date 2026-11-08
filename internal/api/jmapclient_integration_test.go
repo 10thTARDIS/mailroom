@@ -1214,10 +1214,25 @@ func (e *jcEnv) queryChangesCase(query func(args map[string]any) (map[string]any
 	return nil
 }
 
+// stepQueryChanges is the key's side of the same exchange: Email/queryChanges is
+// closed to API keys (ADR-042 §3), so the honest answer from Email/query is
+// canCalculateChanges=false (RFC 8620 §5.5), and a client that believes it and
+// never calls queryChanges is not refused. Calling it anyway is still refused.
 func stepQueryChanges(e *jcEnv) error {
-	return e.queryChangesCase(
-		func(a map[string]any) (map[string]any, error) { return e.rawOne(e.roToken, "Email/query", a) },
-		func(a map[string]any) (map[string]any, error) { return e.rawOne(e.roToken, "Email/queryChanges", a) })
+	filter := map[string]any{"inMailbox": e.f.InboxID.String()}
+	sorts := []any{map[string]any{"property": "receivedAt", "isAscending": false}}
+	r, err := e.rawOne(e.roToken, "Email/query", map[string]any{"filter": filter, "sort": sorts})
+	if err != nil {
+		return err
+	}
+	if r["canCalculateChanges"] != false {
+		return jcFail("canCalculateChanges = %v for a key, which Email/queryChanges refuses; want false", r["canCalculateChanges"])
+	}
+	if _, err := e.rawOne(e.roToken, "Email/queryChanges", map[string]any{
+		"filter": filter, "sort": sorts, "sinceQueryState": r["queryState"]}); err == nil {
+		return jcFail("Email/queryChanges answered a key; ADR-042 §3 closes it to keys")
+	}
+	return nil
 }
 
 // stepQueryChangesSession is the same exchange as the user's own session, so the

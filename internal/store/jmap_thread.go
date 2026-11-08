@@ -31,6 +31,40 @@ type ThreadView struct {
 	Muted bool
 }
 
+// ThreadIDs returns up to limit thread ids of the caller (oldest id first) and
+// the total number of threads, for a Thread/get that names no ids (RFC 8620
+// §5.1): the caller answers requestTooLarge when total exceeds limit, and
+// otherwise gets every id. RLS scopes the rows to the caller.
+func (tx *UserTx) ThreadIDs(ctx context.Context, limit int) (ids []ulid.ULID, total int, err error) {
+	if err := tx.tx.QueryRow(ctx, `SELECT count(*) FROM app.threads WHERE user_id = $1`,
+		tx.userID.String()).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("store: count threads: %w", err)
+	}
+	if total > limit {
+		return nil, total, nil
+	}
+	rows, err := tx.tx.Query(ctx, `SELECT id FROM app.threads WHERE user_id = $1 ORDER BY id`, tx.userID.String())
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: list threads: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, 0, fmt.Errorf("store: scan thread id: %w", err)
+		}
+		id, err := ulid.Parse(s)
+		if err != nil {
+			return nil, 0, fmt.Errorf("store: parse thread id %q: %w", s, err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: list threads: %w", err)
+	}
+	return ids, total, nil
+}
+
 // GetThreads returns Thread projections for the requested ids. A thread that
 // exists (a row in app.threads) but has no live messages returns with an empty
 // EmailIDs slice; an id with no thread row is simply absent from the result

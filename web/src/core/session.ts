@@ -37,6 +37,32 @@ export interface JmapSession {
   state: StateString;
 }
 
+const ORIGIN_PREFIX = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i;
+
+/**
+ * The session with its URLs made same-origin.
+ *
+ * The server hands out ABSOLUTE URLs (RFC 8620 §2; a stock client cannot use a
+ * relative one). This client is served by that same server, so it keeps only
+ * the path and query of each: a request goes to the origin the page was loaded
+ * from, whatever scheme or host the server believed it was reached on (behind a
+ * TLS-terminating proxy that is the difference between working and a blocked
+ * mixed-content request). A relative URL, from an older server or a fixture, is
+ * left as it is. Done with a prefix match rather than `new URL`, which would
+ * percent-encode the `{template}` braces.
+ */
+export function sameOriginSession(session: JmapSession): JmapSession {
+  const strip = (u: string | undefined): string | undefined => u?.replace(ORIGIN_PREFIX, "");
+  return {
+    ...session,
+    apiUrl: strip(session.apiUrl) ?? session.apiUrl,
+    downloadUrl: strip(session.downloadUrl) ?? session.downloadUrl,
+    uploadUrl: strip(session.uploadUrl) ?? session.uploadUrl,
+    eventSourceUrl: strip(session.eventSourceUrl) ?? session.eventSourceUrl,
+    ...(session.previewUrl !== undefined ? { previewUrl: strip(session.previewUrl) } : {}),
+  };
+}
+
 /** What to assume for `maxCallsInRequest` when the session does not advertise
  * it. Deliberately small: a batch OVER the server's limit is refused whole
  * (internal/api/service.go answers a request-level 400), so under-guessing
