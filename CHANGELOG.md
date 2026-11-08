@@ -22,9 +22,9 @@ to a message in a list.
   several conditions counts once for each of them. A search may use at most 4
   conversation-keyword conditions in all, and a mailbox list (`inMailbox`,
   `inMailboxOtherThan`) at most 256 ids. Anything beyond that is refused with a
-  clear error. Combining the Trash folder with OR (or placing it under NOT) is
+  clear error. Asking for the Trash folder through an OR is
   refused as unsupported instead of quietly widening the answer; Trash combined
-  with AND still shows the Trash view. Conversation-keyword conditions ignore
+  with AND still shows the Trash view, and "not in Trash" (under NOT) works. Conversation-keyword conditions ignore
   messages another mail app has moved to Trash. Oversized `position` and
   `anchorOffset` values are refused. Sorting by subject looks only at the first
   1000 characters of a subject.

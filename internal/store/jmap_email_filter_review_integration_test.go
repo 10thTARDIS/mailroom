@@ -22,6 +22,18 @@ func (f *filterFixture) queryErr(t *testing.T, q EmailQuery) error {
 	})
 }
 
+// queryIDsErr runs q as user A and returns the ids and the error.
+func (f *filterFixture) queryIDsErr(t *testing.T, q EmailQuery) ([]ulid.ULID, error) {
+	t.Helper()
+	var ids []ulid.ULID
+	err := f.h.appStore().UserTx(context.Background(), mustULID(t, f.a.ID), func(tx *UserTx) error {
+		var err error
+		ids, _, err = tx.QueryEmails(context.Background(), q)
+		return err
+	})
+	return ids, err
+}
+
 // addTrash makes a trash-role mailbox in the given account.
 func (f *filterFixture) addTrash(t *testing.T, account string) string {
 	t.Helper()
@@ -107,7 +119,6 @@ func TestFilterTrashMailboxOnlyCountsUnderAnd(t *testing.T) {
 
 	for name, tree := range map[string]EmailFilterNode{
 		"OR":      op(FilterOR, inTrash, inInbox),
-		"NOT":     op(FilterNOT, inTrash),
 		"AND/OR":  op(FilterAND, inInbox, op(FilterOR, inTrash, inInbox)),
 		"OR/AND":  op(FilterOR, inInbox, op(FilterAND, inTrash)),
 		"NOT/NOT": op(FilterNOT, op(FilterNOT, inTrash)),
@@ -121,6 +132,26 @@ func TestFilterTrashMailboxOnlyCountsUnderAnd(t *testing.T) {
 	ids, total := f.query(t, EmailQuery{Tree: ptr(op(FilterAND, inTrash))})
 	if g := sortedNames(f, ids); g != "x3" || total != 1 {
 		t.Errorf("AND Trash view: %q (total %d), want x3", g, total)
+	}
+	// "Not in Trash" is a NEGATIVE Trash leaf: allowed, never a Trash view, so the
+	// deleted message stays hidden and the rest of the mail is listed.
+	for name, tree := range map[string]EmailFilterNode{
+		"NOT":            op(FilterNOT, inTrash),
+		"NOT(OR)":        op(FilterNOT, op(FilterOR, inTrash, leaf(EmailQuery{InMailbox: &f.mbox2}))),
+		"AND(Inbox,NOT)": op(FilterAND, inInbox, op(FilterNOT, inTrash)),
+	} {
+		tree := tree
+		ids, err := f.queryIDsErr(t, EmailQuery{Tree: &tree})
+		if err != nil {
+			t.Errorf("%s (not in Trash) refused: %v", name, err)
+			continue
+		}
+		if slicesContainsName(f.names(ids), "x3") {
+			t.Errorf("%s (not in Trash) listed the trashed message: %v", name, f.names(ids))
+		}
+		if len(ids) == 0 {
+			t.Errorf("%s (not in Trash) listed nothing", name)
+		}
 	}
 	// And a tree that never names Trash is not a Trash view: x3 stays hidden.
 	ids, _ = f.query(t, EmailQuery{Tree: ptr(op(FilterOR, inInbox, leaf(EmailQuery{InMailbox: &f.mbox2})))})

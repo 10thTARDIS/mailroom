@@ -115,23 +115,34 @@ type EmailFilterNode struct {
 // "deleted mail is gone"); a Trash mailbox in the second is refused, because
 // lifting the exclusion for the whole query would widen every other branch.
 func (n EmailFilterNode) mailboxLeaves() (conjunctive, other []ulid.ULID) {
-	var walk func(n EmailFilterNode, conj bool)
-	walk = func(n EmailFilterNode, conj bool) {
+	// conj: reached from the root through AND alone. positive: under an even
+	// number of NOTs. Only a POSITIVE leaf can ask for Trash's mail; a negative
+	// one ("not in Trash") never makes the query a Trash view, and the default
+	// exclusion of deleted mail already agrees with it, so it is neither
+	// conjunctive nor refused. A positive leaf reached through an OR is the
+	// case with no correct global answer (other).
+	var walk func(n EmailFilterNode, conj, positive bool)
+	walk = func(n EmailFilterNode, conj, positive bool) {
 		if n.Operator == "" {
-			if n.Leaf.InMailbox != nil {
-				if conj {
-					conjunctive = append(conjunctive, *n.Leaf.InMailbox)
-				} else {
-					other = append(other, *n.Leaf.InMailbox)
-				}
+			if n.Leaf.InMailbox == nil || !positive {
+				return
+			}
+			if conj {
+				conjunctive = append(conjunctive, *n.Leaf.InMailbox)
+			} else {
+				other = append(other, *n.Leaf.InMailbox)
 			}
 			return
 		}
+		childPositive := positive
+		if n.Operator == FilterNOT {
+			childPositive = !positive
+		}
 		for _, c := range n.Conditions {
-			walk(c, conj && n.Operator == FilterAND)
+			walk(c, conj && n.Operator == FilterAND, childPositive)
 		}
 	}
-	walk(n, true)
+	walk(n, true, true)
 	return conjunctive, other
 }
 

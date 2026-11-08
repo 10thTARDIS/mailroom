@@ -1372,7 +1372,7 @@ func queryErrToMethodError(err error) *MethodError {
 		return &MethodError{Type: errInvalidArguments, Description: "the filter is too large or too complex"}
 	case errors.Is(err, store.ErrUnsupportedTrashFilter):
 		return &MethodError{Type: errUnsupportedFilter,
-			Description: "a Trash mailbox condition cannot be combined under OR or NOT"}
+			Description: "a Trash mailbox condition cannot be reached through OR (\"not in Trash\" under NOT is fine)"}
 	}
 	return &MethodError{Type: errServerFail, Description: err.Error()}
 }
