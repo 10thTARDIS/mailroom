@@ -172,6 +172,8 @@
 //	                   refused and background work stops; nothing is deleted. Safe to
 //	                   run twice; refuses to disable the last enabled user.)
 //	backfill-attachments --user [--apply]   (mailroom#396 attachment rows)
+//	backfill-recipients [--apply] [--user U] [--batch N]   (ADR-055: fill the searchable
+//	                   To/Cc/Bcc and List-Id columns for older mail. Report-only by DEFAULT.)
 //	quarantine         --user U [--release msgID:part] [--revoke msgID:part] [--batch N]
 //	                   (ADR-027 §8: what the download gate refuses, and the two
 //	                   decisions that change it. Read-only with neither flag.)
@@ -451,6 +453,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"mailbox-roles":             runMailboxRoles,
 	"attachment-report":         runAttachmentReport,
 	"backfill-attachments":      runBackfillAttachments,
+	"backfill-recipients":       runBackfillRecipients,
 	"quarantine":                runQuarantine,
 	"thread-report":             runThreadReport,
 	"delete-user":               runDeleteUser,
