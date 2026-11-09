@@ -919,6 +919,16 @@ type EmailQuery struct {
 	// substring matches, deliberately not the search index's tokenised ones.
 	FromContains    string
 	SubjectContains string
+	// ToContains / CcContains / BccContains: the recipient names and addresses
+	// CONTAIN the string, case-insensitively, matched on the stored recipient text
+	// (ADR-055). Bcc exists only on mail the user sent or drafted. Mail the
+	// backfill has not reached matches none of them.
+	ToContains  string
+	CcContains  string
+	BccContains string
+	// ListIDHeader is the `header: ["List-Id", text?]` condition, the only header
+	// stored (ADR-055): nil is no condition.
+	ListIDHeader *ListIDCondition
 	// HasAttachment: true keeps mail with an attachment, false mail without.
 	HasAttachment *bool
 	// MinSize keeps size >= MinSize; MaxSize keeps size < MaxSize (RFC 8621 4.4.1).
@@ -947,6 +957,12 @@ type EmailQuery struct {
 	// is:pinned, is:important), ANDed with every other condition. nil means
 	// none. See search_predicate.go.
 	Search *SearchPredicate
+}
+
+// ListIDCondition is a List-Id header condition: Contains "" means the header is
+// merely present.
+type ListIDCondition struct {
+	Contains string
 }
 
 // QueryEmails runs an Email/query and returns the matching ids (already

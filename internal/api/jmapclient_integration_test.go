@@ -50,6 +50,8 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/auth"
+	"mailroom/internal/mime"
+	"mailroom/internal/rcptproj"
 	"mailroom/internal/search"
 	"mailroom/internal/store"
 )
@@ -345,11 +347,22 @@ func jcMessage(t *testing.T, h *composeHarness, f apiFixture, thread ulid.ULID, 
 	      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		id.String(), f.UserID.String(), hash, thread.String(), subject, "preview of "+subject,
 		fromName, fromAddr, received, len(raw), hasAtt, sentAt, msgID)
+	jcFillRecipients(t, h, id, raw)
 	nextSeededUID++
 	jcExec(t, h, `INSERT INTO app.message_provenance (id, user_id, message_id, account_id, mailbox_id, uid, uidvalidity)
 	      VALUES ($1,$2,$3,$4,$5,$6,1)`, store.NewULID().String(), f.UserID.String(), id.String(),
 		f.AccountID.String(), f.InboxID.String(), nextSeededUID)
 	return id
+}
+
+// jcFillRecipients stores the recipient and List-Id columns exactly as ingest
+// derives them (ADR-055): through the one shared projection, over the bytes.
+func jcFillRecipients(t *testing.T, h *composeHarness, id ulid.ULID, raw string) {
+	t.Helper()
+	m, _ := mime.ParseBytes([]byte(raw))
+	c := rcptproj.Project(m)
+	jcExec(t, h, `UPDATE app.messages SET rcpt_to=$2, rcpt_cc=$3, rcpt_bcc=$4, rcpt_to_sort=$5, list_id_key=$6 WHERE id=$1`,
+		id.String(), c.To, c.Cc, c.Bcc, c.ToSort, c.ListIDKey)
 }
 
 // ---- the steps -----------------------------------------------------------------
@@ -1731,6 +1744,7 @@ func newJCEnv(t *testing.T) *jcEnv {
 	        from_name='Friend', from_address='friend@example.com', sent_at=$3, message_id_hint='<seed-jc@example.com>'
 	        WHERE id=$4`,
 		hash, len(jcSeedPlain), time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC), a.MessageID.String())
+	jcFillRecipients(t, h.composeHarness, a.MessageID, jcSeedPlain)
 	e.m0 = a.MessageID
 	e.m1 = jcMessage(t, h.composeHarness, a, a.ThreadID, "Quarterly report", "Alice", "alice@example.com",
 		time.Date(2026, 10, 30, 9, 0, 0, 0, time.UTC), true, alternativeWithAttachment)

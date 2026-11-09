@@ -46,6 +46,7 @@ func (q EmailQuery) ConditionCount() int {
 		q.InThread != nil, q.InMailbox != nil, q.InMailboxOtherThan != nil, q.InAccount != nil,
 		q.HasKeyword != "", q.NotKeyword != "", q.After != nil, q.Before != nil,
 		q.FromContains != "", q.SubjectContains != "", q.HasAttachment != nil,
+		q.ToContains != "", q.CcContains != "", q.BccContains != "", q.ListIDHeader != nil,
 		q.MinSize != nil, q.MaxSize != nil,
 		q.SomeInThreadHaveKeyword != "", q.NoneInThreadHaveKeyword != "", q.AllInThreadHaveKeyword != "",
 	} {
@@ -216,6 +217,22 @@ func likeContains(v string) string {
 	return "%" + r.Replace(v) + "%"
 }
 
+// foldRecipientQuery folds a recipient query the way the stored text is folded:
+// whitespace runs (newlines included) become one space, so a query can never
+// span two stored lines. A whitespace-only query stays one space.
+func foldRecipientQuery(v string) string {
+	if f := strings.Join(strings.Fields(v), " "); f != "" {
+		return f
+	}
+	return " "
+}
+
+// listIDQuery reduces a client's List-Id text to what the stored key holds: no
+// angle brackets, no whitespace.
+func listIDQuery(v string) string {
+	return strings.Join(strings.Fields(strings.NewReplacer("<", "", ">", "").Replace(v)), "")
+}
+
 // standardConds compiles the STANDARD (RFC 8621 4.4.1) conditions of q: those a
 // FilterOperator leaf may carry, and the ones the query's own flat filter carries
 // too. It is the only place they are written, so a condition cannot mean one
@@ -280,6 +297,26 @@ func (tx *UserTx) standardConds(ctx context.Context, q EmailQuery, restrict []ul
 		// COALESCE'd: a NULL here would make the leaf NULL, and NOT of it NULL.
 		p := bind(likeContains(q.FromContains))
 		conds = append(conds, "(m.from_name ILIKE "+p+" OR COALESCE(m.from_address::text, '') ILIKE "+p+")")
+	}
+	// to / cc / bcc: the same substring match on the stored recipient text (ADR-055),
+	// written once at ingest. The columns are NULL for mail the backfill has not
+	// reached, which matches nothing; COALESCE keeps that a strict false so NOT of
+	// the condition is a true complement.
+	for _, rc := range []struct{ col, v string }{
+		{"m.rcpt_to", q.ToContains}, {"m.rcpt_cc", q.CcContains}, {"m.rcpt_bcc", q.BccContains},
+	} {
+		if rc.v != "" {
+			conds = append(conds, "COALESCE("+rc.col+" ILIKE "+bind(likeContains(foldRecipientQuery(rc.v)))+", false)")
+		}
+	}
+	if q.ListIDHeader != nil {
+		// header: List-Id (ADR-055), the only header stored. Exists = the key is set;
+		// with a value, the key contains it.
+		if v := listIDQuery(q.ListIDHeader.Contains); q.ListIDHeader.Contains == "" || v == "" {
+			conds = append(conds, "COALESCE(m.list_id_key, '') <> ''")
+		} else {
+			conds = append(conds, "COALESCE(m.list_id_key ILIKE "+bind(likeContains(v))+", false)")
+		}
 	}
 	if q.SubjectContains != "" {
 		conds = append(conds, "m.subject ILIKE "+bind(likeContains(q.SubjectContains)))
@@ -371,6 +408,7 @@ const (
 	SortKeySize       EmailSortKind = "size"
 	SortKeyFrom       EmailSortKind = "from"
 	SortKeySubject    EmailSortKind = "subject"
+	SortKeyTo         EmailSortKind = "to"
 	SortKeyHasKeyword EmailSortKind = "hasKeyword"
 )
 
@@ -397,6 +435,10 @@ const (
 	sortFromExpr = `(lower(COALESCE(NULLIF(m.from_name, ''), m.from_address::text, '')) COLLATE "C")`
 	// sortFromOctetExpr: the same, not folded (i;octet).
 	sortFromOctetExpr = `(COALESCE(NULLIF(m.from_name, ''), m.from_address::text, '') COLLATE "C")`
+	// sortToExpr: the first To recipient's display name, else its address,
+	// lowercased (ADR-055); the stored key keeps its case, so i;octet reads it as is.
+	sortToExpr      = `(lower(COALESCE(m.rcpt_to_sort, '')) COLLATE "C")`
+	sortToOctetExpr = `(COALESCE(m.rcpt_to_sort, '') COLLATE "C")`
 	// sortSubjectExpr: the base subject (RFC 5256 2.1: reply and forward markers
 	// stripped), lowercased. See app.base_subject.
 	sortSubjectExpr      = `(app.base_subject(m.subject) COLLATE "C")`
@@ -429,6 +471,12 @@ func (tx *UserTx) sortKeyTerms(ctx context.Context, q EmailQuery, bind func(any)
 			e := sortFromExpr
 			if k.Octet {
 				e = sortFromOctetExpr
+			}
+			out = append(out, orderTerm{expr: e, dir: dirOf(k.Ascending)})
+		case SortKeyTo:
+			e := sortToExpr
+			if k.Octet {
+				e = sortToOctetExpr
 			}
 			out = append(out, orderTerm{expr: e, dir: dirOf(k.Ascending)})
 		case SortKeySubject:

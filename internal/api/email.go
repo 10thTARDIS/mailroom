@@ -1063,14 +1063,19 @@ type emailFilter struct {
 	// The RFC 8621 4.4.1 conditions answered from stored columns (not by the
 	// search index): the sender and subject CONTAIN the string, attachments, size
 	// bounds and the thread-wide keyword tests.
-	From                    string `json:"from"`
-	Subject                 string `json:"subject"`
-	HasAttachment           *bool  `json:"hasAttachment"`
-	MinSize                 *int64 `json:"minSize"`
-	MaxSize                 *int64 `json:"maxSize"`
-	SomeInThreadHaveKeyword string `json:"someInThreadHaveKeyword"`
-	NoneInThreadHaveKeyword string `json:"noneInThreadHaveKeyword"`
-	AllInThreadHaveKeyword  string `json:"allInThreadHaveKeyword"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Cc      string `json:"cc"`
+	Bcc     string `json:"bcc"`
+	Subject string `json:"subject"`
+	// Header is RFC 8621's [name, text?]; only List-Id is stored (ADR-055).
+	Header                  []string `json:"header"`
+	HasAttachment           *bool    `json:"hasAttachment"`
+	MinSize                 *int64   `json:"minSize"`
+	MaxSize                 *int64   `json:"maxSize"`
+	SomeInThreadHaveKeyword string   `json:"someInThreadHaveKeyword"`
+	NoneInThreadHaveKeyword string   `json:"noneInThreadHaveKeyword"`
+	AllInThreadHaveKeyword  string   `json:"allInThreadHaveKeyword"`
 }
 
 // emailFilterConditions is every FilterCondition property Email/query honors —
@@ -1112,12 +1117,12 @@ var emailFilterConditions = map[string]bool{
 	"deskArchived": true,
 	// stored columns (Postgres): RFC 8621 4.4.1 conditions that need no search
 	// index. from/subject are SUBSTRING matches on the stored sender and subject;
-	// `header` and `bcc` are NOT here (no queryable storage for them), so they are
-	// answered with unsupportedFilter rather than ignored.
-	"from": true, "subject": true, "hasAttachment": true, "minSize": true, "maxSize": true,
+	// to/cc/bcc on the stored recipient text, and `header` for List-Id only (ADR-055).
+	// Any other header name is answered with unsupportedFilter rather than ignored.
+	"from": true, "to": true, "cc": true, "bcc": true, "header": true, "subject": true, "hasAttachment": true, "minSize": true, "maxSize": true,
 	"someInThreadHaveKeyword": true, "noneInThreadHaveKeyword": true, "allInThreadHaveKeyword": true,
 	// text (the search index)
-	"text": true, "to": true, "cc": true, "body": true,
+	"text": true, "body": true,
 	// Mailroom extension: the operator syntax (capSearch), and its as-you-type
 	// modifier (#724)
 	"query": true, "queryPrefix": true,
@@ -1345,6 +1350,8 @@ var deltaStableConditions = map[string]bool{
 	// ONE message changes the membership of every OTHER message in its thread,
 	// and those messages get no change row.
 	"from": true, "subject": true, "hasAttachment": true, "minSize": true, "maxSize": true,
+	// to/cc/bcc and the List-Id header are columns written at ingest (ADR-055), like from.
+	"to": true, "cc": true, "bcc": true, "header": true,
 	// ⚠ `inTab` IS DELIBERATELY ABSENT and must stay absent (#228). A message's
 	// tab can change with NO Email change_log row behind it — the operator
 	// re-points a label, or a classifier version bump re-runs the verdicts — so
@@ -1496,7 +1503,7 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 		switch s.Property {
 		case "receivedAt", "sentAt":
 			keys = append(keys, store.EmailSortKey{Kind: store.SortKeyDate, Ascending: asc})
-		case "size", "from", "subject", "hasKeyword":
+		case "size", "from", "to", "subject", "hasKeyword":
 			// RFC 8621 4.4.2. They sort immutable per-message values (or, for
 			// hasKeyword, one message's own keyword), so a change to any of them
 			// appends that message's Email change row and a delta can replay the
@@ -1589,7 +1596,7 @@ func parseEmailQuery(args emailQueryArgs) (emailQueryPlan, *MethodError) {
 		// The direction the date key and the id follow when the sort names no
 		// date key of its own. Only the date-like sorts speak for it: a new
 		// property carries its own direction in its key.
-		if asc && s.Property != "size" && s.Property != "from" && s.Property != "subject" && s.Property != "hasKeyword" {
+		if asc && s.Property != "size" && s.Property != "from" && s.Property != "to" && s.Property != "subject" && s.Property != "hasKeyword" {
 			q.SortAscending = true
 		}
 	}

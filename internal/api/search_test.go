@@ -78,7 +78,7 @@ func TestEmailFilterConditionsAllowlist(t *testing.T) {
 	// be honored while an equally valid sibling was rejected.
 	for _, k := range []string{
 		"inMailbox", "inThread", "inAccount", "hasKeyword", "notKeyword", "before", "after",
-		"text", "from", "to", "cc", "subject", "body", "query",
+		"text", "from", "to", "cc", "bcc", "header", "subject", "body", "query",
 		"hasAttachment", "minSize", "maxSize",
 		"someInThreadHaveKeyword", "noneInThreadHaveKeyword", "allInThreadHaveKeyword",
 	} {
@@ -86,7 +86,7 @@ func TestEmailFilterConditionsAllowlist(t *testing.T) {
 			t.Errorf("%q is decoded but not allowlisted", k)
 		}
 	}
-	for _, k := range []string{"operator", "conditions", "header", "bcc", "bogus"} {
+	for _, k := range []string{"operator", "conditions", "bogus"} {
 		if emailFilterConditions[k] {
 			t.Errorf("%q must not be allowlisted — it is not implemented", k)
 		}
