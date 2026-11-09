@@ -9,6 +9,117 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.102.0] — 2026-11-09
+
+**v1.102 makes Mailroom a good citizen for other mail apps and AI tools, and gives you
+a view of what happened to your mail.** Standard JMAP mail apps (such as aerc) and AI
+tools can now connect and get standard answers: combined searches, exact sender,
+recipient, subject and mailing-list matching, new sorts, any header, and folder counts
+that update as mail moves. A new Activity page lists what your AI tools did, decryptions,
+purges, sign-ins and bulk rule actions in one place. Replacing your PGP key now lets your
+old key vouch for the new one, and a contact's vouched-for new key gets a gentler
+question; Mailroom still never switches keys without you. The person running Mailroom can
+disable and re-enable users, rules can be limited to one kind of message, and a bug that
+sometimes opened a reply with an error instead of the message body is fixed.
+
+### What's new: for you
+
+- **Activity.** Settings has a new Activity section: one list, newest first, of what your
+  AI tools did or were refused (and changes to their keys), every decryption, every
+  permanently deleted message, sign-ins and sign-outs of your devices, and bulk changes by
+  rules and learned placement. Filter by kind and date and press Load more; it says
+  "showing the most recent N" rather than inventing a total, and says how far back each
+  kind goes (sign-ins about a week after a session ends). Lines link to the message, key or
+  rule while it still exists. Routine reading by AI tools is left out (it stays on each
+  key's own page), and no subjects or decrypted content are ever shown. Applying a rule to
+  existing mail, and undoing it, are now recorded here.
+- **Rules for one kind of message.** The rule editor has "Only for messages that are":
+  personal mail, receipts and account mail, promotions, notifications, mailing lists,
+  other automatic mail, or unclear. Such a rule applies to new mail only.
+- **Replacing your key.** When you replace a key, your old key signs the new one, so people
+  who get your new key (from your key page, web key lookup or the Autocrypt header) can see
+  it is really from you. It is on by default and can be turned off; an expired old key does
+  not hold the replacement up; a key revoked as compromised never vouches.
+- **When a contact replaces theirs.** If the key you had for them vouches for their new key,
+  you see a gentler question ("their previous key, the one you had, vouches for it") with
+  Trust as the first button, in the reader and the composer. Nothing changes until you
+  choose. The wording only softens when every check passes: the old key is the one you
+  trusted, not revoked, the signature is sound, recent and not from a weak algorithm, and
+  the new key stands up on its own. If the old key was reported compromised, you are told
+  so instead. If you trust a key because of a vouch and the old key is later revoked,
+  Mailroom warns you to check the key another way. A contact can withdraw a vouch.
+
+### What's new: for mail apps and AI tools (JMAP)
+
+- **They can connect at all.** The session now gives complete web addresses, so standard
+  clients work out of the box.
+- **Honest sessions for API keys.** A read-only key is shown as read-only, and keys are not
+  told they can follow query changes when they cannot.
+- **Combined searches.** AND, OR and NOT, nested up to 8 levels and 64 conditions. An API
+  key limited to some accounts still only ever sees those accounts' mail; a NOT or OR can
+  never reach outside them.
+- **Exact matching for sender, recipients, subject and mailing list.** `from`, `to`, `cc`,
+  `bcc` and `subject` find mail whose value contains the text, ignoring case, as the
+  standard says; `header` works for List-Id. Bcc is found only where the stored message
+  has it (normally mail you sent or drafted). Search text is limited to 512 characters.
+- **More filters and sorts.** Has-attachment, size, conversation keywords, "in a mailbox
+  other than"; sorting by size, sender, recipient, subject and keyword; and jumping to a
+  message in a list (`anchor`). Mailbox lists can be filtered.
+- **Any header.** A client can ask for any header field in every standard form, or all
+  headers at once; unknown properties are now refused rather than silently ignored.
+  Header requests are bounded (128 KiB of headers per message, 100 messages and 32
+  header properties a request, 8 MiB of header values per reply).
+- **Folder counts stay current.** Moving, reading, deleting or receiving mail reports the
+  affected folders as changed, so clients see new counts without re-reading everything.
+- **Standard answers and errors.** Negative positions, unknown ids reported in `notFound`,
+  Message-IDs without angle brackets and null when absent, a bounded "get everything",
+  and correct "not JSON" errors.
+- **For AI tools and API keys:** searching by sender, recipient or subject now needs only
+  permission to read mail; free-text search still needs the search permission.
+
+### For the person running Mailroom
+
+- **Disable and re-enable a user:** `mailroom-admin user disable|enable <id or email>`. A
+  disabled user is locked out of sign-in, sessions, API keys and OAuth app connections at
+  once, and their background work (sync, write-back, push, indexing, scheduled sends,
+  snoozes, AI-tool approval expiry) stops; nothing is deleted, and enabling restores it
+  all. It refuses to disable the last enabled user. It does not unpublish their public key.
+- **`mailroom-admin activity`** counts each kind of activity across all users for a window,
+  says when a count is a lower bound, and prints one user's entries with `--user`.
+- **`mailroom-admin backfill-recipients`** fills recipients and list ids for mail stored
+  before this version (see Upgrading).
+
+### Safety and behaviour
+
+- **Recipients and list ids are now stored beside each message**, in readable form, like
+  the sender and subject already were, so they can be searched. A database backup can show
+  who each message went to (including Bcc where the stored message has one) and which list
+  it came from. The message itself stays encrypted. Recipient lists are kept up to 200
+  people and 8 KiB per field.
+- Every part of this release had an independent security review, and every finding was
+  fixed before release.
+
+### Fixes
+
+- **Replying no longer sometimes opens a broken composer.** Opening a reply could show an
+  error where the message body should be; the composer now waits for the editor actually
+  in use.
+
+### Upgrading
+
+- **Eight database migrations apply on start** (versions 89 to 96): sort functions, a
+  column for change tracking, the user-disable function, rule kinds, removing an unused
+  table, two indexes for the Activity page, five recipient columns, and a key-history
+  change. None changes existing mail. On a large instance the Activity index briefly holds
+  up writes to the audit log while it builds, so upgrade at a quiet moment.
+- **Then run the recipient backfill.** `mailroom-admin backfill-recipients` only reports
+  what it would fill; when it looks right, run it with `--apply`. Until then, older mail
+  does not match the new recipient and list searches. It runs in batches while Mailroom
+  keeps running, and a second run changes nothing.
+- **Behind an HTTPS proxy,** make sure Mailroom knows its public address
+  (`MAILROOM_PUBLIC_URL`, or OIDC sign-in), or mail apps will be given `http://` addresses.
+  The web app is not affected.
+
 ## [1.102.0-beta.7] — 2026-11-09
 
 **The seventh beta of v1.102: replacing your own PGP key now tells your correspondents, and a correspondent who replaces theirs gets a gentler question from Mailroom.** Nothing is ever trusted without you.
