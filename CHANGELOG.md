@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**Mail clients can read any header, and folder counts stay current.** A standard
+## [1.102.0-beta.3] — 2026-11-09
+
+**The third beta of v1.102: mail clients can read any header, and folder counts stay current.** A standard
 JMAP client can ask for any header field in every standard form, and sees unread
 and total counts change as mail moves, without re-reading everything.
 
