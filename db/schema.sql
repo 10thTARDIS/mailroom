@@ -1125,6 +1125,18 @@ CREATE TABLE app.messages (
   -- the resolver's answer (areaJoinSQL), NULL = Needs sorting, kept correct by
   -- triggers. FK added after app.areas. Declared last to match ADD COLUMN.
   area_id                app.ulid,
+  -- SEARCHABLE RECIPIENTS AND LIST-ID (ADR-055, migration 00095): the stored form
+  -- Email/query's to/cc/bcc filters, `to` sort and List-Id `header` filter read.
+  -- Lowercased names and addresses one per line (bounded), the first To's display
+  -- name else address, and the id inside List-Id's angle brackets. NULL = not
+  -- filled yet (the backfill's candidate set); '' = filled, nothing there. Set
+  -- together at ingest and by `mailroom-admin backfill-recipients`. Declared last
+  -- to match ADD COLUMN order.
+  rcpt_to                text,
+  rcpt_cc                text,
+  rcpt_bcc               text,
+  rcpt_to_sort           text,
+  list_id_key            text,
   UNIQUE (user_id, content_hash),
   FOREIGN KEY (user_id, content_hash)
     REFERENCES app.blobs (user_id, content_hash)
