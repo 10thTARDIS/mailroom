@@ -127,6 +127,13 @@ func TestWebClientDeclaresCapabilitiesForEveryMethodItCalls(t *testing.T) {
 		devices[urn] = true
 	}
 
+	// Activity/list (ADR-053) rides a wider set the same way (MAILROOM_USING +
+	// CAP_ACTIVITY), behind hasCapability.
+	activity := map[string]bool{capActivity: true}
+	for urn := range using {
+		activity[urn] = true
+	}
+
 	client := readWebSource(t, webClientTS)
 	seen := map[string]bool{}
 	for _, m := range reMethod.FindAllStringSubmatch(client, -1) {
@@ -153,6 +160,9 @@ func TestWebClientDeclaresCapabilitiesForEveryMethodItCalls(t *testing.T) {
 		}
 		if strings.HasPrefix(name, "SignedInDevice/") {
 			declared = devices
+		}
+		if strings.HasPrefix(name, "Activity/") {
+			declared = activity
 		}
 
 		urn, known := methodCapabilities[name]
