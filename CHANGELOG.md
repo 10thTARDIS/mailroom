@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**A new Activity page shows what happened to your mail in one list.** What your AI
+## [1.102.0-beta.5] — 2026-11-09
+
+**The fifth beta of v1.102: a new Activity page shows what happened to your mail in one list.** What your AI
 tools did, decryptions, purges, sign-ins and sign-outs, and bulk rule actions, newest
 first, with filters.
 
