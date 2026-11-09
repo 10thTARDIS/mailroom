@@ -211,6 +211,9 @@ func countUserActivity(ctx context.Context, st *store.Store, uid ulid.ULID, o ac
 	f := store.ActivityFilter{Sources: o.Sources, Since: o.Since, Limit: min(store.ActivityMaxLimit, o.Cap)}
 	n := 0
 	for {
+		// Re-bounded every page: the last page asks only for what is left of
+		// the cap (a fixed limit let --cap 150 count 200).
+		f.Limit = min(store.ActivityMaxLimit, o.Cap-n)
 		var page store.ActivityPage
 		if err := st.UserTx(ctx, uid, func(tx *store.UserTx) error {
 			var e error

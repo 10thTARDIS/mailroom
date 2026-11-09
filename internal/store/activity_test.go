@@ -3,6 +3,7 @@
 package store
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -56,6 +57,24 @@ func TestActivityKindsFor(t *testing.T) {
 		b := &actBuilder{args: []any{"u"}}
 		if b.activityBranch(k, ActivityFilter{}, "2") == "" {
 			t.Errorf("kind %s has no branch", k)
+		}
+	}
+}
+
+// A cursor is client input: a forged one is refused as bad arguments, never
+// passed to Postgres (a year-300000 time was a serverFail with the SQLSTATE).
+func TestParseActivityCursorBounds(t *testing.T) {
+	ok := ActivityCursor{At: time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), Kind: ActivityKindPurge, ID: "00000000000000000042"}
+	if _, err := ParseActivityCursor(ok.Encode()); err != nil {
+		t.Fatalf("a real cursor was refused: %v", err)
+	}
+	for name, c := range map[string]ActivityCursor{
+		"year 300000": {At: time.Date(300000, 1, 1, 0, 0, 0, 0, time.UTC), Kind: ActivityKindPurge, ID: "1"},
+		"before 1970": {At: time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), Kind: ActivityKindPurge, ID: "1"},
+		"long id":     {At: ok.At, Kind: ActivityKindAITool, ID: strings.Repeat("A", 1<<20)},
+	} {
+		if _, err := ParseActivityCursor(c.Encode()); !errors.Is(err, ErrActivityArgs) {
+			t.Errorf("%s: %v, want ErrActivityArgs", name, err)
 		}
 	}
 }

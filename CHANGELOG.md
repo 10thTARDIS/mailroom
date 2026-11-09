@@ -50,7 +50,9 @@ first, with filters.
 
 ### Upgrading
 
-- One database migration adds the two indexes on start. It needs no action.
+- One database migration adds the two indexes on start. It needs no action, but
+  on a large instance building the audit-log index briefly holds up writes to that
+  log, so upgrade at a quiet moment.
 
 ## [1.102.0-beta.4] — 2026-11-09
 

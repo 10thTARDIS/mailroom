@@ -97,6 +97,9 @@ var kindSource = map[string]string{
 // ActivitySourceOf is the filter group of a kind ("" for an unknown kind).
 func ActivitySourceOf(kind string) string { return kindSource[kind] }
 
+// activityCursorMaxID bounds a cursor's id: the longest real id, a ULID, is 26.
+const activityCursorMaxID = 32
+
 // ParseActivityCursor decodes a cursor and refuses anything that is not one.
 func ParseActivityCursor(s string) (ActivityCursor, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
@@ -114,7 +117,15 @@ func ParseActivityCursor(s string) (ActivityCursor, error) {
 	if _, ok := kindSource[parts[1]]; !ok || parts[2] == "" {
 		return ActivityCursor{}, fmt.Errorf("%w: not a cursor", ErrActivityArgs)
 	}
-	return ActivityCursor{At: time.UnixMicro(us).UTC(), Kind: parts[1], ID: parts[2]}, nil
+	// A cursor is replayed by the client, so it is bounded like any input: a
+	// time Postgres can hold (a forged year-300000 cursor was a serverFail
+	// carrying the SQLSTATE text), and an id no longer than any real one
+	// (a ULID is 26 characters, an audit id at most 20 digits).
+	at := time.UnixMicro(us).UTC()
+	if at.Year() < 1970 || at.Year() > 9999 || len(parts[2]) > activityCursorMaxID {
+		return ActivityCursor{}, fmt.Errorf("%w: not a cursor", ErrActivityArgs)
+	}
+	return ActivityCursor{At: at, Kind: parts[1], ID: parts[2]}, nil
 }
 
 // ActivityFilter selects a page.
@@ -291,6 +302,19 @@ func (b *actBuilder) activityBranch(kind string, f ActivityFilter, n string) str
 		if cond != "" {
 			cond = " WHERE true" + cond
 		}
+		// The same upper bound INSIDE the grouping (security review of beta 5):
+		// a group's max(created_at) is <= X only if every one of its rows is, so
+		// bounding the rows by the cursor's time (and by until) never changes
+		// which groups qualify or their counts, and a "Load more" no longer
+		// re-reads every newer backfill row. The first page still reads the
+		// user's backfill rows; those are operator-run and bounded by mailbox.
+		inner := ""
+		if !f.Until.IsZero() {
+			inner += " AND a.created_at < " + b.param(f.Until.UTC())
+		}
+		if f.After != nil {
+			inner += " AND a.created_at <= " + b.param(f.After.At.UTC())
+		}
 		return `(SELECT g.at AS at, 'placement' AS kind, g.bid AS id, g.action AS outcome,
 			NULL::text AS key_name, NULL::text AS method, NULL::text AS reason,
 			NULL::text AS purpose, NULL::text AS fingerprint, NULL::text AS user_agent, g.cnt AS cnt,
@@ -298,7 +322,7 @@ func (b *actBuilder) activityBranch(kind string, f ActivityFilter, n string) str
 		   FROM (SELECT max(a.created_at) AS at, a.object_id::text AS bid, a.action::text AS action, count(*)::int AS cnt
 		           FROM app.audit_log a
 		          WHERE a.user_id = $1 AND a.object_type = '` + backfillObjectType + `'
-		            AND a.action IN ('` + backfillActionMove + `', '` + backfillActionUndo + `')
+		            AND a.action IN ('` + backfillActionMove + `', '` + backfillActionUndo + `')` + inner + `
 		          GROUP BY a.object_id, a.action) g` + cond + `
 		  ORDER BY g.at DESC, g.bid DESC LIMIT ` + n + `)`
 	case ActivityKindRuleApply:

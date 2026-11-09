@@ -143,3 +143,25 @@ func TestActivityCommand(t *testing.T) {
 		}
 	}
 }
+
+// --cap is a real bound above one page (security review of beta 5): with a
+// fixed page size of 100, --cap 150 used to count 200.
+func TestActivityCapIsExactAboveOnePage(t *testing.T) {
+	h := newUntangleHarness(t)
+	ctx := context.Background()
+	run := store.NewULID().String()
+	a := seedAdminActivity(t, h.super, "admcap-"+run)
+	if _, err := h.super.Exec(ctx, `
+		INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail)
+		SELECT $1, 'user', $2, 'Email', 'm' || g::text, '{}'
+		  FROM generate_series(1, 250) g`, a.user, store.PurgeAction); err != nil {
+		t.Fatal(err)
+	}
+	uid := ulid.MustParse(a.user)
+	since := time.Now().Add(-24 * time.Hour)
+	counts, oldest := map[string]int{}, map[string]*time.Time{}
+	n, capped, err := countUserActivity(ctx, h.store, uid, activityOptions{Since: since, Cap: 150}, counts, oldest)
+	if err != nil || !capped || n != 150 {
+		t.Errorf("countUserActivity with --cap 150 = %d, capped %v, %v; want exactly 150, capped", n, capped, err)
+	}
+}
