@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**The person running Mailroom can disable a user, and rules can apply to one kind of
+## [1.102.0-beta.4] — 2026-11-09
+
+**The fourth beta of v1.102: the person running Mailroom can disable a user, and rules can apply to one kind of
 message.** A disabled user is locked out everywhere at once and comes back intact when
 re-enabled; a rule can now be limited to, say, promotional mail.
 
