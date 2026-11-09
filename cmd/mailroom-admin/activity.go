@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 
@@ -286,7 +288,7 @@ func activityDetail(e store.ActivityEntry) string {
 	var p []string
 	add := func(k, v string) {
 		if v != "" {
-			p = append(p, k+"="+v)
+			p = append(p, k+"="+safeText(v))
 		}
 	}
 	add("outcome", e.Outcome)
@@ -308,7 +310,23 @@ func activityDetail(e store.ActivityEntry) string {
 		add("object", e.ObjectType+":"+e.ObjectID+" ("+state+")")
 	}
 	if len(p) == 0 {
-		return e.ID
+		return safeText(e.ID)
 	}
 	return strings.Join(p, " ")
+}
+
+// safeText makes user-supplied text safe to print to an operator's terminal. A key
+// or rule name is typed by a user, and an ANSI escape, any C0/C1 control (newline
+// and tab included, so one entry stays one line), a bidi override or another
+// format (Cf) or default-ignorable character could rewrite the screen or hide
+// entries. Each such rune becomes U+FFFD, a visible placeholder, never silence.
+func safeText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == utf8.RuneError || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) ||
+			unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Variation_Selector, r) ||
+			r == '\u2028' || r == '\u2029' {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }

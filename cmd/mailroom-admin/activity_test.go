@@ -3,6 +3,7 @@
 package main
 
 import (
+	"mailroom/internal/store"
 	"strings"
 	"testing"
 	"time"
@@ -44,5 +45,23 @@ func TestParseActivityOptions(t *testing.T) {
 func TestActivityReportListsEveryKind(t *testing.T) {
 	if len(activityKindsInOrder) != 8 {
 		t.Errorf("the report lists %d kinds; update it with the store", len(activityKindsInOrder))
+	}
+}
+
+// A name a user typed must not reach the operator's terminal as an escape.
+func TestActivityDetailNeutralisesTerminalEscapes(t *testing.T) {
+	evil := "a\x1b[2Jb\x1b]0;evil\x07c‮d\x00e\nf"
+	e := store.ActivityEntry{Kind: store.ActivityKindRuleApply, ID: "7", Outcome: "rule.apply", KeyName: evil,
+		ObjectType: "Rule", ObjectID: "x\x1b[31m", ObjectExists: true, Count: 2}
+	got := activityDetail(e)
+	want := "outcome=rule.apply name=a�[2Jb�]0;evil�c�d�e�f count=2 object=Rule:x�[31m (present)"
+	if got != want {
+		t.Errorf("detail =\n%q\nwant\n%q", got, want)
+	}
+	if got := activityDetail(store.ActivityEntry{ID: "9\x1b[2J"}); got != "9�[2J" {
+		t.Errorf("bare id = %q", got)
+	}
+	if safeText("plain name é 日本") != "plain name é 日本" {
+		t.Error("ordinary text was altered")
 	}
 }

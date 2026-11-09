@@ -129,9 +129,8 @@ func TestActivityIsolationPerKind(t *testing.T) {
 	// routine read, the unrelated audit row and the 'replaced' sign-out are absent.
 	got := kindsOf(activityPage(t, st, a.ID, ActivityFilter{}).Entries)
 	want := map[string]int{ActivityKindAITool: 2, ActivityKindAIKey: 1, ActivityKindDecryption: 2, ActivityKindPurge: 1,
-		ActivityKindSignIn: 2, ActivityKindSignOut: 1, ActivityKindPlacement: 1, ActivityKindRuleApply: 1}
-	// the seedUser fixture adds its own decrypt row for A's message (one more)
-	want[ActivityKindDecryption] = 2
+		ActivityKindSignIn: 3, ActivityKindSignOut: 1, ActivityKindPlacement: 1, ActivityKindRuleApply: 1}
+	// seedUser adds a decrypt row and a live session of its own (one more of each).
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("A's kinds = %v, want %v", got, want)
 	}
@@ -141,28 +140,27 @@ func TestActivityIsolationPerKind(t *testing.T) {
 		}
 	}
 
-	// B, who has only seedUser's own rows (a decrypt row), sees none of A's: per
-	// kind, so the leaking branch is named.
-	bSeen := kindsOf(activityPage(t, st, b.ID, ActivityFilter{}).Entries)
-	for _, k := range activityKinds {
-		if k == ActivityKindDecryption {
-			if bSeen[k] != 1 {
-				t.Errorf("B's decryptions = %d, want only B's own 1", bSeen[k])
-			}
-			continue
+	// B, who has only seedUser's own rows (a decrypt row and a session), sees none
+	// of A's: by id, per kind, so the leaking branch is named.
+	aIDs := map[string]bool{}
+	for _, e := range activityPage(t, st, a.ID, ActivityFilter{Limit: ActivityMaxLimit}).Entries {
+		aIDs[e.Kind+":"+e.ID] = true
+	}
+	for _, e := range activityPage(t, st, b.ID, ActivityFilter{Limit: ActivityMaxLimit}).Entries {
+		if aIDs[e.Kind+":"+e.ID] {
+			t.Errorf("B sees A's %s entry %s", e.Kind, e.ID)
 		}
-		if bSeen[k] != 0 {
-			t.Errorf("B sees %d %s entries of A's", bSeen[k], k)
-		}
+	}
+	if n := len(activityPage(t, st, b.ID, ActivityFilter{Limit: ActivityMaxLimit}).Entries); n != 2 {
+		t.Errorf("B has %d entries, want exactly its own 2 (decrypt row and session)", n)
 	}
 	// And through each single-source filter: a branch asked for alone.
 	for _, src := range ActivitySources {
 		p := activityPage(t, st, b.ID, ActivityFilter{Sources: []string{src}})
 		for _, e := range p.Entries {
-			if e.Kind == ActivityKindDecryption {
-				continue
+			if aIDs[e.Kind+":"+e.ID] {
+				t.Errorf("source %s: B sees A's %s entry %s", src, e.Kind, e.ID)
 			}
-			t.Errorf("source %s: B sees A's %s entry %s", src, e.Kind, e.ID)
 		}
 	}
 }
@@ -329,7 +327,7 @@ func TestActivityDeletedObjectKeepsEntryLosesLink(t *testing.T) {
 	}
 	// A message of its own, decrypted: deleting it must not take the entry along.
 	msg := NewULID().String()
-	hash := sha256.Sum256([]byte("blob-" + a.Tag))
+	hash := sha256.Sum256([]byte("gone-soon-" + msg))
 	exec(`INSERT INTO app.messages (id, user_id, content_hash, subject, from_address, received_at, size_bytes)
 	      VALUES ($1,$2,$3,'gone soon','friend@example.com',now(),100)`, msg, a.ID, hash[:])
 	exec(`INSERT INTO app.pgp_decrypt_audit (id, user_id, message_id, purpose, outcome, key_fingerprint, decrypted_at)
@@ -428,5 +426,59 @@ func TestAuditRuleApplyAppearsInActivity(t *testing.T) {
 	if len(p.Entries) != 2 || p.Entries[0].Outcome != RuleApplyUndoAction || p.Entries[0].Count != 3 ||
 		p.Entries[1].Outcome != RuleApplyAction || p.Entries[1].Count != 7 {
 		t.Errorf("rule apply entries = %+v", p.Entries)
+	}
+}
+
+// Each branch scopes by user ON ITS OWN. RLS would hide a branch that forgot its
+// predicate, so a test run as mailroom_app can never see the omission; this one
+// runs the statement on the superuser pool, which RLS does not filter, for B's id
+// and requires none of A's entries, kind by kind, with A's own id as the positive
+// control on the same connection. Removing one branch's `user_id = $1` turns it
+// red for that kind.
+func TestActivityBranchesScopeByUserWithoutRLS(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a := seedUser(t, h.super, "actn-"+NewULID().String())
+	b := seedUser(t, h.super, "actm-"+NewULID().String())
+	seedActivity(t, h.super, a, time.Now().UTC().Truncate(time.Second))
+
+	count := func(user string) map[string]int {
+		kinds, _ := kindsFor(nil)
+		q, args := activityQuery(user, kinds, ActivityFilter{}, ActivityMaxLimit)
+		rows, err := h.super.Query(ctx, q, args...)
+		if err != nil {
+			t.Fatalf("run the statement unfiltered: %v", err)
+		}
+		defer rows.Close()
+		got := map[string]int{}
+		for rows.Next() {
+			vals, err := rows.Values()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got[vals[1].(string)]++
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	mine := count(a.ID)
+	for _, k := range activityKinds {
+		if mine[k] == 0 {
+			t.Errorf("positive control: kind %s returns nothing for its owner on the unfiltered connection", k)
+		}
+	}
+	// B's own fixture rows (one decrypt row, one session) are B's. Everything A
+	// seeded for the remaining kinds must be absent.
+	theirs := count(b.ID)
+	for _, k := range activityKinds {
+		own := 0
+		if k == ActivityKindDecryption || k == ActivityKindSignIn {
+			own = 1
+		}
+		if theirs[k] > own {
+			t.Errorf("kind %s: B's statement returns %d rows (B owns %d) with RLS out of the way: the branch has no user predicate", k, theirs[k], own)
+		}
 	}
 }

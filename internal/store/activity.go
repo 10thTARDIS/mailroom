@@ -342,6 +342,23 @@ func kindsFor(sources []string) ([]string, error) {
 	return kinds, nil
 }
 
+// activityQuery is the whole statement for a page: the selected branches, each
+// bounded and carrying its own user predicate, unioned and ordered by the
+// cursor's tuple. Split from ListActivity so a test can run it on a connection
+// that RLS does not filter and prove each branch scopes by user on its own.
+func activityQuery(userID string, kinds []string, f ActivityFilter, limit int) (string, []any) {
+	b := &actBuilder{args: []any{userID}}
+	n := strconv.Itoa(limit + 1)
+	branches := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		branches = append(branches, b.activityBranch(k, f, n))
+	}
+	q := `SELECT * FROM (` + strings.Join(branches, "\nUNION ALL\n") + `) u
+		ORDER BY at DESC, kind COLLATE "C" DESC, id COLLATE "C" DESC
+		LIMIT ` + n
+	return q, b.args
+}
+
 // ListActivity returns one page of the caller's merged activity, newest first.
 func (tx *UserTx) ListActivity(ctx context.Context, f ActivityFilter) (ActivityPage, error) {
 	limit := f.Limit
@@ -364,16 +381,8 @@ func (tx *UserTx) ListActivity(ctx context.Context, f ActivityFilter) (ActivityP
 		}
 	}
 
-	b := &actBuilder{args: []any{tx.userID.String()}}
-	n := strconv.Itoa(limit + 1)
-	branches := make([]string, 0, len(kinds))
-	for _, k := range kinds {
-		branches = append(branches, b.activityBranch(k, f, n))
-	}
-	q := `SELECT * FROM (` + strings.Join(branches, "\nUNION ALL\n") + `) u
-		ORDER BY at DESC, kind COLLATE "C" DESC, id COLLATE "C" DESC
-		LIMIT ` + n
-	rows, err := tx.tx.Query(ctx, q, b.args...)
+	q, qargs := activityQuery(tx.userID.String(), kinds, f, limit)
+	rows, err := tx.tx.Query(ctx, q, qargs...)
 	if err != nil {
 		return ActivityPage{}, fmt.Errorf("store: list activity: %w", err)
 	}
