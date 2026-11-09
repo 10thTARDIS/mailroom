@@ -238,35 +238,36 @@ func backfillRecipientsForUser(ctx context.Context, st *store.Store, userID ulid
 }
 
 func printRecipientBackfill(w io.Writer, a recipientBackfillAgg, apply bool) {
+	say := func(format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
 	fillVerb := "would fill"
 	if apply {
 		fillVerb = "filled"
 	}
-	fmt.Fprintf(w, "\n=== backfill-recipients ===\n")
-	fmt.Fprintf(w, "  users examined                       %d\n", a.users)
-	fmt.Fprintf(w, "  messages                             %d\n", a.total)
-	fmt.Fprintf(w, "  already filled (skipped)             %d\n", a.alreadyFilled)
-	fmt.Fprintf(w, "  candidates (columns still NULL)      %d\n", a.candidates)
+	say("\n=== backfill-recipients ===\n")
+	say("  users examined                       %d\n", a.users)
+	say("  messages                             %d\n", a.total)
+	say("  already filled (skipped)             %d\n", a.alreadyFilled)
+	say("  candidates (columns still NULL)      %d\n", a.candidates)
 	if apply {
-		fmt.Fprintf(w, "  %-36s %d\n", fillVerb, a.written)
-		fmt.Fprintf(w, "  lost a race (already filled)         %d\n", a.lostRace)
+		say("  %-36s %d\n", fillVerb, a.written)
+		say("  lost a race (already filled)         %d\n", a.lostRace)
 	} else {
-		fmt.Fprintf(w, "  %-36s %d\n", fillVerb, a.parsed)
+		say("  %-36s %d\n", fillVerb, a.parsed)
 	}
-	fmt.Fprintf(w, "    with a To                          %d\n", a.withTo)
-	fmt.Fprintf(w, "    with a Cc                          %d\n", a.withCc)
-	fmt.Fprintf(w, "    with a Bcc (sent or drafted mail)  %d\n", a.withBcc)
-	fmt.Fprintf(w, "    with a List-Id                     %d\n", a.withList)
-	fmt.Fprintf(w, "  recipients past the stored bound     %d\n", a.truncated)
-	fmt.Fprintf(w, "  unreadable (bytes or parse)          %d\n", a.unreadable)
+	say("    with a To                          %d\n", a.withTo)
+	say("    with a Cc                          %d\n", a.withCc)
+	say("    with a Bcc (sent or drafted mail)  %d\n", a.withBcc)
+	say("    with a List-Id                     %d\n", a.withList)
+	say("  recipients past the stored bound     %d\n", a.truncated)
+	say("  unreadable (bytes or parse)          %d\n", a.unreadable)
 
 	switch {
 	case a.candidates == 0:
-		fmt.Fprintf(w, "  — nothing to do: every message already has its recipient columns.\n")
+		say("  — nothing to do: every message already has its recipient columns.\n")
 	case !apply:
-		fmt.Fprintf(w, "  — REPORT ONLY. Nothing was written. Re-run with --apply.\n")
+		say("  — REPORT ONLY. Nothing was written. Re-run with --apply.\n")
 	case a.unreadable > 0:
-		fmt.Fprintf(w, "  ⚠ %d message(s) could not be read and stay unfilled; they match no recipient\n", a.unreadable)
-		fmt.Fprintf(w, "    filter. A re-run retries them.\n")
+		say("  ⚠ %d message(s) could not be read and stay unfilled; they match no recipient\n", a.unreadable)
+		say("    filter. A re-run retries them.\n")
 	}
 }
