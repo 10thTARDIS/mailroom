@@ -300,7 +300,21 @@ func (r *backfillRun) do(tx *store.UserTx) error {
 // would be the automation arguing with them.
 func (r *backfillRun) rulesToRun(tx *store.UserTx) ([]rules.Rule, error) {
 	if r.only == "" {
-		return tx.ListRules(r.ctx, true)
+		all, err := tx.ListRules(r.ctx, true)
+		if err != nil {
+			return nil, err
+		}
+		// Kind-bound rules apply to new mail only (see below); say so rather than
+		// silently leaving them out.
+		out := all[:0:0]
+		for _, rl := range all {
+			if rl.KindBound() {
+				rp("skipping rule %q: limited to the %q kind of message, which applies to new mail only\n", rl.Name, rl.Kind)
+				continue
+			}
+			out = append(out, rl)
+		}
+		return out, nil
 	}
 	id, err := ulid.Parse(r.only)
 	if err != nil {
@@ -315,6 +329,10 @@ func (r *backfillRun) rulesToRun(tx *store.UserTx) ([]rules.Rule, error) {
 	}
 	if !rs[0].Enabled {
 		return nil, fmt.Errorf("rule %s is turned off; turn it on before applying it to existing mail", r.only)
+	}
+	if rs[0].KindBound() {
+		return nil, fmt.Errorf("rule %s is limited to the %q kind of message, so it applies to new mail only; "+
+			"the scan of existing mail has no kind to test it against", r.only, rs[0].Kind)
 	}
 	return rs, nil
 }

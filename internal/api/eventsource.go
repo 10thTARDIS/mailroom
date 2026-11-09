@@ -177,9 +177,14 @@ func (a *API) EventSourceHandler(w http.ResponseWriter, r *http.Request) {
 	// Only a request with a session has one to check (dev-auth does not).
 	// The check stamps nothing and never renews: a stream is not USE, or a
 	// forgotten tab would keep a session alive for ever.
+	//
+	// A stream with NO session (an API key or an OAuth token) re-checks the user
+	// instead: disabling a user must end the streams their keys opened, not only
+	// refuse the next request.
 	sess, hasSession := auth.SessionFromContext(r.Context())
+	sessionCheck := hasSession && a.sessionLive != nil
 	recheckC := noPing
-	if hasSession && a.sessionLive != nil {
+	if sessionCheck || (!hasSession && a.store != nil) {
 		interval := a.streamRecheck
 		if interval <= 0 {
 			interval = streamRecheckInterval
@@ -195,7 +200,13 @@ func (a *API) EventSourceHandler(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return // the client went away
 		case <-recheckC:
-			live, err := a.sessionLive(r.Context(), sess.ID, userID)
+			var live bool
+			var err error
+			if sessionCheck {
+				live, err = a.sessionLive(r.Context(), sess.ID, userID)
+			} else {
+				live, err = a.userEnabled(r.Context(), userID)
+			}
 			if err != nil {
 				// Keep the stream: a database blip must not drop everyone's push
 				// channel. Said once per stream, not every 30 seconds.
@@ -236,6 +247,18 @@ func (a *API) EventSourceHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// userEnabled reports whether the user is still enabled (neither disabled nor
+// soft-deleted): the stream re-check for a request that carries no session.
+func (a *API) userEnabled(ctx context.Context, userID ulid.ULID) (bool, error) {
+	var ok bool
+	err := a.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+		var e error
+		ok, e = tx.SelfEnabled(ctx)
+		return e
+	})
+	return ok, err
 }
 
 // noPing is a nil channel: it never fires, so `ping=0` (RFC 8620's "no pings")

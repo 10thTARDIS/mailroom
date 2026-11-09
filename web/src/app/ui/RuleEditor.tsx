@@ -32,7 +32,9 @@ import type {
   RuleOp,
   RulePreview,
   RuleTightenResult,
+  MessageKind,
 } from "../../core/jmap/types";
+import { MESSAGE_KINDS } from "../../core/jmap/types";
 import { findDuplicateRule, nameForDraft } from "../../core/ruleIdentity";
 import type { DuplicateRule } from "../../core/ruleIdentity";
 import { stripBidiControls } from "../../core/hostileText";
@@ -426,6 +428,8 @@ export interface RuleDraft {
   conditions: RuleCondition;
   actions: RuleAction[];
   enabled: boolean;
+  /** Limit the rule to one message kind; null/absent is any kind. */
+  kind?: MessageKind | null;
   /**
    * The name is still OURS to choose — the user has not typed one (#292).
    *
@@ -546,6 +550,7 @@ export function RuleForm({
       conditions: form.conditions,
       actions: form.actions,
       enabled: form.enabled,
+      kind: form.kind ?? null,
     };
     const ok = form.id
       ? await actions.updateRule(form.id, body)
@@ -625,6 +630,24 @@ export function RuleForm({
           <small className="hint">{t("rules.priorityHint")}</small>
         </label>
       </div>
+
+      <label className="field">
+        <span>{t("rules.kind.label")}</span>
+        <select
+          value={form.kind ?? ""}
+          onChange={(e) =>
+            setForm({ ...form, kind: e.target.value === "" ? null : (e.target.value as MessageKind) })
+          }
+        >
+          <option value="">{t("rules.kind.any")}</option>
+          {MESSAGE_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {t(`rules.kind.${k}` as MessageKey)}
+            </option>
+          ))}
+        </select>
+        <small className="hint">{t("rules.kind.hint")}</small>
+      </label>
 
       <h3>{t("rules.conditions")}</h3>
       <ConditionNode node={form.conditions} onChange={setConditions} onRemove={null} depth={0} />
@@ -1224,6 +1247,7 @@ export function RulesBody({ initialDraft }: { initialDraft?: RuleDraft }): JSX.E
               conditions: rule.conditions,
               actions: rule.actions,
               enabled: rule.enabled,
+              kind: rule.kind ?? null,
             })
           }
           onCancel={() => setEditing(null)}
@@ -1313,7 +1337,9 @@ export function RulesBody({ initialDraft }: { initialDraft?: RuleDraft }): JSX.E
                         {/* Only for an ENABLED rule: the server refuses a
                             disabled one, and offering a button that always
                             errors is worse than not offering it. */}
-                        {r.enabled ? (
+                        {r.enabled && r.kind ? (
+                          <span className="hint">{t("rules.apply.kindHint")}</span>
+                        ) : r.enabled ? (
                           <button
                             type="button"
                             className="link-button"
@@ -1352,6 +1378,7 @@ export function RulesBody({ initialDraft }: { initialDraft?: RuleDraft }): JSX.E
                               conditions: r.conditions,
                               actions: r.actions,
                               enabled: r.enabled,
+                              kind: r.kind ?? null,
                             })
                           }
                         >
@@ -1374,6 +1401,7 @@ export function RulesBody({ initialDraft }: { initialDraft?: RuleDraft }): JSX.E
                             conditions,
                             actions: r.actions,
                             enabled: r.enabled,
+                            kind: r.kind ?? null,
                           });
                         }}
                       />

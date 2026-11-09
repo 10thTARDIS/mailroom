@@ -280,7 +280,6 @@ var plan = map[string]Entry{
 	"change_log":   {Dropped, "", "the JMAP change feed; a log of this instance's mutations, not user data"},
 	"change_floor": {Dropped, "", "change-feed compaction watermark"},
 	"jobs":         {Dropped, "", "the work queue; in-flight operations of this instance"},
-	"sync_jobs":    {Dropped, "", "per-account sync scheduling state"},
 	"writeback_intents": {Dropped, "",
 		"pending IMAP writes for this instance's accounts"},
 	"account_sync_status": {Dropped, "", "per-account sync health and cursors"},

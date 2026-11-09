@@ -250,6 +250,20 @@ func (tx *UserTx) SelfIsAdmin(ctx context.Context) (bool, error) {
 	return n > 0, nil
 }
 
+// SelfEnabled reports whether the transaction's user can still use the service:
+// the row exists and is neither disabled nor soft-deleted (users_self lets a user
+// read exactly its own row). It is the re-check an already-open stream makes, for
+// the streams that have no session to re-check (an API key or OAuth token).
+func (tx *UserTx) SelfEnabled(ctx context.Context) (bool, error) {
+	var n int
+	if err := tx.tx.QueryRow(ctx,
+		`SELECT count(*) FROM app.users WHERE id = $1 AND disabled_at IS NULL AND deleted_at IS NULL`,
+		tx.userID.String()).Scan(&n); err != nil {
+		return false, fmt.Errorf("store: self enabled: %w", err)
+	}
+	return n > 0, nil
+}
+
 // DeletePolicyStatus reports whether a hard delete could actually remove the
 // app.users row, read from pg_catalog at run time.
 //

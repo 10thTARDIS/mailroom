@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
@@ -285,4 +286,57 @@ func (tx *UserTx) Profile(ctx context.Context) (UserProfile, bool, error) {
 		return UserProfile{}, false, fmt.Errorf("store: parse user id %q: %w", id, err)
 	}
 	return p, true, nil
+}
+
+// The closed set of outcomes SetUserDisabled reports, as the definer returns them.
+const (
+	UserOutcomeNotFound        = "not_found"
+	UserOutcomeDisabled        = "disabled"
+	UserOutcomeAlreadyDisabled = "already_disabled"
+	UserOutcomeEnabled         = "enabled"
+	UserOutcomeAlreadyEnabled  = "already_enabled"
+	// UserOutcomeLastEnabled means the user was NOT disabled because no other
+	// enabled user remains: disabling the last one would lock everybody out.
+	UserOutcomeLastEnabled = "last_enabled"
+)
+
+// SetUserDisabledResult is what SetUserDisabled did. ID and Email are zero on
+// UserOutcomeNotFound.
+type SetUserDisabledResult struct {
+	ID      ulid.ULID
+	Email   string
+	Outcome string
+}
+
+// SetUserDisabled disables (disabled=true) or re-enables a user through the
+// narrow SECURITY DEFINER app.set_user_disabled; ref is a user id or an email.
+// It is idempotent, never disables the last enabled user, and deletes nothing:
+// sign-in, sessions, API keys, OAuth grants and the user's background work all
+// refuse or stop on app.users.disabled_at alone, so enabling the user again
+// restores every one of them.
+func (s *Store) SetUserDisabled(ctx context.Context, ref string, disabled bool) (SetUserDisabledResult, error) {
+	var res SetUserDisabledResult
+	if strings.TrimSpace(ref) == "" {
+		return res, errors.New("store: set user disabled: a user id or email is required")
+	}
+	err := s.SystemTx(ctx, func(tx *SystemTx) error {
+		var id, email *string
+		if e := tx.tx.QueryRow(ctx,
+			`SELECT out_id::text, out_email, outcome FROM app.set_user_disabled($1, $2)`,
+			strings.TrimSpace(ref), disabled).Scan(&id, &email, &res.Outcome); e != nil {
+			return fmt.Errorf("store: set user disabled: %w", e)
+		}
+		if id != nil {
+			u, pe := ulid.Parse(*id)
+			if pe != nil {
+				return fmt.Errorf("store: set user disabled: parse id %q: %w", *id, pe)
+			}
+			res.ID = u
+		}
+		if email != nil {
+			res.Email = *email
+		}
+		return nil
+	})
+	return res, err
 }

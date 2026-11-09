@@ -509,6 +509,63 @@ REVOKE ALL ON FUNCTION app.active_user_ids() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.active_user_ids() TO mailroom_app;
 ALTER FUNCTION app.active_user_ids() OWNER TO mailroom_owner;
 
+-- Disable / re-enable a user (migration 00091): the one supported way to set
+-- app.users.disabled_at. The outcome is a closed set the operator CLI prints:
+-- not_found, disabled, already_disabled, enabled, already_enabled, last_enabled
+-- (the last enabled user is never disabled). p_ref is a user id or an email.
+CREATE OR REPLACE FUNCTION app.set_user_disabled(p_ref text, p_disabled boolean)
+RETURNS TABLE (out_id app.ulid, out_email text, outcome text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = app, pg_temp AS $$
+DECLARE
+  v_id       app.ulid;
+  v_email    text;
+  v_disabled timestamptz;
+  v_others   int;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('mailroom.set_user_disabled'));
+
+  SELECT u.id, u.email::text, u.disabled_at
+    INTO v_id, v_email, v_disabled
+    FROM app.users u
+   -- An id is matched as an id (any case, as ulid.Parse accepts), anything
+   -- else as an email; each side is unique, so at most one row can match.
+   WHERE (CASE WHEN upper(btrim(p_ref)) ~ '^[0-9A-HJKMNP-TV-Z]{26}$'
+               THEN u.id::text = upper(btrim(p_ref))
+               ELSE lower(u.email::text) = lower(btrim(p_ref)) END)
+     AND u.deleted_at IS NULL;
+
+  IF v_id IS NULL THEN
+    RETURN QUERY SELECT NULL::app.ulid, NULL::text, 'not_found'::text;
+    RETURN;
+  END IF;
+
+  IF p_disabled THEN
+    IF v_disabled IS NOT NULL THEN
+      RETURN QUERY SELECT v_id, v_email, 'already_disabled'::text;
+      RETURN;
+    END IF;
+    SELECT count(*) INTO v_others FROM app.users u
+     WHERE u.id <> v_id AND u.disabled_at IS NULL AND u.deleted_at IS NULL;
+    IF v_others = 0 THEN
+      RETURN QUERY SELECT v_id, v_email, 'last_enabled'::text;
+      RETURN;
+    END IF;
+    UPDATE app.users u SET disabled_at = now() WHERE u.id = v_id;
+    RETURN QUERY SELECT v_id, v_email, 'disabled'::text;
+  ELSE
+    IF v_disabled IS NULL THEN
+      RETURN QUERY SELECT v_id, v_email, 'already_enabled'::text;
+      RETURN;
+    END IF;
+    UPDATE app.users u SET disabled_at = NULL WHERE u.id = v_id;
+    RETURN QUERY SELECT v_id, v_email, 'enabled'::text;
+  END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION app.set_user_disabled(text, boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.set_user_disabled(text, boolean) TO mailroom_app;
+ALTER FUNCTION app.set_user_disabled(text, boolean) OWNER TO mailroom_owner;
+
 -- ----------------------------------------------------------------------------
 -- 3. Per-user change sequencing (drives JMAP state strings)
 -- ----------------------------------------------------------------------------
@@ -1589,23 +1646,25 @@ CREATE INDEX jobs_due ON app.jobs (fire_at) WHERE state = 'pending';
 CREATE UNIQUE INDEX jobs_live_idempotency_key ON app.jobs (idempotency_key)
   WHERE state IN ('pending', 'running');
 
+-- A DISABLED (or soft-deleted) user's jobs are left pending, untouched: enabling the
+-- user again resumes them (migration 00091).
 CREATE OR REPLACE FUNCTION app.dequeue_due_jobs(p_worker text, p_limit int)
 RETURNS SETOF app.jobs
 LANGUAGE sql SECURITY DEFINER SET search_path = app, pg_temp AS $$
   UPDATE app.jobs j SET state = 'running', locked_by = p_worker, locked_at = now(),
                         attempts = attempts + 1
   WHERE j.id IN (
-    SELECT id FROM app.jobs
-    WHERE (state = 'pending' AND fire_at <= now())
-       -- Stranded by a process that died holding the lock (#351 B3):
-       -- locked_at was written on every dequeue and read by nothing, so a
-       -- job left running by any restart stayed running forever, and
-       -- EnsureRecurringUserJob counted the zombie as "already scheduled".
-       -- See db/migrations/00041 for the lease trade-off.
-       OR (state = 'running' AND locked_at IS NOT NULL
-           AND locked_at < now() - interval '15 minutes')
-    ORDER BY fire_at
-    FOR UPDATE SKIP LOCKED
+    SELECT jj.id FROM app.jobs jj
+    WHERE ((jj.state = 'pending' AND jj.fire_at <= now())
+       -- Stranded by a process that died holding the lock (#351 B3); see
+       -- db/migrations/00041 for the lease trade-off.
+       OR (jj.state = 'running' AND jj.locked_at IS NOT NULL
+           AND jj.locked_at < now() - interval '15 minutes'))
+      AND (jj.user_id IS NULL OR EXISTS (
+            SELECT 1 FROM app.users u
+             WHERE u.id = jj.user_id AND u.disabled_at IS NULL AND u.deleted_at IS NULL))
+    ORDER BY jj.fire_at
+    FOR UPDATE OF jj SKIP LOCKED
     LIMIT p_limit
   )
   RETURNING j.*;
@@ -1643,8 +1702,11 @@ GRANT SELECT, UPDATE ON app.jobs TO mailroom_owner;
 CREATE OR REPLACE FUNCTION app.count_due_jobs()
 RETURNS bigint
 LANGUAGE sql SECURITY DEFINER STABLE SET search_path = app, pg_temp AS $$
-  SELECT count(*) FROM app.jobs
-   WHERE state = 'pending' AND fire_at <= now();
+  SELECT count(*) FROM app.jobs jj
+   WHERE jj.state = 'pending' AND jj.fire_at <= now()
+     AND (jj.user_id IS NULL OR EXISTS (
+           SELECT 1 FROM app.users u
+            WHERE u.id = jj.user_id AND u.disabled_at IS NULL AND u.deleted_at IS NULL));
 $$;
 REVOKE ALL ON FUNCTION app.count_due_jobs() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.count_due_jobs() TO mailroom_app;
@@ -1954,6 +2016,9 @@ CREATE TABLE app.rules (
   enabled       boolean NOT NULL DEFAULT true,
   system_suggested boolean NOT NULL DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now(),
+  -- Optional message-kind binding (migration 00092): NULL = any kind, otherwise one
+  -- of the internal/kind values. Validated in Go, not by a CHECK.
+  kind          text,
   UNIQUE (user_id, name)
 );
 ALTER TABLE app.rules ENABLE ROW LEVEL SECURITY;
@@ -2408,7 +2473,7 @@ CREATE POLICY contact_key_pins_isolation ON app.contact_key_pins
   WITH CHECK (user_id = app.current_user_id());
 
 -- ----------------------------------------------------------------------------
--- 11. User keys, API keys, push, audit, AI providers, sync jobs
+-- 11. User keys, API keys, push, audit, AI providers
 -- ----------------------------------------------------------------------------
 -- User signing/encryption keys. PRIVATE material is wrapped and usable only
 -- via the crypto process (spec §9); this table stores wrapped bytes + refs.
@@ -2885,8 +2950,11 @@ RETURNS SETOF app.ulid
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = app, pg_temp AS $$
   SELECT DISTINCT p.user_id
     FROM app.api_key_pending p
-   WHERE (p.state = 'pending' AND p.expires_at <= now())
-      OR (p.state = 'approved' AND p.ran_at IS NULL AND p.decided_at <= now() - interval '10 minutes')
+   WHERE ((p.state = 'pending' AND p.expires_at <= now())
+       OR (p.state = 'approved' AND p.ran_at IS NULL AND p.decided_at <= now() - interval '10 minutes'))
+     -- A disabled (or deleted) user's background work stops (migration 00091).
+     AND EXISTS (SELECT 1 FROM app.users u
+                  WHERE u.id = p.user_id AND u.disabled_at IS NULL AND u.deleted_at IS NULL)
 $$;
 REVOKE ALL ON FUNCTION app.api_key_pending_due_users() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.api_key_pending_due_users() TO mailroom_app;
@@ -3240,10 +3308,13 @@ BEGIN
   IF NOT FOUND THEN
     RETURN;
   END IF;
-  IF r.revoked_at IS NULL AND r.used_at IS NULL AND r.expires_at > now() THEN
+  SELECT (u.disabled_at IS NULL AND u.deleted_at IS NULL) INTO v_ok FROM app.users u WHERE u.id = r.user_id;
+  -- A refusal for a disabled user must NOT use the token up: re-enabling the user
+  -- restores the grant, and a token burned here would read as a REUSE on the
+  -- client's next try and end the whole family.
+  IF COALESCE(v_ok, false) AND r.revoked_at IS NULL AND r.used_at IS NULL AND r.expires_at > now() THEN
     UPDATE app.oauth_tokens t SET used_at = now() WHERE t.id = r.id;
   END IF;
-  SELECT (u.disabled_at IS NULL AND u.deleted_at IS NULL) INTO v_ok FROM app.users u WHERE u.id = r.user_id;
   RETURN QUERY SELECT r.id, r.user_id, r.api_key_id, r.family_id, r.resource, r.scopes, r.expires_at,
                       r.revoked_at IS NOT NULL, r.used_at IS NOT NULL, COALESCE(v_ok, false);
 END
@@ -3428,28 +3499,6 @@ CREATE TABLE app.ai_providers (
 ALTER TABLE app.ai_providers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.ai_providers FORCE ROW LEVEL SECURITY;
 CREATE POLICY ai_providers_isolation ON app.ai_providers
-  FOR ALL TO mailroom_app
-  USING (user_id = app.current_user_id())
-  WITH CHECK (user_id = app.current_user_id());
-
--- Long-running ingest runs: bulk import + backfill progress (spec §4).
-CREATE TABLE app.sync_jobs (
-  id            app.ulid PRIMARY KEY,
-  user_id       app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
-  account_id    app.ulid REFERENCES app.accounts(id) ON DELETE CASCADE,
-  kind          text NOT NULL,                 -- 'bulk_import','backfill','reindex'
-  source        text,                          -- 'mbox'|'maildir'|'takeout'|NULL
-  state         app.job_state NOT NULL DEFAULT 'pending',
-  progress_done bigint NOT NULL DEFAULT 0,
-  progress_total bigint,
-  cursor        jsonb NOT NULL DEFAULT '{}',   -- resumability (spec §4)
-  last_error    text,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  completed_at  timestamptz
-);
-ALTER TABLE app.sync_jobs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app.sync_jobs FORCE ROW LEVEL SECURITY;
-CREATE POLICY sync_jobs_isolation ON app.sync_jobs
   FOR ALL TO mailroom_app
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
@@ -4513,7 +4562,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   -- (app.category_dismissals is granted separately below: it takes no UPDATE.)
   app.rule_corrections, app.remote_allows, app.compose_snippets, app.saved_searches,
   app.user_keys, app.api_keys, app.push_subscriptions,
-  app.ai_providers, app.sync_jobs,
+  app.ai_providers,
   app.areas, app.area_feeds, app.desk_preferences, app.client_preferences,
   app.drawer_archives, app.setup_runs, app.setup_journal,
   app.learned_placements, app.learned_placement_gate_resets,

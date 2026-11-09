@@ -46,6 +46,8 @@ type RuleRow struct {
 	Actions         []rules.Action
 	Enabled         bool
 	SystemSuggested bool
+	// Kind binds the rule to one message kind; "" is any kind (stored as NULL).
+	Kind string
 }
 
 // RulePatch is a partial update for UpdateRule: a nil pointer leaves the field
@@ -57,6 +59,9 @@ type RulePatch struct {
 	Actions         *[]rules.Action
 	Enabled         *bool
 	SystemSuggested *bool
+	// Kind: nil leaves the binding unchanged, a pointer to "" clears it (any
+	// kind), otherwise it binds the rule to that kind.
+	Kind *string
 }
 
 // CreateRule validates and inserts a rule, then appends the Rule change_log row
@@ -69,7 +74,7 @@ func (tx *UserTx) CreateRule(ctx context.Context, row RuleRow) (ulid.ULID, error
 	if err := rules.Validate(rules.Rule{
 		Name: row.Name, Priority: row.Priority,
 		Conditions: row.Conditions, Actions: row.Actions,
-		Enabled: row.Enabled, SystemSuggested: row.SystemSuggested,
+		Enabled: row.Enabled, SystemSuggested: row.SystemSuggested, Kind: row.Kind,
 	}); err != nil {
 		return ulid.ULID{}, fmt.Errorf("%w: %v", ErrInvalidRule, err)
 	}
@@ -85,10 +90,11 @@ func (tx *UserTx) CreateRule(ctx context.Context, row RuleRow) (ulid.ULID, error
 	}
 	if _, err := sp.Exec(ctx, `
 		INSERT INTO app.rules
-			(id, user_id, name, priority, conditions, actions, enabled, system_suggested)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
+			(id, user_id, name, priority, conditions, actions, enabled, system_suggested, kind)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)`,
 		id.String(), tx.userID.String(), row.Name, row.Priority,
-		string(condJSON), string(actJSON), row.Enabled, row.SystemSuggested); err != nil {
+		string(condJSON), string(actJSON), row.Enabled, row.SystemSuggested,
+		nullableKind(row.Kind)); err != nil {
 		_ = sp.Rollback(ctx) // ROLLBACK TO SAVEPOINT — the outer tx stays usable
 		if isUniqueViolation(err) {
 			return ulid.ULID{}, ErrRuleNameTaken
@@ -116,14 +122,15 @@ func (tx *UserTx) UpdateRule(ctx context.Context, id ulid.ULID, patch RulePatch)
 		actRaw     []byte
 		enabled    bool
 		systemSugg bool
+		kindCol    *string
 	)
 	err = tx.tx.QueryRow(ctx, `
-		SELECT name, priority, conditions, actions, enabled, system_suggested
+		SELECT name, priority, conditions, actions, enabled, system_suggested, kind
 		  FROM app.rules
 		 WHERE user_id = $1 AND id = $2
 		 FOR UPDATE`,
 		tx.userID.String(), id.String()).
-		Scan(&name, &priority, &condRaw, &actRaw, &enabled, &systemSugg)
+		Scan(&name, &priority, &condRaw, &actRaw, &enabled, &systemSugg, &kindCol)
 	if err != nil {
 		if isNoRows(err) {
 			return false, nil
@@ -141,6 +148,10 @@ func (tx *UserTx) UpdateRule(ctx context.Context, id ulid.ULID, patch RulePatch)
 	}
 
 	nName, nPriority, nEnabled, nSystem := name, priority, enabled, systemSugg
+	nKind := ""
+	if kindCol != nil {
+		nKind = *kindCol
+	}
 	nConds, nActs := conds, acts
 	if patch.Name != nil {
 		nName = *patch.Name
@@ -160,10 +171,13 @@ func (tx *UserTx) UpdateRule(ctx context.Context, id ulid.ULID, patch RulePatch)
 	if patch.SystemSuggested != nil {
 		nSystem = *patch.SystemSuggested
 	}
+	if patch.Kind != nil {
+		nKind = *patch.Kind
+	}
 
 	if verr := rules.Validate(rules.Rule{
 		Name: nName, Priority: nPriority, Conditions: nConds, Actions: nActs,
-		Enabled: nEnabled, SystemSuggested: nSystem,
+		Enabled: nEnabled, SystemSuggested: nSystem, Kind: nKind,
 	}); verr != nil {
 		return true, fmt.Errorf("%w: %v", ErrInvalidRule, verr)
 	}
@@ -180,13 +194,14 @@ func (tx *UserTx) UpdateRule(ctx context.Context, id ulid.ULID, patch RulePatch)
 	err = sp.QueryRow(ctx, `
 		UPDATE app.rules
 		   SET name = $3, priority = $4, conditions = $5::jsonb, actions = $6::jsonb,
-		       enabled = $7, system_suggested = $8
+		       enabled = $7, system_suggested = $8, kind = $9
 		 WHERE user_id = $1 AND id = $2
-		   AND (name, priority, conditions, actions, enabled, system_suggested)
-		       IS DISTINCT FROM ($3, $4, $5::jsonb, $6::jsonb, $7, $8)
+		   AND (name, priority, conditions, actions, enabled, system_suggested, kind)
+		       IS DISTINCT FROM ($3, $4, $5::jsonb, $6::jsonb, $7, $8, $9::text)
 		RETURNING id`,
 		tx.userID.String(), id.String(), nName, nPriority,
-		string(condJSON), string(actJSON), nEnabled, nSystem).Scan(&touched)
+		string(condJSON), string(actJSON), nEnabled, nSystem,
+		nullableKind(nKind)).Scan(&touched)
 	if err != nil {
 		if isNoRows(err) {
 			// The row exists (we locked it) but nothing changed: a true no-op.
@@ -261,7 +276,7 @@ func (tx *UserTx) ListRules(ctx context.Context, enabledOnly bool) ([]rules.Rule
 		where += " AND enabled"
 	}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT id, name, priority, conditions, actions, enabled, system_suggested
+		SELECT id, name, priority, conditions, actions, enabled, system_suggested, kind
 		  FROM app.rules
 		 WHERE `+where+`
 		 ORDER BY priority, name, id`,
@@ -281,7 +296,7 @@ func (tx *UserTx) GetRules(ctx context.Context, ids []ulid.ULID) ([]rules.Rule, 
 		return nil, nil
 	}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT id, name, priority, conditions, actions, enabled, system_suggested
+		SELECT id, name, priority, conditions, actions, enabled, system_suggested, kind
 		  FROM app.rules
 		 WHERE user_id = $1 AND id = ANY($2)`,
 		tx.userID.String(), ulidStrings(ids))
@@ -296,7 +311,7 @@ func (tx *UserTx) GetRules(ctx context.Context, ids []ulid.ULID) ([]rules.Rule, 
 // first) then id — the exact ordered set the ingest evaluator consumes.
 func (tx *UserTx) RulesForEval(ctx context.Context) ([]rules.Rule, error) {
 	rows, err := tx.tx.Query(ctx, `
-		SELECT id, name, priority, conditions, actions, enabled, system_suggested
+		SELECT id, name, priority, conditions, actions, enabled, system_suggested, kind
 		  FROM app.rules
 		 WHERE user_id = $1 AND enabled
 		 ORDER BY priority, id`,
@@ -322,10 +337,14 @@ func scanRules(rows interface {
 			r       rules.Rule
 			condRaw []byte
 			actRaw  []byte
+			kindCol *string
 		)
 		if err := rows.Scan(&idStr, &r.Name, &r.Priority, &condRaw, &actRaw,
-			&r.Enabled, &r.SystemSuggested); err != nil {
+			&r.Enabled, &r.SystemSuggested, &kindCol); err != nil {
 			return nil, fmt.Errorf("store: scan rule: %w", err)
+		}
+		if kindCol != nil {
+			r.Kind = *kindCol
 		}
 		id, err := ulid.Parse(idStr)
 		if err != nil {
@@ -344,6 +363,14 @@ func scanRules(rows interface {
 		return nil, fmt.Errorf("store: scan rules: %w", err)
 	}
 	return out, nil
+}
+
+// nullableKind stores "" (any kind) as NULL.
+func nullableKind(k string) *string {
+	if k == "" {
+		return nil
+	}
+	return &k
 }
 
 func marshalRule(conds rules.Condition, acts []rules.Action) (condJSON, actJSON []byte, err error) {
