@@ -75,7 +75,7 @@ func mailCapability() map[string]any {
 		"maxMailboxDepth":            nil,
 		"maxSizeMailboxName":         255,
 		"maxSizeAttachmentsPerEmail": maxAttachmentBytes,
-		"emailQuerySortOptions":      []string{"receivedAt", "sentAt", "size", "from", "subject", "hasKeyword"},
+		"emailQuerySortOptions":      []string{"receivedAt", "sentAt", "size", "from", "to", "subject", "hasKeyword"},
 		"mayCreateTopLevelMailbox":   false,
 	}
 }

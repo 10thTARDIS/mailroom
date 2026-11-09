@@ -582,3 +582,67 @@ func TestIdentityHTMLSignatureIsSanitised(t *testing.T) {
 	obj, _ := list[0].(map[string]any)
 	assertSanitisedSignature(t, "get of a legacy row", obj["htmlSignature"].(string))
 }
+
+// A draft (and so a sent copy, which takes the same path) stores its recipients
+// from the BUILT BYTES, which keep the Bcc header (ADR-055): the one kind of mail
+// a bcc filter can find. The test goes through the real Email/set and Email/query
+// methods, so the wiring from the JMAP condition to the stored column is covered
+// too, and it checks the control: a received-style message has no Bcc.
+func TestDraftStoresRecipientsAndBccIsSearchable(t *testing.T) {
+	h := newComposeHarness(t)
+	a, _ := seedTwo(t, h.super)
+	seedSendable(t, h.super, a, "", "catchall.example.com")
+
+	res := call(t, h.api.emailSet, a.UserID, map[string]any{
+		"create": map[string]any{
+			"c1": map[string]any{
+				"from":       []map[string]any{{"email": "me@catchall.example.com"}},
+				"to":         []map[string]any{{"name": "Dana Lee", "email": "dana@example.net"}},
+				"cc":         []map[string]any{{"email": "ed@example.net"}},
+				"bcc":        []map[string]any{{"email": "hidden@example.net"}},
+				"subject":    "planning",
+				"bodyValues": map[string]any{"1": map[string]any{"value": "hello"}},
+				"textBody":   []map[string]any{{"partId": "1"}},
+			},
+		},
+	})
+	created, _ := res["created"].(map[string]any)
+	obj, ok := created["c1"].(map[string]any)
+	if !ok {
+		t.Fatalf("draft not created: %#v", res)
+	}
+	id, _ := obj["id"].(string)
+
+	for filter, want := range map[string]int{
+		`{"to":"dana lee"}`:           1,
+		`{"cc":"ED@example.net"}`:     1,
+		`{"bcc":"hidden@"}`:           1,
+		`{"to":"hidden@"}`:            0, // a Bcc is not a To
+		`{"bcc":"dana"}`:              0,
+		`{"cc":"dana"}`:               0,
+		`{"header":["List-Id"]}`:      0, // the draft has none
+		`{"header":["X-Anything"]}`:   -1,
+		`{"header":["List-Id", "x"]}`: 0,
+	} {
+		out, mErr := h.api.emailQuery(context.Background(), a.UserID,
+			mustJSON(t, map[string]any{"filter": json.RawMessage(filter)}))
+		if want == -1 {
+			if mErr == nil || mErr.Type != errUnsupportedFilter {
+				t.Errorf("%s: %+v, want unsupportedFilter", filter, mErr)
+			}
+			continue
+		}
+		if mErr != nil {
+			t.Errorf("%s: %v", filter, mErr)
+			continue
+		}
+		var res map[string]any
+		if err := json.Unmarshal(out, &res); err != nil {
+			t.Fatal(err)
+		}
+		ids, _ := res["ids"].([]any)
+		if len(ids) != want || (want == 1 && ids[0] != id) {
+			t.Errorf("%s: ids %v, want %d (the draft is %s)", filter, ids, want, id)
+		}
+	}
+}

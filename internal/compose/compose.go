@@ -52,6 +52,7 @@ import (
 	"mailroom/internal/mime"
 	"mailroom/internal/pgpmime"
 	"mailroom/internal/provider"
+	"mailroom/internal/rcptproj"
 	"mailroom/internal/store"
 )
 
@@ -385,6 +386,9 @@ func (c *Composer) record(ctx context.Context, tx *store.UserTx, userID ulid.ULI
 		// is the cost of letting a byte-derived fact come from anywhere else,
 		// and the part PATH can only come from a parse in any case.
 		Attachments: attachproj.Rows(mustParse(built.Raw)),
+		// Likewise the recipients and List-Id (ADR-055): from the stored bytes,
+		// which keep the Bcc header (SendPayload strips it only for the wire).
+		Recipients: recipientCols(built.Raw),
 
 		MailboxID: target.ID,
 		AccountID: si.AccountID,
@@ -1246,6 +1250,12 @@ func snippet(text string) string {
 // path: attachmentRows(nil) is nil, which projects no rows, and the message
 // still records. The alternative — dropping the whole compose — would be a
 // worse answer to "our own builder produced something we cannot read".
+// recipientCols is the stored recipient projection of the built bytes (ADR-055).
+func recipientCols(raw []byte) *store.RecipientCols {
+	c := rcptproj.Project(mustParse(raw))
+	return &c
+}
+
 func mustParse(raw []byte) *mime.Message {
 	m, _ := mime.ParseBytes(raw)
 	return m

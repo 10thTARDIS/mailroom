@@ -33,6 +33,9 @@ type fxMsg struct {
 	attach   bool
 	kw       []string
 	age      time.Duration
+	// rcpt is the stored recipient projection (ADR-055); nil leaves the columns
+	// NULL, which is mail the backfill has not reached.
+	rcpt *RecipientCols
 }
 
 type filterFixture struct {
@@ -73,12 +76,12 @@ func newFilterFixture(t *testing.T) *filterFixture {
 	}
 	day := 24 * time.Hour
 	f.msgs = []*fxMsg{
-		{name: "x1", thread: "T", subject: "Re: Lunch plans", fromName: "Bob Builder", fromAddr: "bob@example.net", size: 500, age: 1 * day},
-		{name: "x2", thread: "T", acct2: true, subject: "Secret", fromAddr: "carol@example.org", size: 900, attach: true, kw: []string{"kwx"}, age: 2 * day},
-		{name: "x3", subject: "100%_sure", fromAddr: "alice@example.com", size: 100, age: 3 * day},
-		{name: "x4", thread: "U", subject: "Zeta", fromName: "Alice A", fromAddr: "alice@example.com", size: 700, attach: true, kw: []string{"kwx"}, age: 4 * day},
-		{name: "y1", thread: "V", subject: "FWD: Tie", fromAddr: "dup@example.com", size: 300, kw: []string{"kwx"}, age: 5 * day},
-		{name: "y2", thread: "V", acct2: true, subject: "Tie", fromAddr: "dup@example.com", size: 300, age: 5 * day},
+		{name: "x1", thread: "T", subject: "Re: Lunch plans", fromName: "Bob Builder", fromAddr: "bob@example.net", size: 500, age: 1 * day, rcpt: &RecipientCols{To: "dana lee\ndana@example.org", Cc: "", Bcc: "", ToSort: "Dana Lee", ListIDKey: "plans.example.net"}},
+		{name: "x2", thread: "T", acct2: true, subject: "Secret", fromAddr: "carol@example.org", size: 900, attach: true, kw: []string{"kwx"}, age: 2 * day, rcpt: &RecipientCols{To: "dana@example.org", Cc: "ed@example.org", Bcc: "secret@example.org", ToSort: "dana@example.org", ListIDKey: ""}},
+		{name: "x3", subject: "100%_sure", fromAddr: "alice@example.com", size: 100, age: 3 * day, rcpt: &RecipientCols{To: "erin@example.org", Cc: "dana@example.org", Bcc: "", ToSort: "erin@example.org", ListIDKey: "plans.example.net"}},
+		{name: "x4", thread: "U", subject: "Zeta", fromName: "Alice A", fromAddr: "alice@example.com", size: 700, attach: true, kw: []string{"kwx"}, age: 4 * day, rcpt: &RecipientCols{To: "bob builder\nbob@example.net", Cc: "", Bcc: "", ToSort: "Bob Builder", ListIDKey: ""}},
+		{name: "y1", thread: "V", subject: "FWD: Tie", fromAddr: "dup@example.com", size: 300, kw: []string{"kwx"}, age: 5 * day, rcpt: &RecipientCols{To: "zed@example.org", Cc: "", Bcc: "", ToSort: "zed", ListIDKey: "tie.example.org"}},
+		{name: "y2", thread: "V", acct2: true, subject: "Tie", fromAddr: "dup@example.com", size: 300, age: 5 * day, rcpt: &RecipientCols{To: "zed@example.org", Cc: "", Bcc: "", ToSort: "Zed", ListIDKey: ""}},
 	}
 	for _, m := range f.msgs {
 		m.id = NewULID()
@@ -95,7 +98,9 @@ func newFilterFixture(t *testing.T) *filterFixture {
 	// User B holds mail that matches A's text conditions.
 	for i, name := range []string{"bx1", "bx2"} {
 		m := &fxMsg{name: name, id: NewULID(), thread: "", subject: "Re: Lunch plans", fromName: "Bob Builder",
-			fromAddr: "bob@example.net", size: 500 + int64(i), attach: true, kw: []string{"kwx"}, age: day}
+			fromAddr: "bob@example.net", size: 500 + int64(i), attach: true, kw: []string{"kwx"}, age: day,
+			rcpt: &RecipientCols{To: "dana lee\ndana@example.org", Cc: "dana@example.org", Bcc: "secret@example.org",
+				ToSort: "Dana Lee", ListIDKey: "plans.example.net"}}
 		f.insert(t, b.ID, m, mustULID(t, b.MailboxID), mustULID(t, b.AccountID))
 		f.bMsgs = append(f.bMsgs, m.id)
 	}
@@ -126,6 +131,7 @@ func (f *filterFixture) insert(t *testing.T, userID string, m *fxMsg, mailbox, a
 	if kw == nil {
 		kw = []string{}
 	}
+	rc := m.rcpt.nullable()
 	for _, q := range []struct {
 		sql  string
 		args []any
@@ -133,10 +139,11 @@ func (f *filterFixture) insert(t *testing.T, userID string, m *fxMsg, mailbox, a
 		{`INSERT INTO app.blobs (user_id, content_hash, size_plain, size_stored, dek_id) VALUES ($1, $2, 1, 1, $3)`,
 			[]any{userID, hash[:], NewULID().String()}},
 		{`INSERT INTO app.messages (id, user_id, content_hash, thread_id, subject, from_name, from_address,
-		        received_at, size_bytes, has_attachments, keywords)
-		  VALUES ($1, $2, $3, $4, $5, $6, $7, now() - $8::interval, $9, $10, $11)`,
+		        received_at, size_bytes, has_attachments, keywords,
+		        rcpt_to, rcpt_cc, rcpt_bcc, rcpt_to_sort, list_id_key)
+		  VALUES ($1, $2, $3, $4, $5, $6, $7, now() - $8::interval, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			[]any{m.id.String(), userID, hash[:], thread, m.subject, m.fromName, m.fromAddr,
-				m.age.String(), m.size, m.attach, kw}},
+				m.age.String(), m.size, m.attach, kw, rc.To, rc.Cc, rc.Bcc, rc.ToSort, rc.ListIDKey}},
 		{`INSERT INTO app.message_provenance (id, user_id, message_id, account_id, mailbox_id, uid, uidvalidity)
 		  VALUES ($1, $2, $3, $4, $5, $6, 1)`,
 			[]any{NewULID().String(), userID, m.id.String(), account.String(), mailbox.String(), fxUID.Add(1)}},
@@ -427,6 +434,15 @@ func fromKey(m *fxMsg) string {
 	return strings.ToLower(m.fromAddr)
 }
 
+// toKey is the reference for the `to` sort, computed in Go: the folded stored key,
+// empty for mail with no stored recipients.
+func toKey(m *fxMsg) string {
+	if m.rcpt == nil {
+		return ""
+	}
+	return strings.ToLower(m.rcpt.ToSort)
+}
+
 func TestSortKeysOrderAndTieBreak(t *testing.T) {
 	f := newFilterFixture(t)
 	type sc struct {
@@ -446,6 +462,12 @@ func TestSortKeysOrderAndTieBreak(t *testing.T) {
 			func() []string { return f.refOrder(t, fromKey, true, false) }},
 		{"from desc", []EmailSortKey{{Kind: SortKeyFrom}}, false,
 			func() []string { return f.refOrder(t, fromKey, false, false) }},
+		{"to asc", []EmailSortKey{{Kind: SortKeyTo, Ascending: true}}, false,
+			func() []string { return f.refOrder(t, toKey, true, false) }},
+		{"to desc", []EmailSortKey{{Kind: SortKeyTo}}, false,
+			func() []string { return f.refOrder(t, toKey, false, false) }},
+		{"to asc, ties ascending", []EmailSortKey{{Kind: SortKeyTo, Ascending: true}}, true,
+			func() []string { return f.refOrder(t, toKey, true, true) }},
 		{"subject asc (base subject)", []EmailSortKey{{Kind: SortKeySubject, Ascending: true}}, false,
 			func() []string {
 				return f.refOrder(t, func(m *fxMsg) string { return baseSubject(m.subject) }, true, false)

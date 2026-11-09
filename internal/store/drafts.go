@@ -81,6 +81,11 @@ type LocalMessage struct {
 
 	Draft bool
 	Seen  bool
+
+	// Recipients is derived from the BUILT BYTES (rcptproj), not from the
+	// request: the stored message keeps its Bcc header, so a draft or sent copy
+	// is the one place rcpt_bcc is non-empty (ADR-055).
+	Recipients *RecipientCols
 }
 
 // CreateLocalMessage records a locally authored message: blob metadata, the
@@ -136,6 +141,7 @@ func (tx *UserTx) CreateLocalMessage(ctx context.Context, m LocalMessage) (ulid.
 		// the same alias (spec §5).
 		AddressedAddress: m.FromAddress,
 		LocalMailboxID:   &mailbox,
+		Recipients:       m.Recipients,
 	}
 	if err := tx.InsertMessage(ctx, row); err != nil {
 		return ulid.ULID{}, err

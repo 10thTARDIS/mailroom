@@ -705,3 +705,37 @@ func TestIngestAutocryptKeyIsIdempotent(t *testing.T) {
 		t.Fatalf("contact_keys rows = %d after two messages carrying the same key, want 1", got)
 	}
 }
+
+// TestIngestFillsTheSearchableRecipientColumns (ADR-055): a message ingested now
+// has all five columns FILLED (the backfill's candidate predicate, rcpt_to IS
+// NULL, must not select it), each from the right header.
+func TestIngestFillsTheSearchableRecipientColumns(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	raw := rawFrom("Carol <carol@example.com>", "Plans", "rc1@example.com",
+		`Cc: "Ed Example" <Ed@example.com>`, `Bcc: hidden@example.com`, `List-Id: Plans <Plans.Example.net>`)
+	res, err := f.ing.Ingest(ctx, f.userID, f.dek, f.dekID, raw, f.prov(f.mailboxA, 301, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var to, cc, bcc, sortKey, listKey *string
+	if err := f.super.QueryRow(ctx, `SELECT rcpt_to, rcpt_cc, rcpt_bcc, rcpt_to_sort, list_id_key
+	                                   FROM app.messages WHERE id=$1`, res.MessageID.String()).
+		Scan(&to, &cc, &bcc, &sortKey, &listKey); err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]*string{"rcpt_to": to, "rcpt_cc": cc, "rcpt_bcc": bcc, "rcpt_to_sort": sortKey, "list_id_key": listKey} {
+		if got == nil {
+			t.Errorf("%s is NULL after ingest", name)
+		}
+	}
+	if to == nil || cc == nil || bcc == nil || sortKey == nil || listKey == nil {
+		return
+	}
+	if *to != "bob@example.com" || *sortKey != "bob@example.com" {
+		t.Errorf("to = %q, sort key = %q", *to, *sortKey)
+	}
+	if *cc != "ed example\ned@example.com" || *bcc != "hidden@example.com" || *listKey != "plans.example.net" {
+		t.Errorf("cc = %q, bcc = %q, list = %q", *cc, *bcc, *listKey)
+	}
+}

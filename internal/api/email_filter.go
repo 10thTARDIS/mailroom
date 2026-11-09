@@ -5,6 +5,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 
@@ -16,8 +19,8 @@ import (
 type filterCond struct {
 	// q is the store query with this condition's fields set.
 	q store.EmailQuery
-	// text is its search-index half (text, to, cc, body, and the `query`
-	// extension); from/subject are NOT in it (they are stored-column matches).
+	// text is its search-index half (text, body, and the `query`
+	// extension); from/to/cc/subject are NOT in it (they are stored-column matches).
 	text searchFilter
 	// tab is a requested category tab, expanded later by the caller
 	// (emailQueryPlan.requestedTab).
@@ -54,10 +57,10 @@ func parseFilterCondition(rawFilter json.RawMessage, base store.EmailQuery) (fil
 	if err := json.Unmarshal(rawFilter, &c.text); err != nil {
 		return c, &MethodError{Type: errInvalidArguments, Description: "unsupported filter"}
 	}
-	// from and subject are answered from the stored columns (RFC substring
+	// from, to, cc and subject are answered from the stored columns (RFC substring
 	// semantics), not by the search index: taking them out of the text half is
 	// what makes them so.
-	c.text.From, c.text.Subject = "", ""
+	c.text.From, c.text.To, c.text.Cc, c.text.Subject = "", "", "", ""
 	// A query clause whose syntax can match nothing (`from:*foo`) is the
 	// caller's mistake, not an empty mailbox (#712).
 	if mErr := c.text.validate(); mErr != nil {
@@ -152,7 +155,36 @@ func parseFilterCondition(rawFilter json.RawMessage, base store.EmailQuery) (fil
 	q.OnSurface = f.OnSurface
 	q.DeskArchived = f.DeskArchived
 	q.FromContains = f.From
+	q.ToContains, q.CcContains, q.BccContains = f.To, f.Cc, f.Bcc
+	if _, ok := raw["header"]; ok {
+		// RFC 8621 4.4.1: [name] or [name, text]. Only List-Id is stored (ADR-055);
+		// every other name is a condition the server cannot answer, not an empty set.
+		if len(f.Header) < 1 || len(f.Header) > 2 {
+			return c, &MethodError{Type: errInvalidArguments, Description: "header must hold a name and optionally a text"}
+		}
+		if !strings.EqualFold(strings.TrimSpace(f.Header[0]), "list-id") {
+			return c, &MethodError{Type: errUnsupportedFilter,
+				Description: "unsupported filter condition: header is supported for List-Id only"}
+		}
+		lc := &store.ListIDCondition{}
+		if len(f.Header) == 2 {
+			lc.Contains = f.Header[1]
+		}
+		q.ListIDHeader = lc
+	}
 	q.SubjectContains = f.Subject
+	// Substring conditions are bounded (security review of beta 6): ILIKE
+	// lowercases the pattern on every row, so a 1 MiB pattern cost ~1 MiB of work
+	// per message. Nothing stored is longer than a 254-character address or a
+	// 128-character name, so a longer pattern can match nothing anyway.
+	for name, v := range map[string]string{"from": f.From, "to": f.To, "cc": f.Cc, "bcc": f.Bcc, "subject": f.Subject} {
+		if utf8.RuneCountInString(v) > maxFilterTextRunes {
+			return c, &MethodError{Type: errInvalidArguments, Description: name + " is longer than " + strconv.Itoa(maxFilterTextRunes) + " characters"}
+		}
+	}
+	if q.ListIDHeader != nil && utf8.RuneCountInString(q.ListIDHeader.Contains) > maxFilterTextRunes {
+		return c, &MethodError{Type: errInvalidArguments, Description: "header text is longer than " + strconv.Itoa(maxFilterTextRunes) + " characters"}
+	}
 	q.HasAttachment = f.HasAttachment
 	for name, p := range map[string]struct {
 		in  *int64
@@ -280,7 +312,7 @@ func (a *rootAcc) add(root store.EmailQuery, text searchFilter, tab tabs.Tab) *M
 // WHAT MAY SIT WHERE. Every leaf may carry the standard RFC 8621 conditions
 // (inMailbox, hasKeyword, from, subject, sizes, dates, thread keywords, …); the
 // store compiles them identically at every depth. The search-index conditions
-// (text, to, cc, body, query) and the Mailroom extensions (inTab, inArea,
+// (text, body, query) and the Mailroom extensions (inTab, inArea,
 // onDesk, …) cannot be compiled inside a boolean expression: the index answers
 // "which messages match this text" as a candidate list for the whole query, and
 // the extensions need per-request preparation. So they are accepted only in a
@@ -374,3 +406,7 @@ func (t *filterTree) parse(raw json.RawMessage, depth int, conjunctive bool) (st
 	}
 	return store.EmailFilterNode{Leaf: std}, nil
 }
+
+// maxFilterTextRunes bounds every substring filter condition (from, to, cc, bcc,
+// subject, the List-Id header text): longer than anything stored.
+const maxFilterTextRunes = 512

@@ -166,6 +166,11 @@ type MessageRow struct {
 	ReferenceIDs   []string
 	Flags          MessageFlags
 
+	// Recipients is the stored, searchable form of the recipients and List-Id
+	// (ADR-055). nil leaves the columns NULL (not filled yet), which only a
+	// caller with no message bytes should do; every path that has them sets it.
+	Recipients *RecipientCols
+
 	// AddressedAddress is the alias this message was DELIVERED TO — the exact
 	// address a reply should come From (spec §5). AddressedIdentityID is the
 	// verified identity it resolved to, or nil when the derived address matches
@@ -304,6 +309,7 @@ func (tx *UserTx) InsertMessage(ctx context.Context, m MessageRow) error {
 	if m.Flags.Flagged {
 		flaggedAt = m.ReceivedAt
 	}
+	rcpt := m.Recipients.nullable()
 	if _, err := tx.tx.Exec(ctx, `
 		INSERT INTO app.messages (
 			id, user_id, content_hash, thread_id,
@@ -314,11 +320,13 @@ func (tx *UserTx) InsertMessage(ctx context.Context, m MessageRow) error {
 			addressed_identity_id, addressed_address, local_mailbox_id,
 			list_id, list_unsubscribe, recipient_count, auth_fail, dedup_hash,
 			list_unsubscribe_post, auto_submitted, precedence, feedback_id, dkim_domains, return_path,
-			classified_tab, classifier_version, flagged_at)
+			classified_tab, classifier_version, flagged_at,
+			rcpt_to, rcpt_cc, rcpt_bcc, rcpt_to_sort, list_id_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
 		        $22::app.ulid,$23,$24::app.ulid,$25,$26,$27,$28,$29,
 		        $30,$31,$32,$33,$34::text[],$35,
-		        NULLIF($36,'')::app.category_tab,$37,$38)`,
+		        NULLIF($36,'')::app.category_tab,$37,$38,
+		        $39,$40,$41,$42,$43)`,
 		m.ID.String(), tx.userID.String(), m.ContentHash, m.ThreadID.String(),
 		m.Subject, m.Snippet, m.FromName, nullStr(m.FromAddress), m.SentAt, m.ReceivedAt,
 		m.SizeBytes, m.HasAttachments,
@@ -330,6 +338,7 @@ func (tx *UserTx) InsertMessage(ctx context.Context, m MessageRow) error {
 		nullStr(m.ListUnsubscribePost), nullStr(m.AutoSubmitted), nullStr(m.Precedence),
 		nullStr(m.FeedbackID), nullStrSlice(m.DKIMDomains), nullStr(m.ReturnPath),
 		m.ClassifiedTab, nullInt(m.ClassifierVersion), flaggedAt,
+		rcpt.To, rcpt.Cc, rcpt.Bcc, rcpt.ToSort, rcpt.ListIDKey,
 	); err != nil {
 		return fmt.Errorf("store: insert message: %w", err)
 	}

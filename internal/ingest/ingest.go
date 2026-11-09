@@ -32,6 +32,7 @@ import (
 	"mailroom/internal/ml"
 	"mailroom/internal/pgpkeys"
 	"mailroom/internal/placement"
+	"mailroom/internal/rcptproj"
 	"mailroom/internal/rules"
 	"mailroom/internal/store"
 	"mailroom/internal/tabs"
@@ -820,7 +821,8 @@ func (in *Ingestor) ingestNew(ctx context.Context, tx *store.UserTx, userID ulid
 		SentAt: proj.SentAt, ReceivedAt: prov.InternalDate, SizeBytes: int64(len(raw)),
 		HasAttachments: proj.HasAttachments,
 		MessageIDHint:  proj.MessageID, InReplyTo: first(proj.InReplyTo), ReferenceIDs: nonNil(proj.References),
-		Flags: flags,
+		Flags:      flags,
+		Recipients: &proj.Recipients,
 
 		AddressedAddress:    addressed,
 		AddressedIdentityID: identityID,
@@ -1505,6 +1507,9 @@ type projection struct {
 	// Participants are the To + Cc recipients (address + display name), the
 	// correspondent evidence the auto-derived contacts layer records (#37).
 	Participants []store.ContactParticipant
+	// Recipients is the stored, searchable form of To/Cc/Bcc and List-Id
+	// (ADR-055), derived by the one shared projection the backfill also uses.
+	Recipients store.RecipientCols
 
 	// The bulk signals, read off the headers here and PERSISTED on the row
 	// (migration 00016, #157) so the training path sees the same facts the serve
@@ -1549,6 +1554,7 @@ func projectionFrom(m *mime.Message) projection {
 	p.Attachments = attachproj.Rows(m)
 	p.Candidates, _ = alias.DeriveFrom(m.Header)
 	p.Participants = participantsFrom(m)
+	p.Recipients = rcptproj.Project(m)
 	// Bulk signals, persisted rather than re-derived (#157). Authentication-Results
 	// is repeated per verifying hop, so ALL values go to the conservative parser —
 	// it sets AuthFail only on a clear failure, never on merely-absent auth.

@@ -51,15 +51,17 @@ func TestFilterOperatorBounds(t *testing.T) {
 
 func TestFilterOperatorShapeErrors(t *testing.T) {
 	for name, c := range map[string]struct{ filter, want string }{
-		"unknown operator":      {`{"operator":"XOR","conditions":[]}`, errInvalidArguments},
-		"no conditions":         {`{"operator":"AND"}`, errInvalidArguments},
-		"conditions not array":  {`{"operator":"AND","conditions":{}}`, errInvalidArguments},
-		"stray key":             {`{"operator":"AND","conditions":[],"inMailbox":"x"}`, errInvalidArguments},
-		"unknown inside":        {`{"operator":"AND","conditions":[{"bogus":1}]}`, errUnsupportedFilter},
-		"header is unsupported": {`{"operator":"OR","conditions":[{"header":["List-Id"]}]}`, errUnsupportedFilter},
-		"text under OR":         {`{"operator":"OR","conditions":[{"text":"x"},{"hasKeyword":"$seen"}]}`, errUnsupportedFilter},
-		"text under NOT":        {`{"operator":"NOT","conditions":[{"body":"x"}]}`, errUnsupportedFilter},
-		"text under AND under OR": {`{"operator":"OR","conditions":[{"operator":"AND","conditions":[{"to":"x"}]}]}`,
+		"unknown operator":            {`{"operator":"XOR","conditions":[]}`, errInvalidArguments},
+		"no conditions":               {`{"operator":"AND"}`, errInvalidArguments},
+		"conditions not array":        {`{"operator":"AND","conditions":{}}`, errInvalidArguments},
+		"stray key":                   {`{"operator":"AND","conditions":[],"inMailbox":"x"}`, errInvalidArguments},
+		"unknown inside":              {`{"operator":"AND","conditions":[{"bogus":1}]}`, errUnsupportedFilter},
+		"other header is unsupported": {`{"operator":"OR","conditions":[{"header":["X-Mailer"]}]}`, errUnsupportedFilter},
+		"header needs a name":         {`{"operator":"OR","conditions":[{"header":[]}]}`, errInvalidArguments},
+		"header takes two strings":    {`{"operator":"OR","conditions":[{"header":["List-Id","a","b"]}]}`, errInvalidArguments},
+		"text under OR":               {`{"operator":"OR","conditions":[{"text":"x"},{"hasKeyword":"$seen"}]}`, errUnsupportedFilter},
+		"text under NOT":              {`{"operator":"NOT","conditions":[{"body":"x"}]}`, errUnsupportedFilter},
+		"text under AND under OR": {`{"operator":"OR","conditions":[{"operator":"AND","conditions":[{"body":"x"}]}]}`,
 			errUnsupportedFilter},
 		"extension under NOT": {`{"operator":"NOT","conditions":[{"onDesk":true}]}`, errUnsupportedFilter},
 		"two texts":           {`{"operator":"AND","conditions":[{"text":"a"},{"text":"b"}]}`, errUnsupportedFilter},
@@ -89,16 +91,17 @@ func TestFilterOperatorStability(t *testing.T) {
 		filter string
 		stable bool
 	}{
-		"flat stable":                {`{` + mb + `}`, true},
-		"AND stable":                 {`{"operator":"AND","conditions":[{` + mb + `},{"hasKeyword":"$seen"}]}`, true},
-		"NOT stable":                 {`{"operator":"NOT","conditions":[{` + mb + `}]}`, true},
-		"OR NOT nested stable":       {`{"operator":"OR","conditions":[{"operator":"NOT","conditions":[{` + mb + `}]},{"minSize":5}]}`, true},
-		"from/subject are columns":   {`{"operator":"NOT","conditions":[{"from":"a"},{"subject":"b"}]}`, true},
-		"thread keyword unstable":    {`{"someInThreadHaveKeyword":"$seen"}`, false},
-		"NOT of unstable":            {`{"operator":"NOT","conditions":[{"noneInThreadHaveKeyword":"$seen"}]}`, false},
-		"unstable deep in OR":        {`{"operator":"OR","conditions":[{` + mb + `},{"operator":"AND","conditions":[{"allInThreadHaveKeyword":"$seen"}]}]}`, false},
-		"to still goes to the index": {`{"operator":"AND","conditions":[{"to":"a"},{` + mb + `}]}`, false},
-		"inAccount":                  {`{"operator":"NOT","conditions":[{"inAccount":"0000000000000000000000000A"}]}`, false},
+		"flat stable":                        {`{` + mb + `}`, true},
+		"AND stable":                         {`{"operator":"AND","conditions":[{` + mb + `},{"hasKeyword":"$seen"}]}`, true},
+		"NOT stable":                         {`{"operator":"NOT","conditions":[{` + mb + `}]}`, true},
+		"OR NOT nested stable":               {`{"operator":"OR","conditions":[{"operator":"NOT","conditions":[{` + mb + `}]},{"minSize":5}]}`, true},
+		"from/subject are columns":           {`{"operator":"NOT","conditions":[{"from":"a"},{"subject":"b"}]}`, true},
+		"thread keyword unstable":            {`{"someInThreadHaveKeyword":"$seen"}`, false},
+		"NOT of unstable":                    {`{"operator":"NOT","conditions":[{"noneInThreadHaveKeyword":"$seen"}]}`, false},
+		"unstable deep in OR":                {`{"operator":"OR","conditions":[{` + mb + `},{"operator":"AND","conditions":[{"allInThreadHaveKeyword":"$seen"}]}]}`, false},
+		"recipients and List-Id are columns": {`{"operator":"NOT","conditions":[{"to":"a"},{"cc":"b"},{"bcc":"c"},{"header":["list-id","d"]}]}`, true},
+		"text still goes to the index":       {`{"operator":"AND","conditions":[{"text":"a"},{` + mb + `}]}`, false},
+		"inAccount":                          {`{"operator":"NOT","conditions":[{"inAccount":"0000000000000000000000000A"}]}`, false},
 	} {
 		p, mErr := parseFilter(t, c.filter, "")
 		if mErr != nil {
@@ -112,7 +115,7 @@ func TestFilterOperatorStability(t *testing.T) {
 }
 
 func TestEmailQuerySortParsing(t *testing.T) {
-	for _, prop := range []string{"size", "from", "subject"} {
+	for _, prop := range []string{"size", "from", "to", "subject"} {
 		p, mErr := parseFilter(t, "", fmt.Sprintf(`[{"property":%q,"isAscending":true}]`, prop))
 		if mErr != nil || len(p.query.SortKeys) != 1 || !p.query.SortKeys[0].Ascending || !p.stable {
 			t.Errorf("%s: %+v %v", prop, p.query.SortKeys, mErr)
@@ -124,9 +127,10 @@ func TestEmailQuerySortParsing(t *testing.T) {
 	if _, mErr := parseFilter(t, "", `[{"property":"from","collation":"i;nope"}]`); mErr == nil || mErr.Type != errInvalidArguments {
 		t.Errorf("unknown collation: %v", mErr)
 	}
-	// `to` is not stored in queryable form, so it is refused rather than faked.
-	if _, mErr := parseFilter(t, "", `[{"property":"to"}]`); mErr == nil || mErr.Type != errInvalidArguments {
-		t.Errorf("sort by to: %v", mErr)
+	// `to` sorts on the stored key (ADR-055), with both collations.
+	if p, mErr := parseFilter(t, "", `[{"property":"to","collation":"i;octet"}]`); mErr != nil ||
+		len(p.query.SortKeys) != 1 || p.query.SortKeys[0].Kind != store.SortKeyTo || !p.query.SortKeys[0].Octet {
+		t.Errorf("sort by to (octet): %+v %v", p.query.SortKeys, mErr)
 	}
 	// A new key does not steal the date key's direction: [from asc, receivedAt desc]
 	p, _ := parseFilter(t, "", `[{"property":"from","isAscending":true},{"property":"receivedAt","isAscending":false}]`)
@@ -226,5 +230,47 @@ func TestEmailQueryWindowOffsetsAreBounded(t *testing.T) {
 		if _, mErr := parseEmailQuery(args); mErr != nil {
 			t.Errorf("%s: %v", name, mErr)
 		}
+	}
+}
+
+// to, cc, bcc and header (List-Id) are answered from the stored columns, so they
+// land on the store query and NOT in the search-index half (ADR-055). That the
+// text half is empty is the property: a `to` that went to the index again would
+// be a tokenised match, and not delta-stable.
+func TestRecipientAndListIDConditionsAreStoreConditions(t *testing.T) {
+	p, mErr := parseFilter(t, `{"to":"dana","cc":"ed","bcc":"hid","header":["list-ID","Plans"]}`, "")
+	if mErr != nil {
+		t.Fatal(mErr)
+	}
+	if !p.text.empty() {
+		t.Errorf("to/cc went to the search index: %+v", p.text)
+	}
+	q := p.query
+	if q.ToContains != "dana" || q.CcContains != "ed" || q.BccContains != "hid" ||
+		q.ListIDHeader == nil || q.ListIDHeader.Contains != "Plans" {
+		t.Errorf("store query = %+v", q)
+	}
+	if !p.stable {
+		t.Error("recipient and List-Id conditions are written at ingest only: delta-stable")
+	}
+	if p, _ := parseFilter(t, `{"header":["List-Id"]}`, ""); p.query.ListIDHeader == nil || p.query.ListIDHeader.Contains != "" {
+		t.Errorf("header List-Id (presence): %+v", p.query.ListIDHeader)
+	}
+}
+
+// Substring conditions are bounded (security review of beta 6).
+func TestSubstringFilterTextIsBounded(t *testing.T) {
+	long := strings.Repeat("a", maxFilterTextRunes+1)
+	for _, f := range []string{
+		`{"from":"` + long + `"}`, `{"to":"` + long + `"}`, `{"cc":"` + long + `"}`,
+		`{"bcc":"` + long + `"}`, `{"subject":"` + long + `"}`, `{"header":["List-Id","` + long + `"]}`,
+	} {
+		if _, err := parseFilterCondition(json.RawMessage(f), store.EmailQuery{}); err == nil || err.Type != errInvalidArguments {
+			t.Errorf("%.30s…: %v, want invalidArguments", f, err)
+		}
+	}
+	ok := strings.Repeat("a", maxFilterTextRunes)
+	if _, err := parseFilterCondition(json.RawMessage(`{"to":"`+ok+`"}`), store.EmailQuery{}); err != nil {
+		t.Errorf("a filter at the bound was refused: %v", err)
 	}
 }
