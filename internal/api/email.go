@@ -15,6 +15,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"mailroom/internal/mime"
 	"mailroom/internal/ml"
 	"mailroom/internal/pgpmime"
 	"mailroom/internal/search"
@@ -123,11 +124,21 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 	valid, notFound, requested := parseIDs(*args.IDs)
 	props := defaultEmailProperties
 	if args.Properties != nil {
+		// Unknown and malformed properties are refused (RFC 8620 §5.1), never
+		// dropped; header properties are parsed here, once (ADR-052).
+		if _, mErr := emailPropertySpecs(args.Properties); mErr != nil {
+			return nil, mErr
+		}
 		props = make(map[string]bool, len(args.Properties)+1)
 		for _, p := range args.Properties {
 			props[p] = true
 		}
 		props["id"] = true // always present (RFC 8620 §5.1)
+		if wantsHeaders(props) && len(valid) > maxHeaderPropertyIDs {
+			return nil, &MethodError{Type: errRequestTooLarge, Description: "Email/get with header properties is " +
+				"limited to " + strconv.Itoa(maxHeaderPropertyIDs) + " ids per call (each id reads and decrypts the " +
+				"message); ask for fewer ids per call"}
+		}
 	}
 
 	var (
@@ -234,6 +245,7 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 		return nil, mErr
 	}
 
+	headerBytes := 0 // header values added so far, against maxHeaderResponseBytes
 	for _, req := range requested {
 		id, ok := req.parsed()
 		if !ok {
@@ -245,6 +257,11 @@ func (a *API) emailGet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 			continue
 		}
 		obj := emailObject(ev, props, bodies[id])
+		headerBytes += addHeaderProperties(obj, props, bodies[id])
+		if headerBytes > maxHeaderResponseBytes {
+			return nil, &MethodError{Type: errRequestTooLarge, Description: "the header values requested exceed " +
+				strconv.Itoa(maxHeaderResponseBytes>>20) + " MiB for one response; ask for fewer ids or header properties"}
+		}
 		if catTabs != nil {
 			r, found := catTabs[id]
 			obj["categoryTab"] = emailCategoryTab(r, found)
@@ -365,12 +382,16 @@ func (a *API) allEmailIDs(ctx context.Context, userID ulid.ULID) ([]string, *Met
 func (a *API) loadBodies(ctx context.Context, userID ulid.ULID, props map[string]bool, args bodyArgs,
 	views map[ulid.ULID]store.EmailView, scans map[ulid.ULID][]store.PartScanState) (map[ulid.ULID]*emailBody, *MethodError) {
 
-	need := false
+	need, wantHdrs := false, wantsHeaders(props)
+	bodyNeeded := false
 	for p := range props {
 		if rawProperties[p] {
-			need = true
+			need, bodyNeeded = true, true
 			break
 		}
+	}
+	if wantHdrs {
+		need = true
 	}
 	if !need || len(views) == 0 {
 		return nil, nil
@@ -469,11 +490,26 @@ func (a *API) loadBodies(ctx context.Context, userID ulid.ULID, props map[string
 		}
 		// RFC 3156 encrypted mail (#47 6b, ADR-037): decrypted on this request
 		// path only, only when a body property was asked for, and never stored.
+		var (
+			hdrFields []mime.Field
+			hdrTrunc  bool
+		)
+		if wantHdrs {
+			hdrFields, hdrTrunc = mime.SplitHeaderFields(raw, maxHeaderBlockBytes)
+		}
+		if !bodyNeeded {
+			// Header properties alone: no MIME body walk.
+			out[id] = &emailBody{fields: hdrFields, headersTruncated: hdrTrunc}
+			continue
+		}
 		if pgpmime.IsEncrypted(raw) {
-			out[id] = a.buildEncryptedBody(ctx, userID, id, ev, raw, ba, props)
+			eb := a.buildEncryptedBody(ctx, userID, id, ev, raw, ba, props)
+			eb.fields, eb.headersTruncated = hdrFields, hdrTrunc
+			out[id] = eb
 			continue
 		}
 		b := buildEmailBody(raw, ev.ContentHash, ba)
+		b.fields, b.headersTruncated = hdrFields, hdrTrunc
 		if props["pgpSignature"] {
 			// A PGP/MIME signed plaintext message, verified here and not stored.
 			b.pgpSignature = a.pgpSignatureFor(ctx, userID, raw, raw)

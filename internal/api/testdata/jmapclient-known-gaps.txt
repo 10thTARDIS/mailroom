@@ -15,12 +15,3 @@
 blob.download-attachment	limit-adr042	API keys cannot reach /jmap/download (ADR-042 3), yet the session a key receives advertises downloadUrl
 email.query.filter.header	#111	header needs the raw header block, which is stored only in the encrypted message; no queryable storage exists, so it stays unsupportedFilter
 email.query.sort.to	#113	the To addresses are not stored in queryable form (only the From is), so sorting by them needs recipient columns and a backfill; refused with invalidArguments until then
-email.get.property.header:List-Id:asText	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:Message-ID:asMessageIds	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:From:asAddresses	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:To:asAddresses:all	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:Date:asDate	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:Subject	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.header:X-Absent:asText	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-email.get.property.headers	#114	Email/get silently drops header:* and headers properties instead of returning them or refusing them
-mailbox.changes.after-move	#115	Mailbox state and Mailbox/changes do not move when a message move changes mailbox counts

@@ -415,6 +415,10 @@ func (tx *UserTx) MarkMailboxProvenanceStale(ctx context.Context, mailboxID ulid
 		return 0, fmt.Errorf("store: mark mailbox provenance stale: %w", err)
 	}
 
+	if retired > 0 {
+		// The folder lost these messages the instant this commits (ADR-052).
+		tx.NoteMailboxes(mailboxID)
+	}
 	for msgID := range changed {
 		if _, err := tx.AppendChange(ctx, ObjectEmail, msgID, OpUpdated); err != nil {
 			return 0, err

@@ -9,6 +9,35 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**Mail clients can read any header, and folder counts stay current.** A standard
+JMAP client can ask for any header field in every standard form, and sees unread
+and total counts change as mail moves, without re-reading everything.
+
+### Headers and mailbox counts
+
+- **Mail clients can read any header.** An email request can now ask for any
+  header field by name (`header:Subject`, `header:List-Id:asText`,
+  `header:To:asAddresses:all`, and so on, in every standard form: raw text,
+  decoded text, address lists, grouped addresses, message ids, dates and list
+  links), or for all of a message's headers at once (`headers`). A header the
+  message does not have comes back empty rather than missing. Asking for a
+  property the server does not have, or a header form that does not fit the
+  header, is now refused with a clear error instead of being quietly left out.
+  Header values need the same permission as reading the message, and they are
+  not stored, searched or written to logs.
+- **Header requests are bounded.** Only the first 128 KiB of a message's header
+  block is read, and a message that has more is marked `headersTruncated` so a
+  client can tell. One request can ask for header values on at most 100
+  messages and at most 32 different header properties, and the header values in
+  one reply are limited to 8 MiB; beyond that the server says the request is too
+  large and the client asks for less per call.
+- **Mailbox counts stay in step with the mailbox list.** When a message is moved,
+  read, deleted, trashed or arrives, the folders it touches are now reported as
+  changed, so a client that follows the mailbox list by state sees the new
+  unread and total counts without re-reading everything. A move of thousands of
+  messages reports each folder once. The reply names only the count properties
+  when counts are all that changed.
+
 ## [1.102.0-beta.2] — 2026-11-09
 
 **The second beta of v1.102 brings search and sorting for mail clients.** Standard JMAP clients can combine search

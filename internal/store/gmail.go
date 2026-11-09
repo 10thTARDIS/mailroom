@@ -287,6 +287,12 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 				return res, err
 			}
 			if target != moved {
+				// A placement change moves the message between mailboxes
+				// (ADR-052): the source is noted now, the destination at flush.
+				if err := tx.NoteMailboxCountsBefore(ctx, msgID); err != nil {
+					return res, err
+				}
+				tx.NoteMailboxCountsAfter(msgID)
 				if _, err := tx.tx.Exec(ctx, `
 					UPDATE app.messages SET moved_mailbox_id = NULLIF($3, '')
 					 WHERE user_id = $1 AND id = $2`,
@@ -302,6 +308,10 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 		// hide it there, so it goes; the message is then a member of
 		// Spam/Trash through its provenance.
 		if moved != "" {
+			if err := tx.NoteMailboxCountsBefore(ctx, msgID); err != nil {
+				return res, err
+			}
+			tx.NoteMailboxCountsAfter(msgID)
 			tag, err := tx.tx.Exec(ctx, `
 				UPDATE app.messages m SET moved_mailbox_id = NULL
 				 WHERE m.user_id = $1 AND m.id = $2
@@ -334,7 +344,12 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 // a generic account's, or a Mailroom-side move into another folder — is left
 // alone.
 func (tx *UserTx) clearGmailLabelViewPlacement(ctx context.Context, msgID, reapedMailbox ulid.ULID) (bool, error) {
-	tag, err := tx.tx.Exec(ctx, `
+	// RETURNING old.* (PostgreSQL 18) names the label view the message just left,
+	// so its counts are noted (ADR-052): without it a Gmail INBOX/Sent/Drafts view
+	// lost a message with no Mailbox change row, the stale-count bug #115 fixes,
+	// on the common Gmail delete path (security review of v1.102 beta 3).
+	var left string
+	err := tx.tx.QueryRow(ctx, `
 		UPDATE app.messages m SET moved_mailbox_id = NULL
 		 WHERE m.user_id = $1 AND m.id = $2
 		   AND m.moved_mailbox_id IN (
@@ -348,12 +363,19 @@ func (tx *UserTx) clearGmailLabelViewPlacement(ctx context.Context, msgID, reape
 		   AND NOT EXISTS (
 		       SELECT 1 FROM app.message_provenance p
 		        WHERE p.user_id = $1 AND p.message_id = $2 AND p.state = 'live'
-		          AND p.account_id = (SELECT account_id FROM app.mailboxes WHERE user_id = $1 AND id = $3))`,
-		tx.userID.String(), msgID.String(), reapedMailbox.String())
+		          AND p.account_id = (SELECT account_id FROM app.mailboxes WHERE user_id = $1 AND id = $3))
+		RETURNING old.moved_mailbox_id`,
+		tx.userID.String(), msgID.String(), reapedMailbox.String()).Scan(&left)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("store: clear gmail placement: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if id, perr := ulid.Parse(left); perr == nil {
+		tx.NoteMailboxes(id)
+	}
+	return true, nil
 }
 
 // gmailFolderMailbox returns the account's mailbox id for a folder role, or

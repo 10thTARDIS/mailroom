@@ -393,6 +393,20 @@ func (tx *UserTx) CollapseDuplicateGroup(
 	//    the expunge reaper would stop seeing the copies that are still on the server.
 	//    No conflict is possible — provenance is unique per (mailbox, uidvalidity, uid)
 	//    and each loser holds different coordinates.
+	//
+	//    The copies are about to become one message, so each mailbox that held a
+	//    copy counts one fewer message: the losers' mailboxes are noted NOW (they
+	//    are not derivable once the rows are gone), the keeper's at flush (ADR-052).
+	loserIDs := make([]ulid.ULID, 0, len(loserStrs))
+	for _, ls := range loserStrs {
+		if u, perr := ulid.Parse(ls); perr == nil {
+			loserIDs = append(loserIDs, u)
+		}
+	}
+	if err := tx.NoteMailboxCountsBefore(ctx, loserIDs...); err != nil {
+		return res, false, err
+	}
+	tx.NoteMailboxCountsAfter(keeperID)
 	moved, err := tx.tx.Exec(ctx, `
 		UPDATE app.message_provenance SET message_id = $2
 		 WHERE user_id = $1 AND message_id = ANY($3)`,
