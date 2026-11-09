@@ -73,7 +73,7 @@ func TestEveryMethodHasAKeyPolicy(t *testing.T) {
 	}
 	// What must never be reachable by a key, named outright so a well-meant
 	// edit to the table cannot quietly open one.
-	for _, name := range []string{"ApiKey/get", "ApiKey/set", "ApiKey/getEvents", "PendingAction/set",
+	for _, name := range []string{"ApiKey/get", "ApiKey/set", "ApiKey/getEvents", "Activity/list", "PendingAction/set",
 		"UserKey/get", "UserKey/generate", "UserKey/import", "UserKey/export", "UserKey/revoke",
 		"UserKey/extend", "UserKey/set", "UserKey/replace", "Identity/set", "Account/set", "Account/get",
 		"Mailbox/set", "OutOfOffice/set", "Email/replyToInvite", "Rule/set", "Rule/apply", "Setup/apply",

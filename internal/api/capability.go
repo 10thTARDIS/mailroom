@@ -47,6 +47,7 @@ func capabilityObjects() map[string]any {
 		capOutOfOffice:     map[string]any{},
 		capAPIKeys:         apiKeysCapability(),
 		capDevices:         map[string]any{},
+		capActivity:        activityCapability(),
 		// Whether this server can sign outbound mail at all is INSTANCE state (is
 		// a crypto process wired?), not something the code knows, so the session
 		// builder overwrites this entry — in BOTH the top-level and the
@@ -233,6 +234,9 @@ var methodCapabilities = map[string]string{
 	// Signed-in devices (#937, ADR-048 section 6): the user's own browser sessions.
 	"SignedInDevice/get": capDevices,
 	"SignedInDevice/set": capDevices,
+
+	// The merged Activity list (ADR-053, #45), read-only and session-only.
+	"Activity/list": capActivity,
 
 	// The desk (#442): the user's own arrangement of Areas (fed by tabs and/or
 	// labels), the desk-wide Surface/Drawer threshold and dwell periods, and

@@ -336,6 +336,13 @@ func (a *API) ruleApply(ctx context.Context, userID ulid.ULID, rawArgs json.RawM
 				res.RemovedAreaLabels[id.String()] = out
 			}
 		}
+		// The Activity view's record that a bulk apply happened (ADR-053): one
+		// audit row, in this transaction, counts only. Nothing when nothing changed.
+		if res.Changed > 0 {
+			if e := tx.AuditRuleApply(ctx, ruleID.String(), false, res.Changed); e != nil {
+				return &MethodError{Type: errServerFail, Description: e.Error()}
+			}
+		}
 		return nil
 	})
 	if mErr != nil {
@@ -408,6 +415,11 @@ func (a *API) ruleApplyUndo(
 			}
 			res.Undone++
 			res.MessageIDs = append(res.MessageIDs, id.String())
+		}
+		if res.Undone > 0 {
+			if e := tx.AuditRuleApply(ctx, ruleID.String(), true, res.Undone); e != nil {
+				return &MethodError{Type: errServerFail, Description: e.Error()}
+			}
 		}
 		return nil
 	})

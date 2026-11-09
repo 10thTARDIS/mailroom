@@ -1754,6 +1754,7 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 			t.Errorf("A's set reached B's key: scopes %v revoked %v", scopes, revoked)
 		}
 	},
+	"Activity/list": probeActivityList,
 	"ApiKey/getEvents": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		bk := seedAgentKey(t, h, b)
 		for _, args := range []map[string]any{{}, {"keyId": bk.keyID}} {

@@ -282,7 +282,7 @@ func TestAgentKeyScopesAreEnforced(t *testing.T) {
 	wantForbidden(t, "read-only EmailSubmission/set", name, res)
 	name, res = h.keyCall(t, reader, "Contact/set", map[string]any{"update": map[string]any{}})
 	wantForbidden(t, "read-only Contact/set", name, res)
-	for _, m := range []string{"ApiKey/get", "ApiKey/set", "ApiKey/getEvents", "PendingAction/set",
+	for _, m := range []string{"ApiKey/get", "ApiKey/set", "ApiKey/getEvents", "Activity/list", "PendingAction/set",
 		"UserKey/get", "UserKey/generate", "UserKey/export", "Identity/set", "Account/get"} {
 		name, res := h.keyCall(t, reader, m, map[string]any{})
 		wantForbidden(t, m, name, res)

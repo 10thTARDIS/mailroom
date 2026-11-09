@@ -2804,6 +2804,9 @@ CREATE TABLE app.api_key_events (
   CONSTRAINT api_key_events_anomaly_named CHECK ((outcome = 'anomaly') = (anomaly IS NOT NULL))
 );
 CREATE INDEX api_key_events_by_key ON app.api_key_events (user_id, key_id, at);
+-- Partial, over exactly the rows the Activity view shows (ADR-053, migration 00094).
+CREATE INDEX api_key_events_user_activity ON app.api_key_events (user_id, at DESC, id DESC)
+  WHERE outcome <> 'ok' OR method LIKE '%/set' OR deletes > 0 OR sends > 0;
 ALTER TABLE app.api_key_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.api_key_events FORCE ROW LEVEL SECURITY;
 CREATE POLICY api_key_events_isolation ON app.api_key_events
@@ -3481,6 +3484,8 @@ CREATE POLICY audit_owner_insert ON app.audit_log
   FOR INSERT TO mailroom_owner
   WITH CHECK (true);
 -- Append-only is enforced by grants below (no UPDATE/DELETE granted).
+-- The Activity view's per-user, newest-first read (ADR-053, migration 00094).
+CREATE INDEX audit_log_user_object_time ON app.audit_log (user_id, object_type, created_at DESC, id DESC);
 
 CREATE TABLE app.ai_providers (
   id            app.ulid PRIMARY KEY,
