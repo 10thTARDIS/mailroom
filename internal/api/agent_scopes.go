@@ -186,6 +186,11 @@ var keyPolicies = map[string]keyPolicy{
 	"ApiKey/set":       sessionOnly(whyKeyManagement),
 	"ApiKey/getEvents": sessionOnly(whyKeyManagement),
 
+	// The Activity list records what keys and other sessions did, including
+	// refusals and anomalies (ADR-053): a key must not read the record of its
+	// own detection or when the person signed in.
+	"Activity/list": sessionOnly("the activity list records what keys and other sessions did, and is for the person"),
+
 	// OAuth clients and token families (ADR-050): managing what may connect to
 	// the account is a person's, never a key's.
 	"OAuthClient/get": sessionOnly(whyKeyManagement),

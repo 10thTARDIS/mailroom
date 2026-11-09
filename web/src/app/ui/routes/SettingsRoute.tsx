@@ -97,6 +97,9 @@ import { ApiKeysBody, apiKeysFacts, useApiKeys } from "../settings/rows/ApiKeysR
 import { useApiKeysApi } from "../settings/apikeys/api";
 import { DevicesBody, devicesFacts, useDevices } from "../settings/rows/DevicesRow";
 import { useDevicesApi } from "../settings/devices/api";
+import { ActivityBody, NO_FILTERS, activityFacts, useActivity } from "../settings/rows/ActivityRow";
+import type { ActivityFilters } from "../settings/rows/ActivityRow";
+import { useActivityApi } from "../settings/activity/api";
 import { usePendingApprovals } from "../pendingApprovals";
 import { useKeepScope } from "../settings/nav";
 import { NotificationsBody, pushStateKey, usePushStatus } from "../settings/rows/NotificationsRow";
@@ -359,6 +362,8 @@ function SettingsPage({ route }: { route: SettingsRouteValue }): JSX.Element {
   const keysApi = useKeysApi();
   const apiKeysApi = useApiKeysApi();
   const devicesApi = useDevicesApi();
+  const activityApi = useActivityApi();
+  const [activityFilters, setActivityFilters] = useState<ActivityFilters>(NO_FILTERS);
   // The banner (Shell) polls; this page reads the same snapshot and refreshes
   // it after a decision, so the two never disagree.
   const pending = usePendingApprovals(false);
@@ -394,6 +399,9 @@ function SettingsPage({ route }: { route: SettingsRouteValue }): JSX.Element {
   const accountId = state.accountId;
   const apiKeys = useApiKeys(apiKeysApi, Boolean(accountId));
   const devices = useDevices(devicesApi, Boolean(accountId));
+  // Read only while its row is open: the list is a page of five tables' worth of
+  // records, not a count the state line needs.
+  const activity = useActivity(activityApi, Boolean(accountId) && section === "activity", activityFilters);
   useEffect(() => {
     const justClosed = rulesWereOpen.current && !rulesOpen;
     rulesWereOpen.current = rulesOpen;
@@ -664,6 +672,22 @@ function SettingsPage({ route }: { route: SettingsRouteValue }): JSX.Element {
         "security",
       ],
       body: <DevicesBody reading={devices.reading} reload={devices.reload} api={devicesApi} notify={pushToast} />,
+    }),
+    // The merged Activity list (ADR-053): what happened to your mail and access.
+    activity: row({
+      id: "activity",
+      name: t("settings.activity"),
+      scopes: ["login"],
+      facts: activityFacts(activity.reading),
+      values: ["history", "audit", "log", "decrypted", "deleted", "sign-in", "AI tool"],
+      body: (
+        <ActivityBody
+          reading={activity.reading}
+          loadMore={activity.loadMore}
+          filters={activityFilters}
+          setFilters={setActivityFilters}
+        />
+      ),
     }),
     "saved-searches": row({
       id: "saved-searches",

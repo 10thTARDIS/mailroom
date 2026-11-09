@@ -65,6 +65,7 @@ export type SettingsSection =
   | "keys"
   | "api-keys"
   | "devices"
+  | "activity"
   | "saved-searches"
   | "appearance"
   | "data"
@@ -96,6 +97,7 @@ export const SETTINGS_ROWS: readonly SettingsRowId[] = [
   "keys",
   "api-keys",
   "devices",
+  "activity",
   "saved-searches",
   "appearance",
   "data",

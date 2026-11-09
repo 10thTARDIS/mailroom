@@ -1754,6 +1754,7 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 			t.Errorf("A's set reached B's key: scopes %v revoked %v", scopes, revoked)
 		}
 	},
+	"Activity/list": probeActivityList,
 	"ApiKey/getEvents": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		bk := seedAgentKey(t, h, b)
 		for _, args := range []map[string]any{{}, {"keyId": bk.keyID}} {
@@ -1761,8 +1762,22 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 			if mErr != nil {
 				t.Fatalf("ApiKey/getEvents %v: %+v", args, mErr)
 			}
-			if list := asArr(res["list"]); len(list) != 0 {
-				t.Errorf("A read %d of B's key events (%v)", len(list), args)
+			// Not "the list is empty": another probe (Activity/list) seeds events on
+			// A's OWN keys in the shared harness, and A may read those. The leak
+			// is any event of a key A does not own, so every returned event must
+			// belong to one of A's keys and none may be B's.
+			for _, e := range asArr(res["list"]) {
+				ev, _ := e.(map[string]any)
+				kid, _ := ev["keyId"].(string)
+				if kid == bk.keyID {
+					t.Errorf("A read an event of B's key %s (%v)", kid, args)
+					continue
+				}
+				var owner string
+				superScan2(t, h, `SELECT user_id::text FROM app.api_keys WHERE id = $1`, []any{kid}, &owner)
+				if owner != a.UserID.String() {
+					t.Errorf("A read an event of a key owned by %s, not A (%v)", owner, args)
+				}
 			}
 		}
 	},

@@ -174,9 +174,11 @@ var crossUserProbedMethods = map[string]bool{
 
 	// Agent access (#49): another user's keys, their audit and their approval
 	// queue.
-	"ApiKey/get":        true,
-	"ApiKey/set":        true,
-	"ApiKey/getEvents":  true,
+	"ApiKey/get":       true,
+	"ApiKey/set":       true,
+	"ApiKey/getEvents": true,
+	// The merged Activity list (ADR-053): every source it reads, for another user.
+	"Activity/list":     true,
 	"OAuthClient/get":   true,
 	"OAuthClient/set":   true,
 	"OAuthFamily/set":   true,

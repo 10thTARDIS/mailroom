@@ -294,6 +294,9 @@ const (
 	// SignedInDevice/get and SignedInDevice/set (destroy only). Both are
 	// session-only: an API key is not a session and must never end one.
 	capDevices = "urn:mailroom:devices"
+	// capActivity is the merged Activity list (ADR-053, #45): Activity/list.
+	// Session-only: it records what keys and other sessions did.
+	capActivity = "urn:mailroom:activity"
 )
 
 // maxRequestBytes caps the POST /jmap body (advertised as maxSizeRequestObject).
@@ -740,6 +743,7 @@ func New(st *store.Store, opts ...Option) *API {
 		"ApiKey/get":                   a.apiKeyGet,
 		"ApiKey/set":                   a.apiKeySet,
 		"ApiKey/getEvents":             a.apiKeyGetEvents,
+		"Activity/list":                a.activityList,
 		"OAuthClient/get":              a.oauthClientGet,
 		"OAuthClient/set":              a.oauthClientSet,
 		"OAuthFamily/set":              a.oauthFamilySet,

@@ -120,6 +120,9 @@
 //	blob-report        [--user U] [--verbose]   (mailroom#300 blob/file reconciliation, read-only)
 //	jobs-report                                 (background job rows per kind and state, and what
 //	                   the daily job sweep would delete today. Read-only.)
+//	activity            [--since 7d|DATE] [--source S,...] [--user ID [--limit N]] [--cap N]
+//	                   (ADR-053 / #45: the Activity records per kind instance-wide, or one
+//	                   user's merged entries with --user. Read-only; never message content.)
 //	mailbox-roles      [--user U] [--verbose]   (#351: which SPECIAL-USE roles a provider
 //	                   actually advertises. Read-only; EXITS NON-ZERO when a required role
 //	                   (drafts, sent) is missing, so it can gate a provider cutover.)
@@ -434,6 +437,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"collapse-provenance":       runCollapseProvenance,
 	"blob-report":               runBlobReport,
 	"jobs-report":               runJobsReport,
+	"activity":                  runActivity,
 	"backfill-model-blobs":      runBackfillModelBlobs,
 	"css-report":                runCSSReport,
 	"auth-report":               runAuthReport,

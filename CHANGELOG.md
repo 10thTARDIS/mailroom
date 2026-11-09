@@ -9,6 +9,51 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**A new Activity page shows what happened to your mail in one list.** What your AI
+tools did, decryptions, purges, sign-ins and sign-outs, and bulk rule actions, newest
+first, with filters.
+
+### Activity: one list of what happened
+
+- **A new Activity section in Settings.** One list, newest first, gathers what your AI
+  tools did or were refused (and when their keys were created, changed or revoked),
+  every decryption of an encrypted message or attachment, every message that was
+  permanently deleted, sign-ins and sign-outs of your devices, and bulk changes by
+  rules and learned placement. Each line says when, what kind of event it was and
+  what happened, in plain words.
+- **Filter and page through it.** Choose which kinds to show, narrow it to a range
+  of dates, and press Load more to go further back. The page tells you it is showing
+  "the most recent N" and whether there are older entries; it never invents a total.
+- **Links only where there is something to open.** A line about a message, an AI
+  tool key or a rule links to it while it still exists. When it has gone (a deleted
+  message, a removed rule) the line stays and the link does not.
+- **Routine reading is left out.** An AI tool reading your mail all day would bury
+  everything else, so only what a tool changed, or was refused or flagged for, is
+  listed; every call is still on that key's own page.
+- **Private to you.** Nobody else's activity ever appears, AI tool keys cannot read
+  the list (it is for you, not for the tools it records), and no message subjects or
+  decrypted content are shown: a message is linked, never quoted.
+- **Honest about how far back it goes.** Sign-ins are only remembered for about a
+  week after a session ends, and the page says so.
+- **Rule applications are now recorded.** Applying a rule to mail you already have,
+  and undoing it, now leave a line here. Applications made before this version were
+  not recorded and do not appear.
+- **For the person running Mailroom: `mailroom-admin activity`.** It counts each
+  kind of event across all users for a window (`--since 24h`, `7d` or a date;
+  `--source` to narrow), says when a count is only a lower bound, and prints one
+  user's entries with `--user`. It never prints message content and never writes.
+
+### Under the hood
+
+- Two new database indexes make the Activity page fast however long the history
+  is: one on the audit log and one on AI tool call records.
+
+### Upgrading
+
+- One database migration adds the two indexes on start. It needs no action, but
+  on a large instance building the audit-log index briefly holds up writes to that
+  log, so upgrade at a quiet moment.
+
 ## [1.102.0-beta.4] — 2026-11-09
 
 **The fourth beta of v1.102: the person running Mailroom can disable a user, and rules can apply to one kind of
