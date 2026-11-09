@@ -184,6 +184,15 @@ func (a *API) ruleApply(ctx context.Context, userID ulid.ULID, rawArgs json.RawM
 				Description: "this rule is turned off; turn it on before applying it to existing mail"}
 		}
 
+		// A rule bound to a message kind is judged per NEW message from its headers.
+		// The existing-mail scan has no kind for a message, so applying the rule here
+		// would label every message its conditions match whatever its kind: the
+		// opposite of what the binding says. Refuse rather than over-apply.
+		if rule.KindBound() {
+			return &MethodError{Type: errInvalidArguments,
+				Description: "this rule is limited to one kind of message, so it applies to new mail only; it cannot be applied to existing mail"}
+		}
+
 		update, skipped, e := tx.BackfillUpdate(ctx, rule)
 		if e != nil {
 			return &MethodError{Type: errServerFail, Description: e.Error()}

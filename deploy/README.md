@@ -1048,6 +1048,27 @@ restart required.
 Sign in at `https://mail.example.com/auth/login` (or just open `/` — you will be
 sent there).
 
+### Disabling and re-enabling a user
+
+```sh
+docker compose -f $C exec mailroom /mailroom-admin user disable <user-id-or-email>
+docker compose -f $C exec mailroom /mailroom-admin user enable  <user-id-or-email>
+```
+
+Disabling is soft and reversible, and nothing is deleted. While a user is
+disabled, they cannot sign in; every session they have is refused on its next
+request and their open event streams end; their API keys and OAuth grants are
+refused on every request (and work again on enable); and their background work
+stops: mail sync, write-back to the provider, push notifications, search
+indexing, scheduled sends and snoozes. Scheduled sends and snoozes that fall due
+while the user is disabled stay waiting and run after they are enabled. Mail
+already stored is not touched. Both commands print what they did and are safe to
+run twice. `disable` refuses to disable the last enabled user, since that would
+lock everyone out. Your provider still authenticates a disabled user; Mailroom
+refuses them. To remove a user and their data for good, use
+`mailroom-admin delete-user` instead.
+
+
 ### Signing in to Gmail and Outlook (OAuth, optional)
 
 Users can connect a Gmail / Google Workspace or Outlook.com / Microsoft 365

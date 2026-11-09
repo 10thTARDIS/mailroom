@@ -164,6 +164,10 @@
 //	delete-user        --user-id [--apply] [--confirm-user-id U] [--actor A] [--accept-key-loss]
 //	                   (mailroom#54 hard delete. Report-only by DEFAULT; the extra
 //	                   confirmations exist because this is irreversible.)
+//	user               disable|enable <user-id-or-email>   (soft, reversible: a disabled
+//	                   user cannot sign in, every session, API key and OAuth grant is
+//	                   refused and background work stops; nothing is deleted. Safe to
+//	                   run twice; refuses to disable the last enabled user.)
 //	backfill-attachments --user [--apply]   (mailroom#396 attachment rows)
 //	quarantine         --user U [--release msgID:part] [--revoke msgID:part] [--batch N]
 //	                   (ADR-027 §8: what the download gate refuses, and the two
@@ -446,6 +450,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"quarantine":                runQuarantine,
 	"thread-report":             runThreadReport,
 	"delete-user":               runDeleteUser,
+	"user":                      runUser,
 	"backfill-dedup-hash":       runBackfillDedupHash,
 	"delete-label":              runDeleteLabel,
 	"backfill-function-signals": runBackfillFunctionSignals,

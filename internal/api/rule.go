@@ -41,6 +41,9 @@ func ruleObject(r rules.Rule, corrections int, props map[string]bool) map[string
 		"actions":         r.Actions,
 		"enabled":         r.Enabled,
 		"systemSuggested": r.SystemSuggested,
+		// The message kind the rule is bound to, or null for "any kind": the rule
+		// then applies to every message its conditions match, as it always has.
+		"kind": nullableString(r.Kind),
 		// How many messages the user has taken this rule's label back off (#170).
 		//
 		// A rule that keeps being corrected is a rule that is wrong, and until now
@@ -224,6 +227,16 @@ type ruleCreate struct {
 	Actions         *json.RawMessage `json:"actions"`
 	Enabled         *bool            `json:"enabled"`
 	SystemSuggested *bool            `json:"systemSuggested"`
+	// Kind optionally binds the rule to one message kind (null or absent: any).
+	Kind *string `json:"kind"`
+}
+
+// nullableString renders "" as JSON null.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (a *API) ruleSet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMessage) (json.RawMessage, *MethodError) {
@@ -357,6 +370,13 @@ func createRule(ctx context.Context, tx *store.UserTx, raw json.RawMessage) (map
 	if c.SystemSuggested != nil {
 		row.SystemSuggested = *c.SystemSuggested
 	}
+	if c.Kind != nil {
+		if err := rules.ValidateKind(*c.Kind); err != nil {
+			return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
+				Description: err.Error(), Properties: []string{"kind"}}
+		}
+		row.Kind = *c.Kind
+	}
 
 	id, err := tx.CreateRule(ctx, row)
 	if err != nil {
@@ -422,6 +442,22 @@ func updateRule(ctx context.Context, tx *store.UserTx, id ulid.ULID, patch json.
 					Description: "systemSuggested must be a boolean", Properties: []string{"systemSuggested"}}
 			}
 			p.SystemSuggested = &b
+		case "kind":
+			// null clears the binding (any kind); a string must be a known kind.
+			var k *string
+			if err := json.Unmarshal(val, &k); err != nil {
+				return &SetError{Type: setInvalidProps,
+					Description: "kind must be a string or null", Properties: []string{"kind"}}
+			}
+			v := ""
+			if k != nil {
+				v = *k
+			}
+			if err := rules.ValidateKind(v); err != nil {
+				return &SetError{Type: setInvalidProps,
+					Description: err.Error(), Properties: []string{"kind"}}
+			}
+			p.Kind = &v
 		case "id":
 			return &SetError{Type: setInvalidProps,
 				Description: "id is immutable", Properties: []string{"id"}}

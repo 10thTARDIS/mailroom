@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -1102,12 +1103,38 @@ func (in *Ingestor) applyRules(ctx context.Context, tx *store.UserTx, msgID ulid
 	if err != nil || len(rs) == 0 {
 		return
 	}
-	actions := rules.EvaluateAttributed(rs, messageFacts(proj, parsed, addressed, rs))
+	actions := evaluateRules(rs, proj, parsed, addressed)
 	if len(actions) == 0 {
 		return
 	}
 	_ = tx.ApplyRuleActions(ctx, msgID, prov.AccountID, prov.MailboxID, actions)
 }
+
+// evaluateRules runs the rules over one message's facts. It is pure (no store),
+// so the once-per-message classification below is testable without a database.
+func evaluateRules(rs []rules.Rule, proj projection, parsed *mime.Message, addressed string) []rules.AttributedAction {
+	facts := messageFacts(proj, parsed, addressed, rs)
+	// A rule can be bound to a message kind. Classify ONCE for the message, and
+	// only when some enabled rule is bound: the classifier is cheap but not free,
+	// and rules are evaluated per message, so the cost must not scale with the
+	// number of rules. The facts are the same projected columns the category tabs
+	// are judged from (tabFactsFor), so a message has one kind however it is asked.
+	if rules.UsesKind(rs) {
+		facts.Kind = string(kindOfProjection(proj))
+	}
+	return rules.EvaluateAttributed(rs, facts)
+}
+
+// kindOfProjection is the message's kind for rule evaluation: kind.Classify over
+// the projected header facts. Every call is counted in classifyCount.
+func kindOfProjection(p projection) kind.Kind {
+	classifyCount.Add(1)
+	return kind.Classify(tabFactsFor(p, len(p.Participants))).Kind
+}
+
+// classifyCount counts kind classifications done for rule evaluation. It exists
+// so a test can pin "once per message, not once per rule".
+var classifyCount atomic.Int64
 
 // blockedDestination reports where new mail from this From address goes when
 // its contact is blocked ("junk" or "trash"), or "" when it is not blocked.

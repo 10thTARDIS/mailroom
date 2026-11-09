@@ -24,6 +24,8 @@ import (
 	"strings"
 
 	"github.com/oklog/ulid/v2"
+
+	"mailroom/internal/kind"
 )
 
 // Condition field selectors (spec §8, T0). Each names one projected fact.
@@ -147,6 +149,29 @@ type Rule struct {
 	Actions         []Action
 	Enabled         bool
 	SystemSuggested bool
+	// Kind optionally binds the rule to one message kind (a kind.Kind value:
+	// "personal", "promotional", ...). "" means any kind: the rule behaves exactly
+	// as it did before the field existed.
+	//
+	// A bound rule matches only when MessageFacts.Kind equals it. A caller that
+	// did not classify the message leaves MessageFacts.Kind empty, and a bound rule
+	// then does NOT match: fail closed, so a path that cannot say what kind a
+	// message is can never apply a rule meant for one kind to all mail.
+	Kind string
+}
+
+// KindBound reports whether the rule applies to one message kind only.
+func (r Rule) KindBound() bool { return r.Kind != "" }
+
+// UsesKind reports whether any of the rules is bound to a kind, so a caller can
+// classify each message ONCE, and only when some rule needs it.
+func UsesKind(rs []Rule) bool {
+	for _, r := range rs {
+		if r.Enabled && r.KindBound() {
+			return true
+		}
+	}
+	return false
 }
 
 // MessageFacts is the DOM-free projection the ingest path fills from a parsed
@@ -161,6 +186,10 @@ type MessageFacts struct {
 	ListID          string            // List-Id header value ("" if absent)
 	ListUnsubscribe string            // List-Unsubscribe header value ("" if absent)
 	Headers         map[string]string // arbitrary headers, keyed by LOWERCASED name
+	// Kind is the message's kind (kind.Classify), filled by the caller ONLY when
+	// UsesKind(rules) is true. Empty means "not classified": a kind-bound rule does
+	// not match it.
+	Kind string
 }
 
 // AttributedAction is one action together with the rule that produced it
@@ -215,6 +244,9 @@ func EvaluateAttributed(rs []Rule, f MessageFacts) []AttributedAction {
 	var out []AttributedAction
 	for _, r := range rs {
 		if !r.Enabled {
+			continue
+		}
+		if r.Kind != "" && r.Kind != f.Kind {
 			continue
 		}
 		if !r.Conditions.match(f) {
@@ -388,10 +420,25 @@ func UsesField(c Condition, field string) bool {
 // the single gate the store applies before persisting (and the API surfaces the
 // message as a clean SetError).
 func Validate(r Rule) error {
+	if err := ValidateKind(r.Kind); err != nil {
+		return err
+	}
 	if err := ValidateConditions(r.Conditions); err != nil {
 		return err
 	}
 	return ValidateActions(r.Actions)
+}
+
+// ValidateKind accepts "" (any kind) or one of kind.Kinds().
+func ValidateKind(k string) error {
+	if k == "" || kind.Kind(k).Valid() {
+		return nil
+	}
+	names := make([]string, 0, len(kind.Kinds()))
+	for _, v := range kind.Kinds() {
+		names = append(names, string(v))
+	}
+	return fmt.Errorf("unknown message kind %q (want one of %s)", k, strings.Join(names, ", "))
 }
 
 // ValidateConditions rejects a malformed condition tree: a node that is both a

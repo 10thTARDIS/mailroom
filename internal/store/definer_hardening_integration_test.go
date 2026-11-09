@@ -164,8 +164,12 @@ func TestEveryDefinerPinsPgTempLast(t *testing.T) {
 	// definer mints the id, enforces the cap on registrations no live grant uses
 	// (serialised by an advisory lock), and returns the id and time and nothing
 	// else; sweep_oauth also deletes expired unused registrations.
-	if seen != 26 {
-		t.Errorf("schema app has %d SECURITY DEFINER functions, want 26. If a definer was "+
+	// Migration 00091 adds the 27th, set_user_disabled: the operator's
+	// `mailroom-admin user disable|enable`. It is the only way disabled_at is
+	// written, refuses to disable the last enabled user, and is granted to the
+	// admin role only (never to mailroom_app), so no API request can reach it.
+	if seen != 27 {
+		t.Errorf("schema app has %d SECURITY DEFINER functions, want 27. If a definer was "+
 			"added deliberately, bump this number in the same commit that argues for the new "+
 			"cross-user surface", seen)
 	}

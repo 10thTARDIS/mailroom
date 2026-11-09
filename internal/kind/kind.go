@@ -73,6 +73,23 @@ const (
 	Unknown Kind = "unknown"
 )
 
+// Kinds is every value Classify can return, in a stable order. Anything that
+// accepts a kind from outside (a rule bound to a kind) validates against this
+// list rather than keeping its own, so a new kind is one edit here.
+func Kinds() []Kind {
+	return []Kind{Personal, Transactional, Promotional, Notification, List, Automated, Unknown}
+}
+
+// Valid reports whether k is one of Kinds().
+func (k Kind) Valid() bool {
+	for _, v := range Kinds() {
+		if k == v {
+			return true
+		}
+	}
+	return false
+}
+
 // Facts is the header projection the classifier reads. It is deliberately
 // header-only: no body, no bytes beyond what a mail server already had to parse.
 // That keeps this cheap enough to run on every delivery, and it matches the

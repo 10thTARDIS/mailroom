@@ -9,6 +9,57 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**The person running Mailroom can disable a user, and rules can apply to one kind of
+message.** A disabled user is locked out everywhere at once and comes back intact when
+re-enabled; a rule can now be limited to, say, promotional mail.
+
+### Disabling and re-enabling a user
+
+- **`mailroom-admin user disable` and `user enable`.** Give either a user id or
+  an email address. A disabled user cannot sign in; every session they have is
+  refused on its next request and any open live-update stream ends within about
+  half a minute; their API keys and OAuth app connections are refused on every
+  request; and their background work stops: mail sync, write-back to the
+  provider, push notifications, search indexing, scheduled sends and snoozes.
+  Nothing is deleted, so enabling the user again restores sign-in, keys and
+  connections, and the work resumes. Sends and snoozes that fell due while the
+  user was disabled wait and run after they are enabled. Mail already stored is
+  untouched.
+- **Safe to repeat, and hard to lock yourself out.** Running either command twice
+  just says nothing changed, and `disable` refuses to disable the last enabled
+  user.
+- **A refresh that arrives while a user is disabled no longer breaks the
+  connection.** The refused refresh token is left unused, so once the user is
+  enabled again the connected app carries on instead of having its whole
+  connection ended as a replay.
+
+### Rules for one kind of message
+
+- **A rule can be limited to one kind of message.** The rule editor has a new
+  "Only for messages that are" choice: personal mail, receipts and account mail,
+  promotions, notifications, mailing lists and newsletters, other automatic mail,
+  or unclear. The kind is judged from each new message's headers, once per
+  message however many rules use it. A rule with no kind set behaves exactly as
+  before. Rules also have a `kind` property in the rules API; an unknown kind is
+  refused with a clear error, and `null` clears it.
+- **A rule limited to a kind applies to new mail only.** Applying a rule to mail
+  you already have, in the app or with `mailroom-admin apply-rules`, is refused
+  for these rules (and skipped, with a note, when applying every rule), because
+  existing mail has no kind to test against and the rule would otherwise label
+  everything its conditions match.
+
+### Under the hood
+
+- The unused `sync_jobs` table is removed. Nothing ever wrote to it.
+- Event streams opened with an API key or OAuth token now end when the user is
+  disabled, as sessions' streams already did.
+
+### Upgrading
+
+- Three database migrations apply on start: a function that disables and enables
+  users, a new optional `kind` column on rules (existing rules read as "any
+  kind"), and the removal of the empty `sync_jobs` table. None needs any action.
+
 ## [1.102.0-beta.3] — 2026-11-09
 
 **The third beta of v1.102: mail clients can read any header, and folder counts stay current.** A standard

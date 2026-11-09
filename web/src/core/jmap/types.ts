@@ -2587,6 +2587,28 @@ export interface RemoteAllow {
   value: string;
 }
 
+/** What sort of mail a message is, judged from its headers (the server's kind
+ * classifier). A rule can be bound to one. */
+export type MessageKind =
+  | "personal"
+  | "transactional"
+  | "promotional"
+  | "notification"
+  | "list"
+  | "automated"
+  | "unknown";
+
+/** Every MessageKind, in the order the rule editor offers them. */
+export const MESSAGE_KINDS: readonly MessageKind[] = [
+  "personal",
+  "transactional",
+  "promotional",
+  "notification",
+  "list",
+  "automated",
+  "unknown",
+];
+
 export interface Rule {
   id: Id;
   name: string;
@@ -2596,6 +2618,11 @@ export interface Rule {
   actions: RuleAction[];
   enabled: boolean;
   systemSuggested: boolean;
+  /**
+   * The message kind this rule is limited to, or null/absent for any kind. A
+   * kind-bound rule runs on new mail only.
+   */
+  kind?: MessageKind | null;
   /**
    * How many messages the user has taken this rule's label back off (#170).
    *
