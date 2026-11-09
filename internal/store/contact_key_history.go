@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -101,6 +102,65 @@ func contactKeyEventKind(before, after []byte, now time.Time) string {
 	default:
 		return KeyEventUpdated
 	}
+}
+
+// ContactKeyFirstSeen returns, for each of the given held keys, when this server
+// FIRST stored it (the earliest first_seen event): the one clock a signer cannot
+// choose, which bounds a backdated certification (ADR-054 section 3, rule 5). A
+// key with no first_seen event is absent from the map. Read-only.
+func (tx *UserTx) ContactKeyFirstSeen(ctx context.Context, keyIDs []ulid.ULID) (map[ulid.ULID]time.Time, error) {
+	out := make(map[ulid.ULID]time.Time, len(keyIDs))
+	if len(keyIDs) == 0 {
+		return out, nil
+	}
+	rows, err := tx.tx.Query(ctx, `
+		SELECT contact_key_id, min(at) FROM app.contact_key_events
+		 WHERE user_id = $1 AND contact_key_id = ANY($2) AND kind = $3
+		 GROUP BY contact_key_id`,
+		tx.userID.String(), ulidStrings(keyIDs), KeyEventFirstSeen)
+	if err != nil {
+		return nil, fmt.Errorf("store: contact key first seen: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var at time.Time
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, fmt.Errorf("store: scan first seen: %w", err)
+		}
+		u, err := ulid.Parse(id)
+		if err != nil {
+			return nil, fmt.Errorf("store: first seen key id %q: %w", id, err)
+		}
+		out[u] = at.UTC()
+	}
+	return out, rows.Err()
+}
+
+// ContactKeyPinVoucher returns the fingerprint of the key that vouched for the
+// held key `fingerprint` of contactID when its LATEST `pinned` event records a
+// vouched-for decision (source "vouched:<fingerprint>", ADR-054 rule 8), else
+// "". A later pinning the user made another way supersedes it. Read-only.
+func (tx *UserTx) ContactKeyPinVoucher(ctx context.Context, contactID ulid.ULID, fingerprint string) (string, error) {
+	var source string
+	err := tx.tx.QueryRow(ctx, `
+		SELECT e.source FROM app.contact_key_events e
+		  JOIN app.contact_keys k ON k.user_id = e.user_id AND k.id = e.contact_key_id
+		 WHERE e.user_id = $1 AND k.contact_id = $2 AND k.fingerprint = $3
+		   AND k.removed_at IS NULL AND e.kind = $4
+		 ORDER BY e.at DESC, e.id DESC
+		 LIMIT 1`,
+		tx.userID.String(), contactID.String(), fingerprint, KeyEventPinned).Scan(&source)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: contact key pin voucher: %w", err)
+	}
+	if v, ok := strings.CutPrefix(source, KeyEventSourceVouchedPrefix); ok {
+		return v, nil
+	}
+	return "", nil
 }
 
 // ContactKeyHistory returns a key's events, oldest first. found is false when no

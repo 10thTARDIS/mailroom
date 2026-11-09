@@ -80,6 +80,7 @@ const VIA_TEXT: Record<KeyEventSource, MessageKey> = {
   manual: "keys.via.manual",
   keyserver: "keys.via.keyserver",
   user: "keys.via.user",
+  vouched: "keys.via.user",
   other: "keys.via.other",
 };
 
@@ -100,7 +101,7 @@ export function keyEventText(line: KeyHistoryLine): string {
     case "revoked_seen":
       return via === "" ? t("keys.event.revokedSeenPlain") : tidy(t("keys.event.revokedSeen", { via }));
     case "pinned":
-      return t("keys.event.pinned");
+      return line.source === "vouched" ? t("keys.event.pinnedVouched") : t("keys.event.pinned");
     case "refused":
       return t("keys.event.refused");
     case "removed":

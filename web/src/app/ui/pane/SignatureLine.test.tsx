@@ -152,6 +152,78 @@ describe("a changed key", () => {
   });
 });
 
+describe("a vouched-for new key (ADR-054)", () => {
+  const vouched: PgpSignature = {
+    state: "keyChanged",
+    address: "alice@example.com",
+    fingerprint: NEW,
+    previousFingerprint: OLD,
+    vouchedBy: OLD,
+  };
+  const ordinaryWords = "changed keys, or that someone else is pretending";
+
+  it("says the previous key vouches, in the gentler words, with both fingerprints and the comparison kept", () => {
+    render(vouched);
+    expect(text()).toContain("Signed with a new key for alice@example.com.");
+    expect(text()).toContain("Their previous key, the one you had, vouches for it.");
+    expect(text()).toContain("Trust the new key, or keep the old one.");
+    expect(text()).not.toContain(ordinaryWords);
+    expect(text()).toContain("0123 4567 89AB CDEF 0123 4567 89AB CDEF 0123 4567");
+    expect(text()).toContain("FEDC BA98 7654 3210 FEDC BA98 7654 3210 FEDC BA98");
+    expect(host.querySelector("details summary")?.textContent).toBe("Compare the keys");
+  });
+
+  it("makes Trust the default (first, primary) button, and still asks: nothing is sent until a click", () => {
+    render(vouched);
+    const trust = button("Trust this key from now on")!;
+    expect(buttons()[0]).toBe(trust);
+    expect(trust.getAttribute("data-default-action")).toBe("trust");
+    expect(trust.className).toContain("button-primary");
+    expect(button("Keep the old key")).toBeDefined();
+    expect(decideContactKey).not.toHaveBeenCalled();
+  });
+
+  it("trust still sends the ordinary decision for the new key", async () => {
+    render(vouched);
+    flushSync(() => button("Trust this key from now on")!.click());
+    await settle();
+    expect(decideContactKey).toHaveBeenCalledWith("alice@example.com", NEW, "trust", "T1");
+  });
+
+  it("CONTROL: the ordinary prompt has neither the gentle words nor a default button", () => {
+    render({ ...vouched, vouchedBy: undefined });
+    expect(text()).toContain(ordinaryWords);
+    expect(text()).not.toContain("vouches for it");
+    expect(button("Trust this key from now on")!.getAttribute("data-default-action")).toBeNull();
+  });
+
+  it("a vouch that names another key, or a refused key, is the ordinary prompt", () => {
+    render({ ...vouched, vouchedBy: NEW });
+    expect(text()).toContain(ordinaryWords);
+    render({ ...vouched, refused: true });
+    expect(text()).toContain(ordinaryWords);
+    expect(text()).not.toContain("vouches for it");
+  });
+});
+
+describe("a previous key reported compromised (ADR-054)", () => {
+  it("is the ordinary prompt plus the warning, never the gentle one, even if a vouch is sent", () => {
+    render({
+      state: "keyChanged",
+      address: "alice@example.com",
+      fingerprint: NEW,
+      previousFingerprint: OLD,
+      vouchedBy: OLD,
+      previousKeyCompromised: true,
+    });
+    expect(text()).toContain("changed keys, or that someone else is pretending");
+    expect(text()).toContain("The key you had for alice@example.com was reported stolen or compromised");
+    expect(text()).toContain("Confirm the fingerprint another way.");
+    expect(text()).not.toContain("vouches for it");
+    expect(button("Trust this key from now on")!.getAttribute("data-default-action")).toBeNull();
+  });
+});
+
 describe("importing a key for this sender", () => {
   const unknown: PgpSignature = { state: "unknownKey", address: "alice@example.com", fingerprint: NEW };
   const changed: PgpSignature = {
@@ -211,5 +283,32 @@ describe("a signature by an expired key", () => {
   it("without validWhenSigned it only states the expiry", () => {
     render({ ...SIGNATURE_KEY_EXPIRED, validWhenSigned: false });
     expect(text()).toBe("Signed with a key that expired on 11 Oct 2026.");
+  });
+});
+
+// ADR-054 rule 8: the key the user trusted on a vouch was later revoked.
+describe("a verified key whose voucher has since been revoked (ADR-054 rule 8)", () => {
+  const verified: PgpSignature = { state: "verified", address: "alice@example.com", fingerprint: NEW };
+
+  it("says why the user trusted it and that the voucher was revoked, still verified, with no decision offered", () => {
+    render({ ...verified, pinVouchedByRevoked: true });
+    expect(text()).toContain("checks out against key");
+    expect(text()).toContain(
+      "You trusted this key because alice@example.com's previous key vouched for it. That previous key has since been revoked. Check this key with them another way.",
+    );
+    expect(text()).not.toContain("as compromised");
+    expect(buttons()).toHaveLength(0);
+  });
+
+  it("says compromised when it was", () => {
+    render({ ...verified, pinVouchedByRevoked: true, pinVouchedByCompromised: true });
+    expect(text()).toContain("has since been revoked as compromised");
+  });
+
+  it("CONTROL: a plain verified signature shows no warning, and the compromised flag alone is not enough", () => {
+    render(verified);
+    expect(text()).not.toContain("You trusted this key");
+    render({ ...verified, pinVouchedByCompromised: true });
+    expect(text()).not.toContain("You trusted this key");
   });
 });

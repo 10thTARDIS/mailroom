@@ -74,6 +74,7 @@ describe("history and refresh in words (#815, #818)", () => {
     expect(line("revoked_seen", "wkd")).toBe("Revoked by its owner (seen via WKD)");
     expect(line("revoked_seen", "somewhere")).toBe("Revoked by its owner");
     expect(line("pinned", "user")).toBe("You chose to use it");
+    expect(line("pinned", "vouched:0123456789ABCDEF0123456789ABCDEF01234567")).toBe("You chose to use it; the key you had before vouched for it");
     expect(line("teleported", "user")).toBe("Changed");
     for (const s of [line("first_seen", "somewhere"), line("updated", "x")]) {
       expect(s).not.toMatch(/_|[a-z][A-Z]|\s$/);

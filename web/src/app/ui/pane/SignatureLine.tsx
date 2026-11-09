@@ -16,6 +16,7 @@ import { t } from "../../i18n";
 import { useApp } from "../../state";
 import { ImportKeyDialog } from "../ImportKeyDialog";
 import { KeyChangeDecision } from "../KeyChangeDecision";
+import { PinVoucherWarning } from "../PinVoucherWarning";
 
 export function SignatureLine({
   email,
@@ -54,9 +55,21 @@ export function SignatureLine({
   switch (notice.state) {
     case "verified":
       return (
-        <p className="signature-line signature-line-verified" role="status">
-          {t("thread.signature.verified", { fingerprint: notice.fingerprint })}
-        </p>
+        <div
+          className={
+            notice.pinVouchedByRevoked
+              ? "signature-line signature-line-verified signature-line-pin-voucher"
+              : "signature-line signature-line-verified"
+          }
+        >
+          <p role="status">{t("thread.signature.verified", { fingerprint: notice.fingerprint })}</p>
+          {notice.pinVouchedByRevoked ? (
+            <PinVoucherWarning
+              name={stripBidiControls(email.pgpSignature?.address ?? "")}
+              compromised={notice.pinVouchedByCompromised === true}
+            />
+          ) : null}
+        </div>
       );
     case "bad":
       return (
@@ -99,8 +112,14 @@ export function SignatureLine({
             fingerprint={notice.fingerprint}
             previousFingerprint={notice.previousFingerprint}
             refused={notice.refused}
+            vouched={notice.vouched}
+            previousCompromised={notice.previousCompromised}
             heading={t(
-              notice.refused ? "thread.signature.keyChangedRefused" : "thread.signature.keyChanged",
+              notice.refused
+                ? "thread.signature.keyChangedRefused"
+                : notice.vouched && !notice.previousCompromised
+                  ? "thread.signature.keyChangedVouched"
+                  : "thread.signature.keyChanged",
               { address: stripBidiControls(notice.address) },
             )}
             onDecide={(decision) =>

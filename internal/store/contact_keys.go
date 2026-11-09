@@ -249,6 +249,10 @@ type heldContactKey struct {
 	held, removed bool
 	id            ulid.ULID
 	stored        []byte
+	// contactID and fingerprint are what was asked for (set held or not), so a
+	// merge can name the contact whose OTHER keys may certify this one.
+	contactID   ulid.ULID
+	fingerprint string
 }
 
 // lockHeldContactKey reads the row for (contact, fingerprint) FOR UPDATE, so
@@ -261,13 +265,14 @@ func (tx *UserTx) lockHeldContactKey(ctx context.Context, contactID ulid.ULID, f
 		id      string
 		removed *time.Time
 	)
+	h.contactID, h.fingerprint = contactID, fingerprint
 	err := tx.tx.QueryRow(ctx, `
 		SELECT id, public_key, removed_at FROM app.contact_keys
 		 WHERE user_id = $1 AND contact_id = $2 AND fingerprint = $3
 		 FOR UPDATE`,
 		tx.userID.String(), contactID.String(), fingerprint).Scan(&id, &h.stored, &removed)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return heldContactKey{}, nil
+		return h, nil
 	}
 	if err != nil {
 		return heldContactKey{}, fmt.Errorf("store: read held contact key: %w", err)
@@ -289,7 +294,11 @@ func (tx *UserTx) lockHeldContactKey(ctx context.Context, contactID ulid.ULID, f
 // An unmergeable incoming copy is not an error: the stored key stays as it was
 // (see UpsertContactKey).
 func (tx *UserTx) mergeIntoHeld(ctx context.Context, h heldContactKey, incoming []byte) (stored []byte, changed bool, kind string, err error) {
-	merged, differs, merr := pgpkeys.Merge(h.stored, incoming)
+	certifiers, err := tx.sameContactCertifiers(ctx, h.contactID, h.fingerprint)
+	if err != nil {
+		return h.stored, false, "", err
+	}
+	merged, differs, merr := pgpkeys.Merge(h.stored, incoming, certifiers...)
 	if merr != nil || !differs || len(merged) > maxPublicKey {
 		return h.stored, false, "", nil
 	}
@@ -301,6 +310,49 @@ func (tx *UserTx) mergeIntoHeld(ctx context.Context, h heldContactKey, incoming 
 	}
 	return merged, true, contactKeyEventKind(h.stored, merged, time.Now().UTC()), nil
 }
+
+// sameContactCertifiers returns the public keys of the key(s) currently PINNED
+// for the contact's addresses (app.contact_key_pins), held, not removed and not
+// refused, other than the key being merged: the only keys whose certification of
+// a user ID the merge keeps (pgpkeys.Merge, ADR-054 section 2). The pin is all
+// CheckVouch ever reads, so it is all that is kept. A key that is merely HELD
+// (any sender can make one: holding is free) or refused is never a certifier, so
+// a stranger's key cannot buy storage in another key's stored copy. Scoped by
+// user_id and contact_id, so a key of another contact cannot be reached. Read
+// inside the savepoint that already holds the row's lock.
+func (tx *UserTx) sameContactCertifiers(ctx context.Context, contactID ulid.ULID, exceptFingerprint string) ([][]byte, error) {
+	rows, err := tx.tx.Query(ctx, `
+		SELECT k.public_key FROM app.contact_keys k
+		 WHERE k.user_id = $1 AND k.contact_id = $2 AND k.fingerprint <> $3
+		   AND k.kind = 'pgp' AND k.refused = false AND k.removed_at IS NULL
+		   AND EXISTS (
+		     SELECT 1 FROM app.contact_key_pins p
+		       JOIN app.contact_addresses ca
+		         ON ca.user_id = p.user_id AND ca.address = p.address
+		      WHERE p.user_id = k.user_id AND p.fingerprint = k.fingerprint
+		        AND ca.contact_id = k.contact_id)
+		 ORDER BY k.id
+		 LIMIT $4`,
+		tx.userID.String(), contactID.String(), exceptFingerprint, maxCertifiers)
+	if err != nil {
+		return nil, fmt.Errorf("store: certifier keys: %w", err)
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var b []byte
+		if err := rows.Scan(&b); err != nil {
+			return nil, fmt.Errorf("store: scan certifier key: %w", err)
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// maxCertifiers bounds how many pinned keys of one contact (one per address) are
+// read as certifiers; the bound keeps one sighting's cost
+// fixed whatever a correspondent publishes.
+const maxCertifiers = 16
 
 // contactKeySelect is the projection scanContactKeys reads.
 const contactKeySelect = `
@@ -605,6 +657,24 @@ func (tx *UserTx) lockCurrentContactKey(ctx context.Context, contactID ulid.ULID
 // A key that is already the trusted pin (manual, not refused, pinned for this
 // address) is a no-op: no write, no event, no row (#815).
 func (tx *UserTx) TrustContactKey(ctx context.Context, contactID ulid.ULID, address, fingerprint string) error {
+	return tx.TrustContactKeyVouched(ctx, contactID, address, fingerprint, "")
+}
+
+// KeyEventSourceVouchedPrefix starts the source of a `pinned` event the user made
+// for a key the previous pin VOUCHED for (ADR-054 section 3, rule 8): the source
+// is "vouched:" and the voucher's fingerprint. Only a record: the pin moved
+// because the user decided, exactly as for any other trust.
+const KeyEventSourceVouchedPrefix = "vouched:"
+
+// TrustContactKeyVouched is TrustContactKey for a decision the caller found to
+// be a vouched-for rotation: vouchedBy is the fingerprint of the pinned key that
+// vouched, recorded as the `pinned` event's source. "" is TrustContactKey. It
+// does not decide anything: the user's trust is what calls this.
+func (tx *UserTx) TrustContactKeyVouched(ctx context.Context, contactID ulid.ULID, address, fingerprint, vouchedBy string) error {
+	eventSource := KeyEventSourceUser
+	if vouchedBy != "" {
+		eventSource = KeyEventSourceVouchedPrefix + vouchedBy
+	}
 	return tx.inSavepoint(ctx, func() error {
 		id, pub, source, refused, err := tx.lockCurrentContactKey(ctx, contactID, fingerprint)
 		if err != nil {
@@ -627,7 +697,7 @@ func (tx *UserTx) TrustContactKey(ctx context.Context, contactID ulid.ULID, addr
 		if err := tx.SetContactKeyPin(ctx, address, fingerprint, ContactKeyManual); err != nil {
 			return err
 		}
-		if err := tx.appendContactKeyEvent(ctx, id, KeyEventPinned, KeyEventSourceUser, pub); err != nil {
+		if err := tx.appendContactKeyEvent(ctx, id, KeyEventPinned, eventSource, pub); err != nil {
 			return err
 		}
 		_, err = tx.AppendChange(ctx, ObjectContact, contactID, OpUpdated)

@@ -137,6 +137,12 @@ func (a *API) recipientKeyLookup(ctx context.Context, userID ulid.ULID, rawArgs 
 		// confirms (ContactKey/decide, ADR-039).
 		keyChanged bool
 		pinned     string
+		// vouchedBy / prevCompromised: ADR-054, keyChanged only.
+		vouchedBy       string
+		prevCompromised bool
+		// pinVoucherRevoked / pinVoucherCompromised: ADR-054 rule 8, the key is
+		// the pin and the key that vouched for it has been revoked.
+		pinVoucherRevoked, pinVoucherCompromised bool
 		// expiresAt: the chosen key's end of usability (nil = never).
 		// unusable/expiredAt: why there is no usable key, when it is a lapsed
 		// one (#795): "expired" with the date, or "revoked".
@@ -163,6 +169,8 @@ func (a *API) recipientKeyLookup(ctx context.Context, userID ulid.ULID, rawArgs 
 				r.fingerprint, r.source, r.wkd = res.Key.Fingerprint, res.Key.Source, wkdSkipped
 				r.usable = !res.KeyChanged
 				r.keyChanged, r.pinned = res.KeyChanged, res.PinnedFingerprint
+				r.vouchedBy, r.prevCompromised = res.VouchedBy, res.PreviousKeyCompromised
+				r.pinVoucherRevoked, r.pinVoucherCompromised = res.PinVouchedByRevoked, res.PinVouchedByCompromised
 				r.expiresAt = res.ExpiresAt
 				continue
 			}
@@ -271,6 +279,8 @@ func (a *API) recipientKeyLookup(ctx context.Context, userID ulid.ULID, rawArgs 
 				r.fingerprint, r.source = res.Key.Fingerprint, res.Key.Source
 				r.usable = !res.KeyChanged
 				r.keyChanged, r.pinned = res.KeyChanged, res.PinnedFingerprint
+				r.vouchedBy, r.prevCompromised = res.VouchedBy, res.PreviousKeyCompromised
+				r.pinVoucherRevoked, r.pinVoucherCompromised = res.PinVouchedByRevoked, res.PinVouchedByCompromised
 				r.expiresAt, r.unusable, r.expiredAt = res.ExpiresAt, "", nil
 			}
 			return nil
@@ -311,7 +321,7 @@ func (a *API) recipientKeyLookup(ctx context.Context, userID ulid.ULID, rawArgs 
 		default:
 			reason = recipientReasonNoKey
 		}
-		list = append(list, map[string]any{
+		item := map[string]any{
 			"address":           r.address,
 			"usable":            r.usable,
 			"fingerprint":       fpr,
@@ -323,7 +333,22 @@ func (a *API) recipientKeyLookup(ctx context.Context, userID ulid.ULID, rawArgs 
 			"expiringSoon":      expiringSoon,
 			"reason":            reason,
 			"expiredAt":         expiredAt,
-		})
+		}
+		// ADR-054: present only on a changed key, so older clients see no new
+		// fields and a plain change reads exactly as before.
+		if r.keyChanged && r.vouchedBy != "" {
+			item["vouchedBy"] = r.vouchedBy
+		}
+		if r.keyChanged && r.prevCompromised {
+			item["previousKeyCompromised"] = true
+		}
+		if r.usable && r.pinVoucherRevoked {
+			item["pinVouchedByRevoked"] = true
+			if r.pinVoucherCompromised {
+				item["pinVouchedByCompromised"] = true
+			}
+		}
+		list = append(list, item)
 	}
 	return mustMarshal(map[string]any{
 		"accountId": userID.String(),

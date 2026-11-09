@@ -2429,7 +2429,7 @@ CREATE TABLE app.contact_key_events (
   contact_key_id app.ulid NOT NULL REFERENCES app.contact_keys(id) ON DELETE CASCADE,
   kind           text NOT NULL CHECK (kind IN ('first_seen', 'renewed', 'updated', 'revoked_seen',
                                                'pinned', 'refused', 'removed')),
-  source         text NOT NULL CHECK (source IN ('autocrypt', 'wkd', 'manual', 'keyserver', 'user')),
+  source         text NOT NULL CHECK (source IN ('autocrypt', 'wkd', 'manual', 'keyserver', 'user') OR source ~ '^vouched:[0-9A-F]{40}([0-9A-F]{24})?$'),
   at             timestamptz NOT NULL DEFAULT now(),
   expires_at     timestamptz
 );

@@ -69,6 +69,12 @@ import (
 // imports the wire. A refusal by the crypto process arrives as *CustodyError.
 type KeyCustody interface {
 	GenerateKey(ctx context.Context, userID ulid.ULID, name, email string, exp KeyExpiry) (CustodyKey, error)
+	// GenerateKeyCertifiedBy is GenerateKey for a key rotation (ADR-054): the
+	// crypto process certifies the new key's user ID with the user's own key
+	// certifier before storing it. A certifier that can no longer sign yields an
+	// uncertified key (CustodyKey.Certified false, with CertifyReason), not an
+	// error; another user's key is CustodyDenied.
+	GenerateKeyCertifiedBy(ctx context.Context, userID ulid.ULID, name, email string, exp KeyExpiry, certifier ulid.ULID) (CustodyKey, error)
 	// ImportKey hands an ASCII-armored PRIVATE key (and its passphrase, if
 	// protected) to custody. alreadyStored: that fingerprint was already held.
 	ImportKey(ctx context.Context, userID ulid.ULID, armoredPrivate, passphrase string) (key CustodyKey, alreadyStored bool, err error)
@@ -93,6 +99,9 @@ type KeyExpiry struct {
 type CustodyKey struct {
 	KeyID       string
 	Fingerprint string
+	// Certified and CertifyReason: GenerateKeyCertifiedBy only (ADR-054).
+	Certified     bool
+	CertifyReason string
 }
 
 // CustodyError is the crypto process's own refusal. Code is the wire's error

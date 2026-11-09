@@ -77,6 +77,27 @@ describe("a recipient whose key changed", () => {
     ]);
   });
 
+  it("a vouched-for new key reads gently, with Trust as the default button, and still waits for the user (ADR-054)", () => {
+    render(changedOffer, { "bob@example.com": info({ vouchedBy: OLD }) });
+    const text = host.textContent ?? "";
+    expect(text).toContain("bob@example.com has a new key.");
+    expect(text).toContain("Their previous key, the one you had, vouches for it.");
+    expect(text).not.toContain("is different from the one you last wrote to");
+    // Still refused until decided.
+    expect(text).toContain("Can't encrypt: the key for bob@example.com has changed");
+    const trust = [...host.querySelectorAll("button")].find((b) => b.textContent === "Trust this key from now on")!;
+    expect(trust.getAttribute("data-default-action")).toBe("trust");
+    expect(onDecideKey).not.toHaveBeenCalled();
+  });
+
+  it("a previous key reported compromised adds the warning and never softens", () => {
+    render(changedOffer, { "bob@example.com": info({ vouchedBy: OLD, previousKeyCompromised: true }) });
+    const text = host.textContent ?? "";
+    expect(text).toContain("The key for bob@example.com is different from the one you last wrote to.");
+    expect(text).toContain("was reported stolen or compromised");
+    expect(text).not.toContain("vouches for it");
+  });
+
   it("sends the decision for the NEW key", async () => {
     render(changedOffer, { "bob@example.com": info() });
     const keep = [...host.querySelectorAll("button")].find((b) => b.textContent === "Keep the old key")!;
@@ -251,5 +272,42 @@ describe("checking for an updated key from compose", () => {
   it("control: without the handler nothing is offered", () => {
     renderWith(false);
     expect(refreshButtons()).toHaveLength(0);
+  });
+});
+
+// ADR-054 rule 8: a usable key the user trusted on a vouch whose voucher was
+// later revoked says so, whether or not the switch is offered.
+describe("a usable key whose voucher has since been revoked (ADR-054 rule 8)", () => {
+  const offered: EncryptOffer = { offered: true, why: "ok", missing: [], changed: [] };
+  const usableInfo = (over: Partial<RecipientKeyInfo> = {}): RecipientKeyInfo =>
+    info({ usable: true, keyChanged: false, pinnedFingerprint: null, ...over });
+  const renderWith = (keys: Record<string, RecipientKeyInfo | undefined>): void =>
+    flushSync(() =>
+      root.render(
+        <EncryptSwitch
+          offer={offered}
+          checked={false}
+          onChange={() => {}}
+          names={["Bob"]}
+          keys={keys}
+          onDecideKey={onDecideKey}
+          recipients={["bob@example.com"]}
+          labels={{ "bob@example.com": "Bob" }}
+        />,
+      ),
+    );
+
+  it("warns by name, and as compromised when it was", () => {
+    renderWith({ "bob@example.com": usableInfo({ pinVouchedByRevoked: true }) });
+    expect(host.textContent).toContain(
+      "You trusted this key because Bob's previous key vouched for it. That previous key has since been revoked. Check this key with them another way.",
+    );
+    renderWith({ "bob@example.com": usableInfo({ pinVouchedByRevoked: true, pinVouchedByCompromised: true }) });
+    expect(host.textContent).toContain("revoked as compromised");
+  });
+
+  it("CONTROL: no flag, no warning", () => {
+    renderWith({ "bob@example.com": usableInfo() });
+    expect(host.textContent).not.toContain("You trusted this key");
   });
 });

@@ -76,6 +76,16 @@ func (c *inProcCustody) GenerateKey(ctx context.Context, userID ulid.ULID, name,
 	return CustodyKey{KeyID: r.Key.KeyID, Fingerprint: r.Key.Fingerprint}, nil
 }
 
+func (c *inProcCustody) GenerateKeyCertifiedBy(ctx context.Context, userID ulid.ULID, name, email string, exp KeyExpiry, certifier ulid.ULID) (CustodyKey, error) {
+	c.called()
+	r, err := c.svc.Generate(ctx, pgpwire.GenerateRequest{UserID: userID.String(), Name: name, Email: email,
+		ExpiresDays: exp.Days, ExpiresAt: exp.At, CertifierKeyID: certifier.String()})
+	if err != nil {
+		return CustodyKey{}, wireToCustody(err)
+	}
+	return CustodyKey{KeyID: r.Key.KeyID, Fingerprint: r.Key.Fingerprint, Certified: r.Certified, CertifyReason: r.CertifyReason}, nil
+}
+
 func (c *inProcCustody) ImportKey(ctx context.Context, userID ulid.ULID, armored, pass string) (CustodyKey, bool, error) {
 	c.called()
 	r, err := c.svc.Import(ctx, pgpwire.ImportRequest{UserID: userID.String(), PrivateKey: armored, Passphrase: pass})

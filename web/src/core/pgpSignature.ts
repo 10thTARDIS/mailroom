@@ -13,7 +13,16 @@
 import type { PgpSignature } from "./jmap/types";
 
 export type SignatureNotice =
-  | { state: "verified"; fingerprint: string }
+  | {
+      state: "verified";
+      fingerprint: string;
+      /** ADR-054 rule 8: the user trusted this key because the key they had
+       * vouched for it, and that key has since been revoked. Present only when
+       * true. A notice; the signature stays verified and the pin is untouched. */
+      pinVouchedByRevoked?: true;
+      /** ...and the revocation reason is "compromised". */
+      pinVouchedByCompromised?: true;
+    }
   | { state: "bad" }
   | {
       /** A `bad` with reason keyExpired (#795/#796): the signature checked out
@@ -42,6 +51,12 @@ export type SignatureNotice =
       previousFingerprint: string;
       /** The user already chose to keep the old key. */
       refused: boolean;
+      /** ADR-054: the key the user had vouches for this one. Only ever set when
+       * it names the previous key, and never for a refused key; anything else is
+       * the ordinary prompt. */
+      vouched: boolean;
+      /** ADR-054: the key the user had was reported compromised. */
+      previousCompromised: boolean;
     };
 
 /** The notice for one message, or null when it is not signed. Anything this
@@ -53,7 +68,16 @@ export function signatureNotice(sig: PgpSignature | null | undefined): Signature
     case "verified":
       // A "verified" that names no key names nobody; say the weaker thing.
       return sig.fingerprint
-        ? { state: "verified", fingerprint: shortFingerprint(sig.fingerprint) }
+        ? {
+            state: "verified",
+            fingerprint: shortFingerprint(sig.fingerprint),
+            ...(sig.pinVouchedByRevoked === true
+              ? {
+                  pinVouchedByRevoked: true as const,
+                  ...(sig.pinVouchedByCompromised === true ? { pinVouchedByCompromised: true as const } : {}),
+                }
+              : {}),
+          }
         : { state: "unknownKey", fingerprint: null };
     case "bad":
       // Only the one reason this client knows softens the wording; any other
@@ -88,10 +112,26 @@ export function signatureNotice(sig: PgpSignature | null | undefined): Signature
         fingerprint: sig.fingerprint,
         previousFingerprint: sig.previousFingerprint,
         refused: sig.refused === true,
+        vouched: isVouched(sig.vouchedBy, sig.previousFingerprint, sig.refused === true),
+        previousCompromised: sig.previousKeyCompromised === true,
       };
     default:
       return { state: "bad" };
   }
+}
+
+/** True when the server's vouch can soften the prompt: it names exactly the key
+ * the user had (the previous fingerprint) and the user has not already refused the
+ * new key. Anything else - a vouch for some other key, a refused key - is the
+ * ordinary prompt: a client never makes a prompt gentler than the facts it can
+ * check itself. It softens a sentence; it never decides. */
+export function isVouched(
+  vouchedBy: string | undefined,
+  previousFingerprint: string | undefined,
+  refused: boolean,
+): boolean {
+  if (!vouchedBy || !previousFingerprint || refused) return false;
+  return vouchedBy.toUpperCase() === previousFingerprint.toUpperCase();
 }
 
 /** The last 16 hex digits, grouped in fours - the long key id people compare. */

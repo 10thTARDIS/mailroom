@@ -26,6 +26,8 @@ export function KeyChangeDecision({
   fingerprint,
   previousFingerprint,
   refused = false,
+  vouched = false,
+  previousCompromised = false,
   heading,
   onDecide,
 }: {
@@ -36,6 +38,13 @@ export function KeyChangeDecision({
   previousFingerprint: string;
   /** The user already chose to keep the old key. */
   refused?: boolean;
+  /** ADR-054: the key the user had vouches for the new one. The words are
+   * gentler and Trust is the default button; the choice is still the user's and
+   * nothing is trusted until they click. Ignored when `refused`. */
+  vouched?: boolean;
+  /** ADR-054: the key the user had was reported stolen or compromised. The
+   * ordinary prompt plus one warning; never combined with `vouched`. */
+  previousCompromised?: boolean;
   /** The sentence that opens the block. It is the caller's, because what it is
    * about (this message's signature, a recipient's key) is the caller's. */
   heading: string;
@@ -44,6 +53,9 @@ export function KeyChangeDecision({
   const [busy, setBusy] = useState(false);
   // The address is the sender's own text, quoted back inside a warning about them.
   const shown = stripBidiControls(address);
+  // A vouch softens only a key the user has not already refused, and a compromised
+  // previous key is never a reason to soften anything.
+  const gentle = vouched && !refused && !previousCompromised;
 
   const decide = async (decision: "trust" | "keep"): Promise<void> => {
     if (busy) return;
@@ -58,8 +70,16 @@ export function KeyChangeDecision({
   return (
     <div className="key-change" role="group" aria-label={t("thread.signature.region")}>
       <p className="key-change-heading" role="status">
-        <strong>{heading}</strong> {t("thread.signature.keyChangedWhy", { address: shown })}
+        <strong>{heading}</strong>{" "}
+        {gentle
+          ? t("thread.signature.vouchedWhy")
+          : t("thread.signature.keyChangedWhy", { address: shown })}
       </p>
+      {previousCompromised ? (
+        <p className="key-change-compromised" role="status">
+          {t("thread.signature.previousCompromised", { address: shown })}
+        </p>
+      ) : null}
       <dl className="key-change-keys">
         <dt>{t("thread.signature.before")}</dt>
         <dd>
@@ -71,7 +91,13 @@ export function KeyChangeDecision({
         </dd>
       </dl>
       <div className="key-change-actions">
-        <button type="button" disabled={busy} onClick={() => void decide("trust")}>
+        <button
+          type="button"
+          className={gentle ? "button-primary" : undefined}
+          data-default-action={gentle ? "trust" : undefined}
+          disabled={busy}
+          onClick={() => void decide("trust")}
+        >
           {refused ? t("thread.signature.trustAnyway") : t("thread.signature.trust")}
         </button>
         {refused ? null : (
