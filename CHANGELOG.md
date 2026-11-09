@@ -38,13 +38,6 @@ and total counts change as mail moves, without re-reading everything.
   messages reports each folder once. The reply names only the count properties
   when counts are all that changed.
 
-## [1.102.0-beta.1] — 2026-11-08
-
-**The first beta of v1.102 makes Mailroom work with standard JMAP mail clients.** Clients such as aerc can now connect and get accurate answers:
-a batch of conformance fixes found by running a real third-party JMAP client
-against Mailroom, plus an API key's session that describes what the key can
-actually do.
-
 ## [1.102.0-beta.2] — 2026-11-09
 
 **The second beta of v1.102 brings search and sorting for mail clients.** Standard JMAP clients can combine search
