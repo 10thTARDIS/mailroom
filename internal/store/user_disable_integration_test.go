@@ -18,6 +18,7 @@ package store
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,8 +125,9 @@ func TestDisableUserReachesEveryEntryPointAndEnableRestoresThem(t *testing.T) {
 	if err != nil || res.Outcome != UserOutcomeDisabled || res.ID != aID || res.Email != a.Tag+"@example.com" {
 		t.Fatalf("disable: %+v %v", res, err)
 	}
-	// Twice is safe and says so.
-	res, err = s.SetUserDisabled(ctx, a.ID, true)
+	// Twice is safe and says so. (By a LOWER-CASE id: an id is matched as an id
+	// in any case, as ulid.Parse accepts it, never as a would-be email.)
+	res, err = s.SetUserDisabled(ctx, strings.ToLower(a.ID), true)
 	if err != nil || res.Outcome != UserOutcomeAlreadyDisabled || res.ID != aID {
 		t.Fatalf("second disable: %+v %v", res, err)
 	}
@@ -277,5 +279,49 @@ func TestDisableRefusesTheLastEnabledUser(t *testing.T) {
 	}
 	if _, err := s.SetUserDisabled(ctx, a.ID, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The AI-tool approval sweep is background work too: a disabled user's overdue
+// approval requests are not swept until the user is enabled again.
+func TestPendingSweepSkipsADisabledUser(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, _ := seedTwoUsers(t, h.super)
+	s := h.appStore()
+	aID := mustULID(t, a.ID)
+	key := newTestKey(t, s, aID, "agent", "mr_sweep-token-a", nil)
+	if _, err := h.super.Exec(ctx, `
+		INSERT INTO app.api_key_pending (id, user_id, key_id, kind, method, payload, summary, expires_at)
+		VALUES ($1, $2, $3, 'delete', 'Email/set', '{"destroy":[]}', 'overdue', now() - interval '1 hour')`,
+		NewULID().String(), a.ID, key.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	due := func() bool {
+		ids, err := s.UsersWithDuePending(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range ids {
+			if id == aID {
+				return true
+			}
+		}
+		return false
+	}
+	if !due() {
+		t.Fatal("control: an overdue request is due for an enabled user")
+	}
+	if _, err := s.SetUserDisabled(ctx, a.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if due() {
+		t.Error("a disabled user's overdue approval requests were handed to the sweep")
+	}
+	if _, err := s.SetUserDisabled(ctx, a.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if !due() {
+		t.Error("re-enabling did not resume the sweep")
 	}
 }

@@ -41,9 +41,12 @@ BEGIN
   SELECT u.id, u.email::text, u.disabled_at
     INTO v_id, v_email, v_disabled
     FROM app.users u
-   WHERE (u.id::text = p_ref OR lower(u.email::text) = lower(p_ref))
-     AND u.deleted_at IS NULL
-   LIMIT 1;
+   -- An id is matched as an id (any case, as ulid.Parse accepts), anything
+   -- else as an email; each side is unique, so at most one row can match.
+   WHERE (CASE WHEN upper(btrim(p_ref)) ~ '^[0-9A-HJKMNP-TV-Z]{26}$'
+               THEN u.id::text = upper(btrim(p_ref))
+               ELSE lower(u.email::text) = lower(btrim(p_ref)) END)
+     AND u.deleted_at IS NULL;
 
   IF v_id IS NULL THEN
     RETURN QUERY SELECT NULL::app.ulid, NULL::text, 'not_found'::text;
@@ -146,6 +149,22 @@ END
 $$;
 -- +goose StatementEnd
 
+-- The AI-tool approval sweep skips a disabled (or deleted) user too, so all of
+-- a disabled user's background work stops.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION app.api_key_pending_due_users()
+RETURNS SETOF app.ulid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = app, pg_temp AS $$
+  SELECT DISTINCT p.user_id
+    FROM app.api_key_pending p
+   WHERE ((p.state = 'pending' AND p.expires_at <= now())
+       OR (p.state = 'approved' AND p.ran_at IS NULL AND p.decided_at <= now() - interval '10 minutes'))
+     -- A disabled (or deleted) user's background work stops (migration 00091).
+     AND EXISTS (SELECT 1 FROM app.users u
+                  WHERE u.id = p.user_id AND u.disabled_at IS NULL AND u.deleted_at IS NULL)
+$$;
+-- +goose StatementEnd
+
 -- +goose Down
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION app.oauth_refresh_consume(p_hash bytea)
@@ -195,6 +214,17 @@ LANGUAGE sql SECURITY DEFINER SET search_path = app, pg_temp AS $$
     LIMIT p_limit
   )
   RETURNING j.*;
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION app.api_key_pending_due_users()
+RETURNS SETOF app.ulid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = app, pg_temp AS $$
+  SELECT DISTINCT p.user_id
+    FROM app.api_key_pending p
+   WHERE (p.state = 'pending' AND p.expires_at <= now())
+      OR (p.state = 'approved' AND p.ran_at IS NULL AND p.decided_at <= now() - interval '10 minutes')
 $$;
 -- +goose StatementEnd
 
