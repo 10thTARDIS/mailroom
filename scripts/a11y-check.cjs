@@ -3501,6 +3501,27 @@ async function apiKeysSurfaces(page, cdp) {
     await axeAA(page, "settings-api-key-detail", theme.name);
     await shoot(page, "desktop-" + theme.name + "-detail");
 
+    // ---- Settings > Activity (ADR-053), in this theme ---------------------
+    // The fixture's key calls and approvals are what the list has to show, so this
+    // surface is the loaded list (not just the empty state) wherever they landed.
+    // `.activity-list li, .activity-none` waits for a SETTLED state: an axe pass
+    // over "Reading your activity..." would prove nothing about the list.
+    await load(page, "#/settings/activity");
+    await waitForSelectorD(page, ".activity-page .activity-filters", { timeout: 30000 });
+    await until(
+      "activity: the list (or its empty state) is drawn",
+      30000,
+      () => page.evaluate(() => !!document.querySelector(".activity-list li, .activity-none")),
+      31,
+      () => page.evaluate(() => "ACTIVITY row: " + ((document.querySelector("#setting-body-activity") || {}).textContent || "").slice(0, 400)),
+    );
+    await injectAxe(page);
+    await axeAA(page, "settings-activity", theme.name);
+    if (theme === THEMES[0]) {
+      const shown = await page.evaluate(() => document.querySelectorAll(".activity-list li").length);
+      console.log("activity entries shown=" + shown);
+    }
+
     // ---- the desk with the banner -----------------------------------------
     await load(page, "#/inbox/review");
     await waitForDesk(page);

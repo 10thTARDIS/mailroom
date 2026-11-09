@@ -29,6 +29,8 @@ import type {
   ApiKeySettings,
   OAuthClient,
   ApiKeysCapability,
+  ActivityPage,
+  ActivitySource,
   SignedInDevice,
   PendingAction,
   SuppressedRefusal,
@@ -90,7 +92,7 @@ import type {
   WebPushSubscription,
   WebPushSubscriptionGetResult,
 } from "./types";
-import { CAP_ACCOUNTS, CAP_APIKEYS, CAP_DEVICES, CAP_OUT_OF_OFFICE, CAP_PGP, CAP_PUSH, CAP_REMOTE_CONTENT, MAILROOM_USING } from "./types";
+import { CAP_ACCOUNTS, CAP_ACTIVITY, CAP_APIKEYS, CAP_DEVICES, CAP_OUT_OF_OFFICE, CAP_PGP, CAP_PUSH, CAP_REMOTE_CONTENT, MAILROOM_USING } from "./types";
 import type { OutOfOffice, OutOfOfficeUpdate } from "./types";
 import type {
   ContactMergeResult,
@@ -1163,6 +1165,40 @@ export class JmapClient {
       if (!r || r.error || !r.value) return null;
       const v = r.value as unknown as { destroyed?: string[] | null; notDestroyed?: Record<string, unknown> | null };
       return { destroyed: v.destroyed ?? [], notDestroyed: Object.keys(v.notDestroyed ?? {}) };
+    } catch {
+      return null;
+    }
+  }
+
+  // -- Activity (ADR-053) -------------------------------------------------------
+  //
+  // One merged, newest-first, keyset-paged list. SESSION ONLY on the server.
+  // Adds CAP_ACTIVITY to its own `using`, only when the session advertises it,
+  // and never throws.
+
+  /** The `urn:mailroom:activity` session object, or null when not advertised. */
+  activityCapability(): Record<string, unknown> | null {
+    if (!this.hasCapability(CAP_ACTIVITY)) return null;
+    return (this.session?.capabilities[CAP_ACTIVITY] as Record<string, unknown> | undefined) ?? {};
+  }
+
+  /** One page of the list, or null when it cannot be asked or failed. */
+  async activityList(args: {
+    sources?: ActivitySource[];
+    since?: string;
+    until?: string;
+    before?: string;
+    limit?: number;
+  }): Promise<ActivityPage | null> {
+    if (!this.hasCapability(CAP_ACTIVITY)) return null;
+    try {
+      const [r] = await this.request(
+        [{ name: "Activity/list", args: { accountId: this.accountId, ...args }, id: "a" }],
+        [...MAILROOM_USING, CAP_ACTIVITY],
+      );
+      if (!r || r.error || !r.value) return null;
+      const v = r.value as unknown as Partial<ActivityPage>;
+      return { list: v.list ?? [], next: v.next ?? null, limit: v.limit ?? 0, covers: v.covers ?? {} };
     } catch {
       return null;
     }

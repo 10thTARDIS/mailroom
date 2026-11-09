@@ -370,7 +370,7 @@ func (tx *UserTx) ListActivity(ctx context.Context, f ActivityFilter) (ActivityP
 	for _, k := range kinds {
 		branches = append(branches, b.activityBranch(k, f, n))
 	}
-	q := strings.Join(branches, "\nUNION ALL\n") + `
+	q := `SELECT * FROM (` + strings.Join(branches, "\nUNION ALL\n") + `) u
 		ORDER BY at DESC, kind COLLATE "C" DESC, id COLLATE "C" DESC
 		LIMIT ` + n
 	rows, err := tx.tx.Query(ctx, q, b.args...)

@@ -78,7 +78,7 @@ func seedActivity(t *testing.T, super *pgxpool.Pool, u fixtureUser, base time.Ti
 	// An audit row of an unrelated kind: never listed.
 	audit("conflict.resolved", "Email", u.MessageID, `{}`, 9)
 	exec(`INSERT INTO app.rules (id, user_id, name, conditions, actions) VALUES ($1,$2,$3,'{}','[]')`,
-		s.ruleID, u.ID, "rule-"+u.Tag)
+		s.ruleID, u.ID, "rule-act-"+s.ruleID)
 	exec(`INSERT INTO app.pgp_decrypt_audit (id, user_id, message_id, purpose, outcome, key_fingerprint, decrypted_at)
 	      VALUES ($1,$2,$3,'body','decrypted','FFEEDDCC',$4)`, NewULID().String(), u.ID, u.MessageID, at(10))
 	sess := func(id string, created time.Time, revokedMin int, reason string) {

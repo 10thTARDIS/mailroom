@@ -75,6 +75,14 @@ bounded by `n+1` before the union, so the statement never reads more than
   tie-break between sources that share a timestamp. `source` is the coarser
   filter group (`ai_tool` = both AI kinds, `decryption`, `purge`, `session` =
   sign_in and sign_out, `bulk` = placement and rule_apply).
+- **One entry per backfill batch.** A placement backfill writes one audit row per
+  message moved; that branch groups them by (batch, direction) and reports the
+  count, timed at the batch's last move. It reads that user's backfill rows
+  (operator-run, few) rather than stopping at `LIMIT n+1` before grouping; its
+  output is still bounded by the limit like every other branch.
+- **Ended sessions.** A sign-out entry covers `signed_out`, `signed_out_elsewhere`,
+  `refused` and `expired`; `replaced` (a new sign-in taking a session's place) is
+  left out as noise.
 - **The id** is text for ULID sources; `audit_log`'s bigint id is zero-padded
   to 20 digits so text order equals numeric order, and the branch orders by the
   bigint itself.
@@ -136,15 +144,17 @@ any other (`session_only`).
 
 ### The operator CLI
 
-`mailroom-admin activity [--since 24h|YYYY-MM-DD] [--source ...] [--user ID]`.
-Report-only; writes nothing.
+`mailroom-admin activity [--since 24h|7d|YYYY-MM-DD] [--source ...] [--user ID
+[--limit N]] [--cap N]`. Report-only; writes nothing.
 
 - **Default (instance-wide):** counts per source and kind over the window,
   per-kind and never one total, with the oldest entry present per source, so
   "none" is distinguishable from "the source keeps nothing that old". Built by
-  running the same store read per active user (`ListActiveUserIDs`, one
-  `UserTx` each) and summing: no `SECURITY DEFINER` function, no cross-user
-  policy, no new grant. The `mailroom_admin` role is deliberately not used.
+  running the same store read per active user (`ListActiveUserIDs`, the
+  fan-out the background loops already use, then one `UserTx` each) and summing:
+  no new `SECURITY DEFINER` function, no cross-user policy, no new grant. A
+  per-user `--cap` (default 5,000 entries) bounds the work, and a user who hits
+  it is reported, so a lower bound never reads as a total. The `mailroom_admin` role is deliberately not used.
 - **Per-user detail only on request:** `--user ID` prints that user's merged
   entries (the same read and shape as the web), because an operator already
   acts per user through `UserTx` in every other admin command. It prints

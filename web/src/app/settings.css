@@ -1071,3 +1071,37 @@
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* Activity (ADR-053): the merged list reuses .apikey-activity's rows; these are
+   the filter bar and the source tag. */
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-start;
+  margin: 0 0 8px;
+}
+.activity-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.activity-sources legend {
+  padding: 0;
+  font-weight: 600;
+}
+.activity-source-choice {
+  white-space: nowrap;
+}
+.activity-tag {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.8571rem;
+  white-space: nowrap;
+}

@@ -237,6 +237,59 @@ export interface SignedInDevice {
   isCurrent: boolean;
 }
 
+/**
+ * The merged Activity list (ADR-053): what happened to the user's mail and
+ * access, read from the records that already exist. Absent from `MAILROOM_USING`
+ * for CAP_APIKEYS's reason; the helper in jmap/client.ts adds it itself, only when
+ * the session advertises it. SESSION ONLY on the server.
+ */
+export const CAP_ACTIVITY = "urn:mailroom:activity";
+
+/** The filter groups of the Activity list, in display order. */
+export type ActivitySource = "ai_tool" | "decryption" | "purge" | "session" | "bulk";
+
+/** The branch an entry came from (finer than its source). */
+export type ActivityKind =
+  | "ai_tool"
+  | "ai_key"
+  | "decryption"
+  | "purge"
+  | "sign_in"
+  | "sign_out"
+  | "placement"
+  | "rule_apply";
+
+/** One entry. Fields a kind does not have are null. Never message content. */
+export interface ActivityEntry {
+  /** `<kind>:<id>`, unique in the list. */
+  id: string;
+  kind: ActivityKind;
+  source: ActivitySource;
+  at: string;
+  /** An AI call's outcome, "decrypted"/"failed", a session's end reason, or an audit action. */
+  outcome: string | null;
+  /** The AI key's name, or the rule's name for a rule apply. */
+  keyName: string | null;
+  method: string | null;
+  reason: string | null;
+  purpose: "body" | "attachment" | null;
+  fingerprint: string | null;
+  /** "Firefox on Linux" for a session; the raw user agent is never sent. */
+  device: string | null;
+  count: number | null;
+  /** What the entry concerns; `exists` is false once it is gone. */
+  object: { type: string; id: Id; exists: boolean } | null;
+}
+
+/** `Activity/list`'s answer. There is no total: `covers` is, per source, the
+ * oldest record that source still holds (null when none). */
+export interface ActivityPage {
+  list: ActivityEntry[];
+  next: string | null;
+  limit: number;
+  covers: Partial<Record<ActivitySource, string | null>>;
+}
+
 /** The `urn:mailroom:apikeys` session object (internal/api/agent_keys.go
  * apiKeysCapability): what a client building a key needs to know, stated by
  * the server rather than assumed. Every field is optional on purpose — a
