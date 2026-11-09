@@ -149,7 +149,7 @@ func searchMail() tool {
 	return tool{
 		name: "search_mail", title: "Search mail", readOnly: true, idempotent: true,
 		description: "Search the mailbox, newest first. All filters are optional and combine with AND. " +
-			"text uses the full-text index and needs the search:read scope; from, to and subject match the stored "+
+			"text uses the full-text index and needs the search:read scope; from, to and subject match the stored " +
 			"sender, recipients and subject as text and need only mail:read. " +
 			"mailboxId comes from list_mailboxes and areaId from list_areas. unread and flagged can be combined only as " +
 			"unread+flagged or read+unflagged (the server takes one required and one excluded keyword). " +
