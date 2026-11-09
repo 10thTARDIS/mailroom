@@ -1,6 +1,6 @@
 # ADR-053: One Activity view, read from the records that already exist
 
-**Status:** Proposed (v1.102.0 beta 5; #45). No operator decision is needed:
+**Status:** Accepted (v1.102.0 beta 5; #45). No operator decision is needed:
 the view adds no sign-in log, shows no message subject, and the one migration
 is two additive indexes.
 

@@ -9,11 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**The person running Mailroom can disable a user, rules can apply to one kind of
-message, and there is one place to see what happened to your mail and access.** A
-disabled user is locked out everywhere at once and comes back intact when re-enabled; a
-rule can now be limited to, say, promotional mail; and a new Activity page lists what AI
-tools did, what was decrypted or permanently deleted, and who signed in, in one list.
+**A new Activity page shows what happened to your mail in one list.** What your AI
+tools did, decryptions, purges, sign-ins and sign-outs, and bulk rule actions, newest
+first, with filters.
 
 ### Activity: one list of what happened
 
@@ -44,6 +42,21 @@ tools did, what was decrypted or permanently deleted, and who signed in, in one 
   kind of event across all users for a window (`--since 24h`, `7d` or a date;
   `--source` to narrow), says when a count is only a lower bound, and prints one
   user's entries with `--user`. It never prints message content and never writes.
+
+### Under the hood
+
+- Two new database indexes make the Activity page fast however long the history
+  is: one on the audit log and one on AI tool call records.
+
+### Upgrading
+
+- One database migration adds the two indexes on start. It needs no action.
+
+## [1.102.0-beta.4] — 2026-11-09
+
+**The fourth beta of v1.102: the person running Mailroom can disable a user, and rules can apply to one kind of
+message.** A disabled user is locked out everywhere at once and comes back intact when
+re-enabled; a rule can now be limited to, say, promotional mail.
 
 ### Disabling and re-enabling a user
 
@@ -83,17 +96,14 @@ tools did, what was decrypted or permanently deleted, and who signed in, in one 
 ### Under the hood
 
 - The unused `sync_jobs` table is removed. Nothing ever wrote to it.
-- Two new database indexes make the Activity page fast however long the history
-  is: one on the audit log and one on AI tool call records.
 - Event streams opened with an API key or OAuth token now end when the user is
   disabled, as sessions' streams already did.
 
 ### Upgrading
 
-- Four database migrations apply on start: a function that disables and enables
+- Three database migrations apply on start: a function that disables and enables
   users, a new optional `kind` column on rules (existing rules read as "any
-  kind"), the removal of the empty `sync_jobs` table, and two indexes for the
-  Activity page. None needs any action.
+  kind"), and the removal of the empty `sync_jobs` table. None needs any action.
 
 ## [1.102.0-beta.3] — 2026-11-09
 
