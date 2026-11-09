@@ -80,6 +80,21 @@ export interface PgpSignature {
   fingerprint?: string;
   previousFingerprint?: string;
   refused?: boolean;
+  /** keyChanged only (ADR-054): the fingerprint of the key the user had (the
+   * pinned one), which carries a valid certification of this key's user ID for
+   * the address. It changes the sentence, never the state: the user still
+   * decides, and nothing moves the pin without them. Absent unless every rule
+   * the server checks held; an old server never sends it. */
+  vouchedBy?: string;
+  /** keyChanged only (ADR-054): the key the user had was revoked as compromised,
+   * so the new key cannot be checked against it. */
+  previousKeyCompromised?: boolean;
+  /** verified only (ADR-054 rule 8): the user trusted this key because the key
+   * they had vouched for it, and that key has since been revoked. A notice; the
+   * state and the pin are unchanged. Absent unless true. */
+  pinVouchedByRevoked?: boolean;
+  /** with pinVouchedByRevoked: the revocation's reason is "compromised". */
+  pinVouchedByCompromised?: boolean;
   /** Refines `bad` (#795/#796). `keyExpired`: the signature checked out and was
    * refused only because the key that made it (`fingerprint`) has expired. The
    * server gives it only for a key it would otherwise have trusted for the From
@@ -545,6 +560,18 @@ export interface RecipientKeyInfo {
   keyChanged: boolean;
   /** The fingerprint last encrypted to, when `keyChanged`. */
   pinnedFingerprint: string | null;
+  /** ADR-054, `keyChanged` only: the key last written to vouches for this one
+   * (same meaning as on PgpSignature). Absent otherwise. */
+  vouchedBy?: string;
+  /** ADR-054, `keyChanged` only: the key last written to was revoked as
+   * compromised. Absent otherwise. */
+  previousKeyCompromised?: boolean;
+  /** ADR-054 rule 8, `usable` only: the key is the pin and the key that vouched
+   * for it has since been revoked (same meaning as on PgpSignature). Absent
+   * unless true. A notice; encryption is not refused. */
+  pinVouchedByRevoked?: boolean;
+  /** with pinVouchedByRevoked: the revocation's reason is "compromised". */
+  pinVouchedByCompromised?: boolean;
   /** #795: when the chosen key stops working (UTCDate; null = never). Absent on
    * a server before #795. */
   expiresAt?: string | null;

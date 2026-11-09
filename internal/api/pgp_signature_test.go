@@ -10,6 +10,7 @@ import (
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/packet"
 
+	"mailroom/internal/compose"
 	"mailroom/internal/pgpverify"
 	"mailroom/internal/store"
 )
@@ -179,4 +180,51 @@ func TestEmbeddedCandidatesOrderAndBounds(t *testing.T) {
 	if len(out) != 2 || !bytes.Equal(out[0], big) || string(out[1]) != "small" {
 		t.Errorf("byte bound: got %d candidates", len(out))
 	}
+}
+
+// ADR-054: the vouch fields on a keyChanged result. classifySignature only COPIES
+// the vouch (computed by judgeSignature); the rules are pgpkeys.CheckVouch's. What
+// is decided here is where a vouch may attach: only to a change measured against
+// the PIN, and never to a refused key.
+func TestClassifySignatureVouchFields(t *testing.T) {
+	const oldFp, newFp = "AAAA", "BBBB"
+	verified := pgpverify.Result{Verdict: pgpverify.VerdictVerified, SignerFingerprint: newFp}
+	held := func(refused bool) *heldSigner {
+		return &heldSigner{key: store.ContactKey{Fingerprint: newFp, Source: store.ContactKeyWKD, Refused: refused}, names: true}
+	}
+	vouch := compose.Vouch{VouchedBy: oldFp}
+	compromised := compose.Vouch{PreviousCompromised: true}
+
+	t.Run("a change against the pin carries the vouch", func(t *testing.T) {
+		got, _ := classifySignature(sigFacts{res: verified, signer: held(false), pin: oldFp, hasPin: true, vouch: vouch})
+		if got.State != sigKeyChanged || got.VouchedBy != oldFp || got.PreviousKeyCompromised {
+			t.Errorf("got %+v", got)
+		}
+	})
+	t.Run("CONTROL: no vouch computed, none shown", func(t *testing.T) {
+		got, _ := classifySignature(sigFacts{res: verified, signer: held(false), pin: oldFp, hasPin: true})
+		if got.State != sigKeyChanged || got.VouchedBy != "" || got.PreviousKeyCompromised {
+			t.Errorf("got %+v", got)
+		}
+	})
+	t.Run("the compromised warning attaches to a change against the pin", func(t *testing.T) {
+		got, _ := classifySignature(sigFacts{res: verified, signer: held(false), pin: oldFp, hasPin: true, vouch: compromised})
+		if got.State != sigKeyChanged || got.VouchedBy != "" || !got.PreviousKeyCompromised {
+			t.Errorf("got %+v", got)
+		}
+	})
+	t.Run("a change against the best eligible key (no pin) cannot be vouched", func(t *testing.T) {
+		s := held(false)
+		s.key.Source = store.ContactKeyAutocrypt // unauthenticated: not eligible
+		got, _ := classifySignature(sigFacts{res: verified, signer: s, other: oldFp, vouch: vouch})
+		if got.State != sigKeyChanged || got.VouchedBy != "" {
+			t.Errorf("got %+v", got)
+		}
+	})
+	t.Run("the state never changes with a vouch: still keyChanged, pin untouched", func(t *testing.T) {
+		got, pinFirst := classifySignature(sigFacts{res: verified, signer: held(false), pin: oldFp, hasPin: true, vouch: vouch})
+		if got.State != sigKeyChanged || pinFirst {
+			t.Errorf("state %q pinFirst %v", got.State, pinFirst)
+		}
+	})
 }

@@ -41,32 +41,43 @@ var errKeyRevoked = errors.New("pgpkeyd: the key is revoked")
 // the same order and with the same three-line check as Sign: the key is found,
 // then it must be the caller's, before anything else is asked of it.
 func (s *Service) lifecycleTarget(ctx context.Context, op, rawUserID, keyID string) (string, Record, KeyUpdater, error) {
-	userID, err := validUserID(rawUserID)
+	userID, rec, err := s.ownedKey(ctx, op, rawUserID, keyID)
 	if err != nil {
 		return "", Record{}, nil, err
-	}
-	if strings.TrimSpace(keyID) == "" {
-		return "", Record{}, nil, pgpwire.Errorf(pgpwire.CodeInvalidRequest, "key_id is required")
-	}
-	rec, err := s.vault.Get(WithCaller(ctx, userID), keyID)
-	if errors.Is(err, ErrNoSuchKey) {
-		return "", Record{}, nil, pgpwire.Errorf(pgpwire.CodeNotFound, "no such key")
-	}
-	if err != nil {
-		s.log.Error("pgp key lookup failed", "op", op, "key_id", keyID, "err", err)
-		return "", Record{}, nil, pgpwire.Errorf(pgpwire.CodeInternal, "key lookup failed")
-	}
-	// ─── THE OWNERSHIP CHECK ──── same three lines as ExportPublic and Sign.
-	if rec.UserID != userID {
-		s.log.Warn("pgp "+op+" refused: wrong owner",
-			"caller_user_id", userID, "key_id", keyID, "owner_user_id", rec.UserID)
-		return "", Record{}, nil, pgpwire.Errorf(pgpwire.CodeDenied, "key belongs to another user")
 	}
 	updater, ok := s.vault.(KeyUpdater)
 	if !ok {
 		return "", Record{}, nil, pgpwire.Errorf(pgpwire.CodeInternal, "this vault cannot update keys")
 	}
 	return userID, rec, updater, nil
+}
+
+// ownedKey resolves keyID and refuses it unless it is the caller's: the
+// confused-deputy check every verb that is handed a key id runs before anything
+// else is asked of the key (Generate's certifier included, ADR-054).
+func (s *Service) ownedKey(ctx context.Context, op, rawUserID, keyID string) (string, Record, error) {
+	userID, err := validUserID(rawUserID)
+	if err != nil {
+		return "", Record{}, err
+	}
+	if strings.TrimSpace(keyID) == "" {
+		return "", Record{}, pgpwire.Errorf(pgpwire.CodeInvalidRequest, "key_id is required")
+	}
+	rec, err := s.vault.Get(WithCaller(ctx, userID), keyID)
+	if errors.Is(err, ErrNoSuchKey) {
+		return "", Record{}, pgpwire.Errorf(pgpwire.CodeNotFound, "no such key")
+	}
+	if err != nil {
+		s.log.Error("pgp key lookup failed", "op", op, "key_id", keyID, "err", err)
+		return "", Record{}, pgpwire.Errorf(pgpwire.CodeInternal, "key lookup failed")
+	}
+	// ─── THE OWNERSHIP CHECK ──── same three lines as ExportPublic and Sign.
+	if rec.UserID != userID {
+		s.log.Warn("pgp "+op+" refused: wrong owner",
+			"caller_user_id", userID, "key_id", keyID, "owner_user_id", rec.UserID)
+		return "", Record{}, pgpwire.Errorf(pgpwire.CodeDenied, "key belongs to another user")
+	}
+	return userID, rec, nil
 }
 
 // Extend moves a stored key's expiry to now + req.Days, by re-signing its
@@ -293,7 +304,7 @@ func extendEntity(e *openpgp.Entity, until, now time.Time) error {
 		}
 		cp.KeyLifetimeSecs = &l
 		cp.SigLifetimeSecs = nil // a self-signature that itself expires would undo the extension
-		if weakHashes[cp.Hash] {
+		if pgpkeys.WeakHash(cp.Hash) {
 			cp.Hash = stdcrypto.SHA256
 		}
 		return &cp, nil
@@ -352,7 +363,7 @@ func extendEntity(e *openpgp.Entity, until, now time.Time) error {
 			emb := *sub.Sig.EmbeddedSignature
 			emb.Notations = append([]*packet.Notation(nil), sub.Sig.EmbeddedSignature.Notations...)
 			emb.CreationTime = sig.CreationTime
-			if weakHashes[emb.Hash] {
+			if pgpkeys.WeakHash(emb.Hash) {
 				emb.Hash = stdcrypto.SHA256
 			}
 			if err := emb.CrossSignKey(sub.PublicKey, e.PrimaryKey, sub.PrivateKey, cfg); err != nil {
@@ -366,10 +377,6 @@ func extendEntity(e *openpgp.Entity, until, now time.Time) error {
 		sub.Sig = sig
 	}
 	return nil
-}
-
-var weakHashes = map[stdcrypto.Hash]bool{
-	stdcrypto.MD5: true, stdcrypto.SHA1: true, stdcrypto.RIPEMD160: true,
 }
 
 func replaceSig(list []*packet.Signature, old, repl *packet.Signature) []*packet.Signature {

@@ -69,7 +69,7 @@ func UserIDs(binary []byte, now time.Time) ([]UserID, error) {
 
 	var first, rest []UserID
 	for _, u := range kb.uids {
-		if len(u.sigs.order) == 0 {
+		if !u.self {
 			continue // no verifying self-signature: not the holder's claim
 		}
 		ident := e.Identities[u.uid.Id]

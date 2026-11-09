@@ -216,6 +216,41 @@ func (s *Service) Generate(ctx context.Context, req pgpwire.GenerateRequest) (*p
 		}
 	}
 
+	// ─── KEY ROTATION: THE OLD KEY CERTIFIES THE NEW ONE (ADR-054 section 1) ───
+	// Before anything is serialized for storage, so the stored public key carries
+	// the certification from its first byte: no window with an uncertified key, no
+	// second write. The certifier is resolved and ownership-checked first (another
+	// user's key id is CodeDenied), and a certifier that can no longer sign leaves
+	// the key uncertified with a reason; it never refuses the generation.
+	var certified bool
+	var certifyReason string
+	var certifier *Record
+	if req.CertifierKeyID != "" {
+		_, old, err := s.ownedKey(ctx, "certify", req.UserID, req.CertifierKeyID)
+		if err != nil {
+			return nil, err
+		}
+		certifier = &old
+		if certifyReason = certifierRefusal(old, created); certifyReason == "" {
+			oldEntity, err := s.unseal(old)
+			if err != nil {
+				return nil, err
+			}
+			uid := ""
+			for name := range entity.Identities {
+				uid = name
+			}
+			if err := entity.SignIdentity(uid, oldEntity, cfg); err != nil {
+				// Not relayed: go-crypto's text can name key internals.
+				s.log.Warn("pgp generate: the certifier could not sign", "user_id", userID,
+					"certifier_key_id", old.KeyID, "err", err)
+				certifyReason = pgpwire.CertifyReasonOldKeyUnusable
+			} else {
+				certified = true
+			}
+		}
+	}
+
 	// Serialize WITHOUT re-signing: this is a storage round-trip, not a
 	// publication, and re-signing here would give the stored bytes a different
 	// signature on every save for no benefit.
@@ -239,6 +274,18 @@ func (s *Service) Generate(ctx context.Context, req pgpwire.GenerateRequest) (*p
 		s.log.Error("pgp key generation: refusing an artefact that does not say what was asked",
 			"user_id", userID, "err", err)
 		return nil, pgpwire.Errorf(pgpwire.CodeInternal, "key generation failed")
+	}
+
+	// ⚠ THE CERTIFICATION IS CHECKED ON THE STORED BYTES, NOT ASSUMED: re-read
+	// the public key and verify it under the old key's PUBLIC half, as an
+	// outside reader will. A certification that does not verify must not be
+	// reported as made.
+	if certified {
+		if !pgpkeys.CertifiedBy(pub, certifier.PublicKey, email) {
+			s.log.Error("pgp key generation: the certification does not verify",
+				"user_id", userID, "certifier_key_id", certifier.KeyID)
+			return nil, pgpwire.Errorf(pgpwire.CodeInternal, "key generation failed")
+		}
 	}
 
 	keyID := ulid.Make().String()
@@ -280,7 +327,30 @@ func (s *Service) Generate(ctx context.Context, req pgpwire.GenerateRequest) (*p
 	if err != nil {
 		return nil, err
 	}
-	return &pgpwire.GenerateResponse{Key: info}, nil
+	return &pgpwire.GenerateResponse{Key: info, Certified: certified, CertifyReason: certifyReason}, nil
+}
+
+// certifierRefusal says why rec cannot certify at now, or "": revoked, retired
+// (decrypt-only), or its own packets no longer allow a signature
+// (Validity.CanSign: revoked, or the primary key expired).
+func certifierRefusal(rec Record, now time.Time) string {
+	switch {
+	case rec.RevokedAt != nil:
+		return pgpwire.CertifyReasonOldKeyRevoked
+	case rec.DecryptOnly:
+		return pgpwire.CertifyReasonOldKeyRetired
+	}
+	v, err := pgpkeys.Assess(rec.PublicKey, now)
+	if err != nil {
+		return pgpwire.CertifyReasonOldKeyUnusable
+	}
+	if !v.CanSign(now) {
+		if v.Revoked {
+			return pgpwire.CertifyReasonOldKeyRevoked
+		}
+		return pgpwire.CertifyReasonOldKeyExpired
+	}
+	return ""
 }
 
 // ExportPublic returns the armored PUBLIC key of a stored key the calling user

@@ -212,6 +212,18 @@ type KeyResolution struct {
 	// confirms (ContactKey/decide, ADR-039).
 	KeyChanged        bool
 	PinnedFingerprint string
+	// VouchedBy and PreviousKeyCompromised (KeyChanged only, ADR-054): the pinned
+	// key vouches for the new one, or the pinned key was revoked as compromised.
+	// They change what the prompt SAYS; encryption stays refused until the user
+	// decides either way.
+	VouchedBy              string
+	PreviousKeyCompromised bool
+	// PinVouchedByRevoked and PinVouchedByCompromised (the key is the pin, ADR-054
+	// rule 8): the user trusted this key because the previous pin vouched for it,
+	// and that previous key has since been revoked (as compromised). A notice
+	// only; the pin is unchanged and encryption is not refused.
+	PinVouchedByRevoked     bool
+	PinVouchedByCompromised bool
 	// ExpiresAt (Found only): when the chosen key stops being usable
 	// (pgpkeys.Validity.UsableUntil); nil means it never expires (#795).
 	ExpiresAt *time.Time
@@ -259,8 +271,44 @@ func ResolveRecipient(ctx context.Context, tx *store.UserTx, address string, now
 	}
 	if hasPin && pinned != key.Fingerprint && key.Source != store.ContactKeyManual {
 		res.KeyChanged, res.PinnedFingerprint = true, pinned
+		if err := fillVouch(ctx, tx, &res, key, pinned, now); err != nil {
+			return KeyResolution{}, err
+		}
+	}
+	if hasPin && pinned == key.Fingerprint {
+		if cid, found, cerr := tx.ContactIDForAddress(ctx, key.Address); cerr == nil && found {
+			if keys, kerr := tx.ContactKeysFor(ctx, cid); kerr == nil {
+				if pv, perr := PinVoucherFor(ctx, tx, cid, keys, pinned, now); perr == nil {
+					res.PinVouchedByRevoked, res.PinVouchedByCompromised = pv.Revoked, pv.Compromised
+				}
+			}
+		}
 	}
 	return res, nil
+}
+
+// fillVouch adds the vouch facts to a key-changed resolution. A failure to read
+// them leaves the ordinary prompt (fail toward asking, never toward softening).
+func fillVouch(ctx context.Context, tx *store.UserTx, res *KeyResolution, key EncryptTo, pinned string, now time.Time) error {
+	cid, found, err := tx.ContactIDForAddress(ctx, key.Address)
+	if err != nil || !found {
+		return err
+	}
+	keys, err := tx.ContactKeysFor(ctx, cid)
+	if err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if k.Kind == store.KeyPGP && k.Fingerprint == key.Fingerprint {
+			v, err := VouchForKey(ctx, tx, key.Address, pinned, k, now)
+			if err != nil {
+				return err
+			}
+			res.VouchedBy, res.PreviousKeyCompromised = v.VouchedBy, v.PreviousCompromised
+			return nil
+		}
+	}
+	return nil
 }
 
 // explainNoKey says why an address with no eligible key has none, when a key
@@ -316,6 +364,9 @@ func explainNoKey(ctx context.Context, tx *store.UserTx, address string, now tim
 type KeyChange struct {
 	Address     string
 	Pinned, Now string
+	// VouchedBy and PreviousKeyCompromised: see KeyResolution (ADR-054).
+	VouchedBy              string
+	PreviousKeyCompromised bool
 }
 
 // KeyChangedError refuses an encrypted send because recipients' keys changed.
@@ -415,7 +466,8 @@ func (c *Composer) planEncrypt(ctx context.Context, tx *store.UserTx, si store.S
 		case !r.Found:
 			missing = append(missing, a)
 		case r.KeyChanged:
-			changed = append(changed, KeyChange{Address: a, Pinned: r.PinnedFingerprint, Now: r.Key.Fingerprint})
+			changed = append(changed, KeyChange{Address: a, Pinned: r.PinnedFingerprint, Now: r.Key.Fingerprint,
+				VouchedBy: r.VouchedBy, PreviousKeyCompromised: r.PreviousKeyCompromised})
 		default:
 			to = append(to, r.Key)
 		}

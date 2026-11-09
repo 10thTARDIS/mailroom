@@ -48,6 +48,8 @@ describe("signatureNotice (#47, ADR-039)", () => {
       fingerprint: B,
       previousFingerprint: A,
       refused: false,
+      vouched: false,
+      previousCompromised: false,
     });
     expect(
       signatureNotice({
@@ -58,6 +60,23 @@ describe("signatureNotice (#47, ADR-039)", () => {
         refused: true,
       }),
     ).toMatchObject({ refused: true });
+  });
+
+  it("a vouch counts only when it names exactly the key the user had, and the key is not refused (ADR-054)", () => {
+    const base = { state: "keyChanged" as const, address: "alice@example.com", fingerprint: B, previousFingerprint: A };
+    expect(signatureNotice({ ...base, vouchedBy: A })).toMatchObject({ vouched: true });
+    expect(signatureNotice({ ...base, vouchedBy: A.toLowerCase() })).toMatchObject({ vouched: true });
+    // Each of these is the ORDINARY prompt:
+    expect(signatureNotice({ ...base })).toMatchObject({ vouched: false });
+    expect(signatureNotice({ ...base, vouchedBy: B })).toMatchObject({ vouched: false });
+    expect(signatureNotice({ ...base, vouchedBy: "" })).toMatchObject({ vouched: false });
+    expect(signatureNotice({ ...base, vouchedBy: A, refused: true })).toMatchObject({ vouched: false });
+  });
+
+  it("carries the compromised-previous-key warning (ADR-054)", () => {
+    const base = { state: "keyChanged" as const, address: "alice@example.com", fingerprint: B, previousFingerprint: A };
+    expect(signatureNotice({ ...base, previousKeyCompromised: true })).toMatchObject({ previousCompromised: true });
+    expect(signatureNotice({ ...base, previousKeyCompromised: false })).toMatchObject({ previousCompromised: false });
   });
 
   it("a keyChanged that cannot be acted on is the weaker unknown state", () => {
@@ -107,5 +126,18 @@ describe("a signature by a key that has since expired", () => {
 
   it("the reason never softens a state other than bad", () => {
     expect(signatureNotice({ state: "unknownKey", reason: "keyExpired" })).toEqual({ state: "unknownKey", fingerprint: null });
+  });
+});
+
+describe("the rule 8 notice (ADR-054)", () => {
+  const verified = { state: "verified", fingerprint: "0123456789ABCDEF0123456789ABCDEF01234567" } as const;
+  it("is carried only when the server says so", () => {
+    expect(signatureNotice({ ...verified, pinVouchedByRevoked: true })).toMatchObject({ pinVouchedByRevoked: true });
+    expect(signatureNotice({ ...verified, pinVouchedByRevoked: true, pinVouchedByCompromised: true })).toMatchObject({
+      pinVouchedByRevoked: true,
+      pinVouchedByCompromised: true,
+    });
+    expect(signatureNotice(verified)).not.toHaveProperty("pinVouchedByRevoked");
+    expect(signatureNotice({ ...verified, pinVouchedByCompromised: true })).not.toHaveProperty("pinVouchedByRevoked");
   });
 });

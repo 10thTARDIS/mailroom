@@ -433,6 +433,17 @@ const en = {
     "Signed with a key you haven't seen from this sender (key {fingerprint}), so the signature can't be checked.",
   "thread.signature.keyChanged":
     "Signed with a NEW key, different from the one you had for {address}.",
+  // ADR-054 rule 8: a pin the user made because the previous key vouched for it,
+  // whose voucher has since been revoked. Said in the reader and in compose.
+  "keys.pinVouchedByRevoked":
+    "You trusted this key because {name}'s previous key vouched for it. That previous key has since been revoked. Check this key with them another way.",
+  "keys.pinVouchedByCompromised":
+    "You trusted this key because {name}'s previous key vouched for it. That previous key has since been revoked as compromised. Check this key with them another way.",
+  "thread.signature.keyChangedVouched": "Signed with a new key for {address}.",
+  "thread.signature.vouchedWhy":
+    "Their previous key, the one you had, vouches for it. Trust the new key, or keep the old one. Nothing changes until you choose.",
+  "thread.signature.previousCompromised":
+    "The key you had for {address} was reported stolen or compromised, so a new key from them cannot be checked against it. Confirm the fingerprint another way.",
   "thread.signature.keyChangedRefused":
     "Signed with a different key from the one you had for {address}. You chose to keep the old key, so this one is not trusted.",
   "thread.signature.keyChangedWhy":
@@ -716,6 +727,8 @@ const en = {
   "compose.encryptMissing": "Can't encrypt: no key for {names}.",
   "compose.encryptChanged":
     "Can't encrypt: the key for {names} has changed since you last wrote to them, and has to be confirmed first.",
+  "compose.encryptChangedVouchedHeading":
+    "{address} has a new key.",
   "compose.encryptChangedHeading":
     "The key for {address} is different from the one you last wrote to.",
   "compose.encryptPending": "Checking for encryption keys…",
@@ -1425,6 +1438,7 @@ const en = {
   "keys.event.revokedSeen": "Revoked by its owner (seen {via})",
   "keys.event.revokedSeenPlain": "Revoked by its owner",
   "keys.event.pinned": "You chose to use it",
+  "keys.event.pinnedVouched": "You chose to use it; the key you had before vouched for it",
   "keys.event.refused": "You chose not to use it",
   "keys.event.removed": "You removed it",
   "keys.event.other": "Changed",

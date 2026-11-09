@@ -181,6 +181,11 @@ describe("correspondents' keys (#815, #818)", () => {
     });
   });
 
+  it("a pinned event the user made for a vouched-for key keeps its own source (ADR-054)", () => {
+    const [l] = keyHistoryLines([{ kind: "pinned", source: "vouched:0123456789ABCDEF0123456789ABCDEF01234567", at: "x", expiresAt: null }]);
+    expect(l).toMatchObject({ kind: "pinned", source: "vouched" });
+  });
+
   it("decide is asked about the pinned address, else one the key and the contact share", () => {
     expect(decideAddress(C1_CONTACT_KEY_ALICE, ["alice@example.org"])).toBe("alice@example.org");
     // CAPTURED: bob's pin went with the removal; the contact's address is used.

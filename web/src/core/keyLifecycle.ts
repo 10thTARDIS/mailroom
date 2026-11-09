@@ -250,7 +250,7 @@ export type KeyEventKind =
   | "other";
 
 /** Where an event came from, as the page words it. */
-export type KeyEventSource = "autocrypt" | "wkd" | "manual" | "keyserver" | "user" | "other";
+export type KeyEventSource = "autocrypt" | "wkd" | "manual" | "keyserver" | "user" | "vouched" | "other";
 
 const EVENT_KINDS: readonly string[] = ["first_seen", "renewed", "updated", "revoked_seen", "pinned", "refused", "removed"];
 const EVENT_SOURCES: readonly string[] = ["autocrypt", "wkd", "manual", "keyserver", "user"];
@@ -266,7 +266,12 @@ export interface KeyHistoryLine {
 export function keyHistoryLines(events: readonly ContactKeyEvent[]): KeyHistoryLine[] {
   return events.map((e) => ({
     kind: EVENT_KINDS.includes(e.kind) ? (e.kind as KeyEventKind) : "other",
-    source: EVENT_SOURCES.includes(e.source) ? (e.source as KeyEventSource) : "other",
+    // "vouched:<fingerprint>" (ADR-054): the user trusted a key the previous one vouched for.
+    source: e.source.startsWith("vouched:")
+      ? "vouched"
+      : EVENT_SOURCES.includes(e.source)
+        ? (e.source as KeyEventSource)
+        : "other",
     at: e.at,
     expiresAt: e.expiresAt ?? null,
   }));

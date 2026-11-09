@@ -380,6 +380,12 @@ type GenerateRequest struct {
 	// time, so the packets say exactly this moment. At least MinKeyLifetime
 	// and at most MaxKeyLifetimeDays from now. Setting both is refused.
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// CertifierKeyID, when set, names one of THIS user's own keys that certifies
+	// the new key's user ID before the new key is stored (key rotation, ADR-054
+	// section 1). The daemon resolves and ownership-checks it as it does any key
+	// id (another user's key is CodeDenied). A certifier that can no longer sign
+	// is not an error: the key is generated uncertified and the response says why.
+	CertifierKeyID string `json:"certifier_key_id,omitempty"`
 }
 
 // MinKeyLifetime is the shortest validity an exact expiry may ask for (#813):
@@ -423,7 +429,22 @@ type KeyInfo struct {
 // public half. The private half never leaves the daemon.
 type GenerateResponse struct {
 	Key KeyInfo `json:"key"`
+	// Certified: the new key's user ID carries a certification by the
+	// CertifierKeyID key, checked against the stored bytes. Always false when no
+	// certifier was named.
+	Certified bool `json:"certified"`
+	// CertifyReason says why a named certifier did not certify: one of the
+	// CertifyReason* values. Empty when Certified or when none was named.
+	CertifyReason string `json:"certify_reason,omitempty"`
 }
+
+// Why a named certifier did not certify (GenerateResponse.CertifyReason).
+const (
+	CertifyReasonOldKeyExpired  = "oldKeyExpired"
+	CertifyReasonOldKeyRevoked  = "oldKeyRevoked"
+	CertifyReasonOldKeyRetired  = "oldKeyRetired"
+	CertifyReasonOldKeyUnusable = "oldKeyUnusable"
+)
 
 // ExportPublicRequest asks for the public half of a stored key.
 //

@@ -22,10 +22,12 @@ import type { JSX } from "react";
 import { recipientKeyNotices } from "../../../core/encryption";
 import type { RecipientKeyNotice } from "../../../core/encryption";
 import type { RecipientKeyInfo } from "../../../core/jmap/types";
+import { isVouched } from "../../../core/pgpSignature";
 import type { ComposeRefreshResult } from "../../../core/keyLifecycle";
 import { keyDateShort } from "../../../core/userKeys";
 import { t } from "../../i18n";
 import { KeyChangeDecision } from "../KeyChangeDecision";
+import { PinVoucherWarning } from "../PinVoucherWarning";
 import { refreshText } from "../settings/keys/text";
 import { joinNames } from "./sendLine";
 import type { EncryptOffer } from "./encryptOffer";
@@ -105,6 +107,20 @@ export function EncryptSwitch({
         ],
   );
 
+  // ADR-054 rule 8: a key trusted on the strength of a key that has since been
+  // revoked. Said wherever the switch is drawn, whether or not it is offered.
+  const pinWarnings = recipients.flatMap((address) => {
+    const info = keys[address];
+    if (!info || !info.usable || info.keyChanged || info.pinVouchedByRevoked !== true) return [];
+    return [
+      <PinVoucherWarning
+        key={`pinvouch-${address}`}
+        name={nameOf(address)}
+        compromised={info.pinVouchedByCompromised === true}
+      />,
+    ];
+  });
+
   if (offer.offered) {
     return (
       <div className="compose-encrypt">
@@ -123,6 +139,7 @@ export function EncryptSwitch({
           </p>
         ) : null}
         {refreshNotes}
+        {pinWarnings}
       </div>
     );
   }
@@ -167,7 +184,14 @@ export function EncryptSwitch({
               address={address}
               fingerprint={info.fingerprint}
               previousFingerprint={info.pinnedFingerprint}
-              heading={t("compose.encryptChangedHeading", { address })}
+              vouched={isVouched(info.vouchedBy, info.pinnedFingerprint, false)}
+              previousCompromised={info.previousKeyCompromised === true}
+              heading={t(
+                isVouched(info.vouchedBy, info.pinnedFingerprint, false) && info.previousKeyCompromised !== true
+                  ? "compose.encryptChangedVouchedHeading"
+                  : "compose.encryptChangedHeading",
+                { address },
+              )}
               onDecide={(decision) => onDecideKey(address, info.fingerprint as string, decision)}
             />,
           ];
@@ -214,6 +238,7 @@ export function EncryptSwitch({
       </p>
       {refreshes}
       {refreshNotes}
+      {pinWarnings}
       {imports}
       {decisions}
     </>

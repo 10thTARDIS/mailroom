@@ -12,9 +12,12 @@ package pgpkeys
 
 import (
 	"bytes"
+	stdcrypto "crypto"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
@@ -292,17 +295,22 @@ var ErrDifferentKey = errors.New("pgpkeys: the two copies are not the same prima
 // which is anyone who can send mail — strip a revocation by replaying the copy
 // from before it.
 //
-// Third-party certifications are DROPPED rather than kept unverified: nothing in
-// Mailroom reads them, and keeping whatever a stranger attaches would let one
-// inflate a stored key past MaxKeyBytes and so block every later renewal of it.
+// Third-party certifications are DROPPED rather than kept unverified: keeping
+// whatever a stranger attaches would let one inflate a stored key past
+// MaxKeyBytes and so block every later renewal of it. ONE KIND SURVIVES (ADR-054
+// section 2): a certification of a user ID, issued by one of certifiers (the
+// public keys of the key(s) PINNED for the contact) and verifying under it, at
+// most the newest per certifier and user ID. That is how a correspondent's old key vouches for their new one; see
+// keepCertification. No certifiers, no exception.
 //
 // changed compares the merged bytes against the stored copy NORMALISED the same
 // way (filtered and re-serialised), so a re-sighting of an identical key — or of
 // one that differs only in dropped material — is not a change and costs no
 // write. stored must be a key this package can read; incoming may be anything,
 // and is refused with an error rather than half-merged.
-func Merge(stored, incoming []byte) (merged []byte, changed bool, err error) {
-	base, err := readKeyBlock(stored)
+func Merge(stored, incoming []byte, certifiers ...[]byte) (merged []byte, changed bool, err error) {
+	certs := certifierKeys(certifiers)
+	base, err := readKeyBlock(stored, certs...)
 	if err != nil {
 		return nil, false, fmt.Errorf("stored copy: %w", err)
 	}
@@ -310,7 +318,7 @@ func Merge(stored, incoming []byte) (merged []byte, changed bool, err error) {
 	if err != nil {
 		return nil, false, err
 	}
-	in, err := readKeyBlock(incoming)
+	in, err := readKeyBlock(incoming, certs...)
 	if err != nil {
 		return nil, false, fmt.Errorf("incoming copy: %w", err)
 	}
@@ -339,14 +347,59 @@ func Merge(stored, incoming []byte) (merged []byte, changed bool, err error) {
 // copy that adds nothing reproduces the normalised stored copy byte for byte.
 type keyBlock struct {
 	primary *packet.PublicKey
-	keySigs sigSet
-	uids    []*uidBlock
-	subkeys []*subkeyBlock
+	// certifiers are the primary keys of the key(s) PINNED for the contact (a
+	// held or refused key is never one): the only issuers whose certification of a user ID is kept
+	// (keepCertification). Empty means every third-party certification drops.
+	certifiers []*packet.PublicKey
+	keySigs    sigSet
+	uids       []*uidBlock
+	subkeys    []*subkeyBlock
 }
 
 type uidBlock struct {
 	uid  *packet.UserId
 	sigs sigSet
+	// third holds the kept third-party signatures, at most ONE per (certifier,
+	// kind): the newest certification and the newest certification revocation
+	// each certifier made over this user ID. Bounded whatever arrives
+	// (keepCertification); emitted after sigs in key order.
+	third map[string]thirdSig
+	// self: at least one verified SELF-signature. sigs may also hold a kept
+	// third-party certification (see keepCertification), which on its own does
+	// not make a user ID the holder's claim and is not emitted.
+	self bool
+}
+
+// thirdSig is one kept third-party signature and the time it claims.
+type thirdSig struct {
+	created time.Time
+	b       []byte
+}
+
+// offer keeps b under key if it is newer than what is held (a tie goes to the
+// smaller byte string, so the outcome never depends on arrival order).
+func (u *uidBlock) offer(key string, created time.Time, b []byte) {
+	if u.third == nil {
+		u.third = map[string]thirdSig{}
+	}
+	if old, ok := u.third[key]; ok {
+		if created.Before(old.created) || (created.Equal(old.created) && bytes.Compare(b, old.b) >= 0) {
+			return
+		}
+	}
+	u.third[key] = thirdSig{created: created, b: b}
+}
+
+// emitThird writes the kept third-party signatures in a fixed (key) order.
+func (u *uidBlock) emitThird(buf *bytes.Buffer) {
+	keys := make([]string, 0, len(u.third))
+	for k := range u.third {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		buf.Write(u.third[k].b)
+	}
 }
 
 type subkeyBlock struct {
@@ -384,7 +437,7 @@ func (s *sigSet) absorb(o sigSet) {
 // readKeyBlock parses the FIRST transferable public key in binary, verifying
 // every signature against its primary key and dropping any that does not
 // verify. A blob carrying secret key material is refused outright.
-func readKeyBlock(binary []byte) (*keyBlock, error) {
+func readKeyBlock(binary []byte, certifiers ...*packet.PublicKey) (*keyBlock, error) {
 	if len(binary) == 0 {
 		return nil, ErrMalformed
 	}
@@ -392,7 +445,7 @@ func readKeyBlock(binary []byte) (*keyBlock, error) {
 		return nil, ErrTooLarge
 	}
 	r := packet.NewReader(bytes.NewReader(binary))
-	kb := &keyBlock{}
+	kb := &keyBlock{certifiers: certifiers}
 
 	// Where the next signature attaches: the primary (before any user ID or
 	// subkey), a user ID, a subkey, or nowhere (a user attribute or packet we
@@ -531,14 +584,74 @@ func (kb *keyBlock) addUIDSig(u *uidBlock, sig *packet.Signature) {
 		return
 	}
 	if !kb.bySelf(sig) {
-		return // third-party certification: dropped (see Merge)
+		// A third-party certification is dropped unless keepCertification says
+		// otherwise (see Merge).
+		kb.keepCertification(u, sig)
+		return
 	}
 	if err := kb.primary.VerifyUserIdSignature(u.uid.Id, kb.primary, sig); err != nil {
 		return
 	}
 	if b, ok := serializeSig(sig); ok {
 		u.sigs.add(b)
+		u.self = true
 	}
+}
+
+// keepCertification is the ONE exception to dropping third-party signatures
+// (ADR-054 section 2): sig is kept if and only if
+//
+//  1. it names as its issuer one of kb.certifiers, a key the user has PINNED for
+//     the contact (CheckKeyIdOrFingerprint: the claim),
+//  2. its hash is not MD5, SHA-1 or RIPEMD-160 (WeakHash): a chosen-prefix
+//     collision can transplant a certification made with one,
+//  3. it VERIFIES under that certifier's public key over this user ID of this
+//     primary (VerifyUserIdSignature: the proof; the claim alone is not enough),
+//  4. its type is a certification, 0x10 to 0x13, or a certification revocation,
+//     0x30 (which voids a vouch: CheckVouch).
+//
+// And at most the NEWEST of each kind is kept per (certifier, user ID), so the
+// bytes kept are bounded whatever arrives, even from the pinned certifier.
+func (kb *keyBlock) keepCertification(u *uidBlock, sig *packet.Signature) bool {
+	kind := "c"
+	switch sig.SigType {
+	case packet.SigTypeGenericCert, packet.SigTypePersonaCert, packet.SigTypeCasualCert,
+		packet.SigTypePositiveCert:
+	case packet.SigTypeCertificationRevocation:
+		kind = "r"
+	default:
+		return false
+	}
+	if WeakHash(sig.Hash) {
+		return false
+	}
+	for _, c := range kb.certifiers {
+		if !sig.CheckKeyIdOrFingerprint(c) {
+			continue
+		}
+		if c.VerifyUserIdSignature(u.uid.Id, kb.primary, sig) != nil {
+			continue
+		}
+		b, ok := serializeSig(sig)
+		if !ok {
+			return false
+		}
+		u.offer(hex.EncodeToString(c.Fingerprint)+"/"+kind, sig.CreationTime, b)
+		return true
+	}
+	return false
+}
+
+// WeakHash reports whether h is a digest a third-party certification must not
+// use: MD5, SHA-1 and RIPEMD-160 have practical or near-practical collision
+// attacks. One definition for every check (the merge, CheckVouch, and the crypto
+// process when it renews a signature).
+func WeakHash(h stdcrypto.Hash) bool {
+	switch h {
+	case stdcrypto.MD5, stdcrypto.SHA1, stdcrypto.RIPEMD160:
+		return true
+	}
+	return false
 }
 
 func (kb *keyBlock) addSubkeySig(s *subkeyBlock, sig *packet.Signature) {
@@ -576,7 +689,12 @@ func serializeSig(sig *packet.Signature) ([]byte, bool) {
 func (kb *keyBlock) absorb(o *keyBlock) {
 	kb.keySigs.absorb(o.keySigs)
 	for _, u := range o.uids {
-		kb.userID(u.uid).sigs.absorb(u.sigs)
+		dst := kb.userID(u.uid)
+		dst.sigs.absorb(u.sigs)
+		for k, t := range u.third {
+			dst.offer(k, t.created, t.b)
+		}
+		dst.self = dst.self || u.self
 	}
 	for _, s := range o.subkeys {
 		dst := kb.subkey(s.pub)
@@ -598,7 +716,7 @@ func (kb *keyBlock) serialize() ([]byte, error) {
 		buf.Write(b)
 	}
 	for _, u := range kb.uids {
-		if len(u.sigs.order) == 0 {
+		if !u.self {
 			continue
 		}
 		if err := u.uid.Serialize(&buf); err != nil {
@@ -607,6 +725,7 @@ func (kb *keyBlock) serialize() ([]byte, error) {
 		for _, b := range u.sigs.order {
 			buf.Write(b)
 		}
+		u.emitThird(&buf)
 	}
 	for _, s := range kb.subkeys {
 		if !s.binding {
@@ -620,4 +739,16 @@ func (kb *keyBlock) serialize() ([]byte, error) {
 		}
 	}
 	return buf.Bytes(), nil
+}
+
+// certifierKeys reads the primary key of each certifier. An unreadable one is
+// skipped: it cannot certify anything.
+func certifierKeys(pubs [][]byte) []*packet.PublicKey {
+	var out []*packet.PublicKey
+	for _, b := range pubs {
+		if kb, err := readKeyBlock(b); err == nil {
+			out = append(out, kb.primary)
+		}
+	}
+	return out
 }

@@ -39,6 +39,7 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"mailroom/internal/compose"
 	"mailroom/internal/pgpkeys"
 	"mailroom/internal/store"
 )
@@ -103,7 +104,16 @@ func (a *API) contactKeyDecide(ctx context.Context, userID ulid.ULID, rawArgs js
 				return &MethodError{Type: errKeyDoesNotNameAddress,
 					Description: "that key has no user ID naming this address, so it cannot be trusted for it"}
 			}
-			err = tx.TrustContactKey(ctx, cid, addr, fpr)
+			// ADR-054: if the pinned key vouches for this one, the `pinned` event
+			// records it. The decision is the user's either way; nothing here
+			// reads the vouch to decide.
+			vouchedBy := ""
+			if pin, hasPin, perr := tx.ContactKeyPin(ctx, addr); perr == nil && hasPin && pin != fpr {
+				if v, verr := compose.VouchForKey(ctx, tx, addr, pin, *held, time.Now().UTC()); verr == nil {
+					vouchedBy = v.VouchedBy
+				}
+			}
+			err = tx.TrustContactKeyVouched(ctx, cid, addr, fpr, vouchedBy)
 		} else {
 			err = tx.RefuseContactKey(ctx, cid, fpr)
 		}

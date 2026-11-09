@@ -88,6 +88,20 @@ type pgpSignature struct {
 	PreviousFingerprint string `json:"previousFingerprint,omitempty"`
 	// Refused: keyChanged only; the user already chose to keep the old key.
 	Refused bool `json:"refused,omitempty"`
+	// VouchedBy: keyChanged only (ADR-054); the fingerprint of the pinned key,
+	// which carries a valid certification of this key's user ID for the address
+	// and passed every rule. It changes the sentence, never the state: the user
+	// still decides, and nothing moves the pin without them.
+	VouchedBy string `json:"vouchedBy,omitempty"`
+	// PreviousKeyCompromised: keyChanged only (ADR-054); the pinned key was
+	// revoked as compromised, so the new key cannot be checked against it.
+	PreviousKeyCompromised bool `json:"previousKeyCompromised,omitempty"`
+	// PinVouchedByRevoked: verified only (ADR-054 rule 8); the user trusted this
+	// key because the previous pin vouched for it, and that previous key has since
+	// been revoked. PinVouchedByCompromised adds that the reason is compromise.
+	// Notices only: the state and the pin are untouched.
+	PinVouchedByRevoked     bool `json:"pinVouchedByRevoked,omitempty"`
+	PinVouchedByCompromised bool `json:"pinVouchedByCompromised,omitempty"`
 	// Reason refines a `bad` state (#795/#796). The one value today is
 	// "keyExpired": the signature checked out over the content and was refused
 	// only because the key that made it (Fingerprint) has expired. The client
@@ -128,12 +142,28 @@ type sigFacts struct {
 	// other: the fingerprint of the best eligible key held for address other than
 	// the signer ("" if none). The baseline when nothing is pinned.
 	other string
+	// vouch: ADR-054, computed only when the signer differs from the pin.
+	vouch compose.Vouch
+	// pinVoucher: ADR-054 rule 8, read for the pinned key.
+	pinVoucher compose.PinVoucher
 }
 
 // classifySignature turns the facts into the property. pinFirst reports that
 // this is the first eligible verification for an address with no pin, which the
 // caller records.
 func classifySignature(f sigFacts) (sig *pgpSignature, pinFirst bool) {
+	sig, pinFirst = classifyBase(f)
+	// ADR-054 rule 8: a verified signature by the pinned key that a (since
+	// revoked) previous key vouched for carries the compensating notice.
+	if sig != nil && sig.State == sigVerified && f.pinVoucher.Revoked && f.hasPin &&
+		f.signer != nil && !f.signer.own && f.pin == sig.Fingerprint {
+		sig.PinVouchedByRevoked = true
+		sig.PinVouchedByCompromised = f.pinVoucher.Compromised
+	}
+	return sig, pinFirst
+}
+
+func classifyBase(f sigFacts) (sig *pgpSignature, pinFirst bool) {
 	mk := func(state, fp string) *pgpSignature {
 		return &pgpSignature{State: state, Address: f.address, Fingerprint: fp}
 	}
@@ -179,6 +209,11 @@ func classifySignature(f sigFacts) (sig *pgpSignature, pinFirst bool) {
 		c := mk(sigKeyChanged, fp)
 		c.PreviousFingerprint = prev
 		c.Refused = k.Refused
+		// Only a change measured against the PIN can be vouched for (rule 1).
+		if f.hasPin && prev == f.pin {
+			c.VouchedBy = f.vouch.VouchedBy
+			c.PreviousKeyCompromised = f.vouch.PreviousCompromised
+		}
 		return c
 	}
 	switch {
@@ -218,7 +253,9 @@ type sigKeys struct {
 	ownKeys     []store.UserKey
 	pin         string
 	hasPin      bool
-	now         time.Time
+	// pinVoucher: ADR-054 rule 8 for the pinned key, read with the keys.
+	pinVoucher compose.PinVoucher
+	now        time.Time
 }
 
 // fromAddress is the single From address of a message, normalised, or "".
@@ -247,6 +284,13 @@ func (a *API) loadSigKeys(ctx context.Context, userID ulid.ULID, outer []byte) *
 			var err error
 			if k.pin, k.hasPin, err = tx.ContactKeyPin(ctx, k.from); err != nil {
 				return err
+			}
+			if k.hasPin {
+				if cid, ok, cerr := tx.ContactIDForAddress(ctx, k.from); cerr == nil && ok {
+					if pv, perr := compose.PinVoucherFor(ctx, tx, cid, k.contactKeys, k.pin, k.now); perr == nil {
+						k.pinVoucher = pv
+					}
+				}
 			}
 		}
 		if own, err := tx.ListUserKeys(ctx); err == nil {
@@ -422,7 +466,7 @@ func (k *sigKeys) gateKeyExpired(res pgpverify.Result) pgpverify.Result {
 func (a *API) judgeSignature(ctx context.Context, userID ulid.ULID, k *sigKeys, res pgpverify.Result) *pgpSignature {
 	from, now := k.from, k.now
 	res = k.gateKeyExpired(res)
-	facts := sigFacts{res: res, address: from, pin: k.pin, hasPin: k.hasPin}
+	facts := sigFacts{res: res, address: from, pin: k.pin, hasPin: k.hasPin, pinVoucher: k.pinVoucher}
 	if res.Verdict == pgpverify.VerdictVerified {
 		facts.signer = k.signerFor(res.SignerFingerprint, now)
 		// The baseline when nothing is pinned: the best eligible key held other
@@ -439,6 +483,14 @@ func (a *API) judgeSignature(ctx context.Context, userID ulid.ULID, k *sigKeys, 
 		}
 	}
 
+	// ADR-054: a vouch for a key that differs from the pin. Computed here, on every
+	// judgement, from the held copies and the clock; never stored. A failure to
+	// read it leaves the ordinary prompt. It cannot change the state below.
+	if facts.signer != nil && !facts.signer.own && facts.hasPin && facts.signer.names &&
+		facts.pin != res.SignerFingerprint && facts.signer.key.Source != store.ContactKeyManual {
+		facts.vouch = a.vouchFor(ctx, userID, k, facts.signer.key)
+	}
+
 	sig, pinFirst := classifySignature(facts)
 	if pinFirst && facts.signer != nil {
 		// Fail-soft: the display is correct without the pin; the pin only makes
@@ -450,6 +502,25 @@ func (a *API) judgeSignature(ctx context.Context, userID ulid.ULID, k *sigKeys, 
 		}
 	}
 	return sig
+}
+
+// vouchFor reads the first-sighting time of the signer's key and applies
+// compose.VouchFor to the keys already loaded in k.
+func (a *API) vouchFor(ctx context.Context, userID ulid.ULID, k *sigKeys, signer store.ContactKey) compose.Vouch {
+	var seen map[ulid.ULID]time.Time
+	if err := a.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+		ids := make([]ulid.ULID, 0, len(k.contactKeys))
+		for _, c := range k.contactKeys {
+			ids = append(ids, c.ID)
+		}
+		var err error
+		seen, err = tx.ContactKeyFirstSeen(ctx, ids)
+		return err
+	}); err != nil {
+		slog.WarnContext(ctx, "could not read when a key was first seen", "user_id", userID.String(), "err", err)
+		return compose.Vouch{}
+	}
+	return compose.VouchFor(k.contactKeys, seen, k.from, k.pin, signer, k.now)
 }
 
 // pgpSignatureFor judges the multipart/signed signature on a message (RFC 3156

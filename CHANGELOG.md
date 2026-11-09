@@ -9,6 +9,30 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**Replacing your own PGP key now tells your correspondents, and a correspondent who replaces theirs gets a gentler question from Mailroom.** Nothing is ever trusted without you.
+
+### Replacing a key: the old one vouches for the new one
+
+- **Your own replacement now carries a certification.** When you replace a key on the Keys page, your old key signs the new key's user ID before the new key is saved. Everyone who receives your new key (from your published key page, over web key lookup, or in the Autocrypt header on your mail) receives that signature with it.
+- **It is on by default and you can turn it off.** Choosing not to certify gives exactly the behaviour you had before. The link between the two keys is public and permanent, so the choice is yours.
+- **An old key that has already expired does not hold the replacement up.** The new key is made without a certification and you are told why.
+- **A key you revoked as compromised never certifies anything.** Replacing is for a key you are retiring in good order; a stolen key is still revoked and a new one generated.
+
+### Receiving a rotation: a gentler question, never an automatic switch
+
+- **When the key you have for someone vouches for their new key, Mailroom says so.** Instead of the usual warning that the key has changed, you see: "Signed with a new key for them. Their previous key, the one you had, vouches for it. Trust the new key, or keep the old one." Trust is the first button; the comparison of fingerprints is still there.
+- **Nothing changes until you choose.** Mailroom never switches to the new key by itself, however the old key vouches. The same gentler wording appears in the composer when you try to encrypt to someone whose key has changed, and encryption still waits for your answer.
+- **It only softens the wording when every check passes.** The key you had must be the one you last trusted for that address; it must not be revoked, and must not have expired before the new key was seen in good time; the signature must be dated sensibly; and the new key must be one Mailroom would accept on its own. If anything is off you get today's prompt unchanged.
+- **If the key you had was reported compromised, you are told that instead.** The usual warning is shown with one more sentence saying the old key was reported stolen, so the new one cannot be checked against it and the fingerprint should be confirmed another way.
+- **Your choice is remembered.** The key's history notes that you trusted it because the previous key vouched for it.
+- **You are warned if that previous key is later revoked.** If you trusted a new key because the old one vouched for it, and the old key is afterwards revoked (above all as compromised), Mailroom now says so where you read their mail and where you write to them: "You trusted this key because their previous key vouched for it. That previous key has since been revoked (as compromised). Check this key with them another way." It is a warning only: Mailroom does not change your trusted key by itself, and a key you trusted without any vouch shows nothing.
+- **A vouch can be withdrawn.** If the old key signed a revocation of its own certification, the vouch no longer counts. A certification made with a weak signature algorithm (SHA-1, MD5, RIPEMD-160) never counts, and a certification made some days after the new key first arrived, but not in the future, now counts.
+
+### Under the hood
+
+- Certifications by the key you currently trust for a contact are kept when another key of theirs is stored or refreshed, at most one per certifying key and user ID; every other signature added by a third party is still dropped. A key someone merely sent you, or one you refused, never has its certifications kept, so it cannot fill up another key's stored copy.
+- One small database migration widens the key history's "source" so it can record which key vouched. It changes no existing data.
+
 ## [1.102.0-beta.6] — 2026-11-09
 
 **The sixth beta of v1.102: searching by recipient and by mailing list now works properly in third-party mail apps and in AI tools that

@@ -977,12 +977,16 @@ func submitSetError(err error) *SetError {
 			Description: "these recipients have no usable encryption key: " + strings.Join(missing.Addresses, ", ")}
 	case errors.As(err, &changed):
 		parts := make([]string, 0, len(changed.Changes))
+		infos := make([]SetKeyChange, 0, len(changed.Changes))
 		for _, c := range changed.Changes {
 			parts = append(parts, c.Address+" (was "+c.Pinned+", now "+c.Now+")")
+			infos = append(infos, SetKeyChange{Address: c.Address, PinnedFingerprint: c.Pinned, Fingerprint: c.Now,
+				VouchedBy: c.VouchedBy, PreviousKeyCompromised: c.PreviousKeyCompromised})
 		}
 		return &SetError{Type: setCannotEncrypt, Properties: []string{"encrypt"},
 			Description: "the encryption key changed and must be confirmed before you can encrypt to: " +
-				strings.Join(parts, "; ")}
+				strings.Join(parts, "; "),
+			KeyChanges: infos}
 	case errors.Is(err, compose.ErrEncryptBcc):
 		return &SetError{Type: setCannotEncrypt, Properties: []string{"encrypt"},
 			Description: "a message with Bcc recipients cannot be encrypted: one encrypted message would reveal every recipient's key, including the Bcc ones"}

@@ -5,8 +5,9 @@ package api
 // UserKey/replace (#817, ADR-040 §14): make a new key for a bound key's address,
 // put it in the old key's place, and retire the old one, in one step.
 //
-//	UserKey/replace {accountId, id, expiresDays? | expiresAt?}
-//	  -> {accountId, id, replacedId, fingerprint, published, boundTo, key, oldKey}
+//	UserKey/replace {accountId, id, expiresDays? | expiresAt?, certify?}
+//	  -> {accountId, id, replacedId, fingerprint, published, boundTo, key, oldKey,
+//	      certified, certifyReason}
 //
 // TWO STEPS, AND THE SECOND IS ATOMIC. The crypto process generates the new key
 // UNBOUND (custody writes it, with its Key `created` row). Then ONE store
@@ -20,8 +21,17 @@ package api
 // Refused before anything is generated: a revoked key (keyRevoked: revoking for
 // compromise stays its own act), a retired key (keyRetired), an unbound key
 // (keyNotBound), a key bound to a wildcard (wildcardIdentity). It spends the
-// generate rate-limit token. The old key certifying the new one is out of scope
-// (#817).
+// generate rate-limit token.
+//
+// THE OLD KEY CERTIFIES THE NEW ONE (ADR-054, #31). Unless certify is false, the
+// crypto process signs the new key's user ID with the old key before storing the
+// new key, so the stored (and so published: WKD, Autocrypt, key page) public key
+// carries the certification. A correspondent's Mailroom then shows a vouched-for
+// rotation. `certified` says whether it happened; `certifyReason` is why not
+// ("oldKeyExpired", "oldKeyRevoked", "oldKeyRetired", "oldKeyUnusable") and null
+// otherwise. An old key that has lapsed NEVER refuses the replacement: the user
+// needs a new key most then. Compromise never reaches this method (a revoked key
+// is refused above).
 
 import (
 	"context"
@@ -47,6 +57,10 @@ type userKeyReplaceArgs struct {
 	ID          string  `json:"id"`
 	ExpiresDays *int    `json:"expiresDays"`
 	ExpiresAt   *string `json:"expiresAt"`
+	// Certify (ADR-054): the old key certifies the new key's user ID. Absent or
+	// true is on; false opts out (the link between the two fingerprints is
+	// public and permanent).
+	Certify *bool `json:"certify"`
 }
 
 func (a *API) userKeyReplace(ctx context.Context, userID ulid.ULID, rawArgs json.RawMessage) (json.RawMessage, *MethodError) {
@@ -115,7 +129,13 @@ func (a *API) userKeyReplace(ctx context.Context, userID ulid.ULID, rawArgs json
 		return nil, mErr
 	}
 
-	ck, err := a.custody.GenerateKey(ctx, userID, ident.DisplayName, ident.Address, exp)
+	var ck CustodyKey
+	var err error
+	if args.Certify == nil || *args.Certify {
+		ck, err = a.custody.GenerateKeyCertifiedBy(ctx, userID, ident.DisplayName, ident.Address, exp, oldID)
+	} else {
+		ck, err = a.custody.GenerateKey(ctx, userID, ident.DisplayName, ident.Address, exp)
+	}
 	if err != nil {
 		return nil, custodyMethodError(ctx, "replace", userID, err, errInvalidArguments)
 	}
@@ -160,15 +180,21 @@ func (a *API) userKeyReplace(ctx context.Context, userID ulid.ULID, rawArgs json
 	if mErr != nil {
 		return nil, mErr
 	}
+	var certifyReason any // null unless a named certifier did not certify
+	if ck.CertifyReason != "" {
+		certifyReason = ck.CertifyReason
+	}
 	return mustMarshal(map[string]any{
-		"accountId":   userID.String(),
-		"id":          newID.String(),
-		"replacedId":  oldID.String(),
-		"fingerprint": ck.Fingerprint,
-		"published":   res.Published,
-		"boundTo":     res.IdentityID.String(),
-		"key":         newObj,
-		"oldKey":      oldObj,
+		"accountId":     userID.String(),
+		"id":            newID.String(),
+		"replacedId":    oldID.String(),
+		"fingerprint":   ck.Fingerprint,
+		"published":     res.Published,
+		"boundTo":       res.IdentityID.String(),
+		"key":           newObj,
+		"oldKey":        oldObj,
+		"certified":     ck.Certified,
+		"certifyReason": certifyReason,
 	}), nil
 }
 

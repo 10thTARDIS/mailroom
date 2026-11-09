@@ -345,8 +345,10 @@ func dearmorBestEffort(s string) []byte {
 // API grows through increments 3–6.
 func probes(userID, keyID, fingerprint, armoredPrivate string, ciphertext []byte, recipientPublic string) map[pgpwire.Method]any {
 	return map[pgpwire.Method]any{
+		// Generate WITH A CERTIFIER (ADR-054): the probe that unseals the named
+		// key to certify, so the leak assertion covers that path too.
 		pgpwire.MethodGenerate: pgpwire.GenerateRequest{
-			UserID: userID, Name: "Probe", Email: "probe@example.com",
+			UserID: userID, Name: "Probe", Email: "probe@example.com", CertifierKeyID: keyID,
 		},
 		pgpwire.MethodExportPublic: pgpwire.ExportPublicRequest{
 			UserID: userID, KeyID: keyID,

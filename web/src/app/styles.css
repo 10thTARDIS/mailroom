@@ -2843,6 +2843,16 @@ kbd {
 .signature-line-changed {
   border-color: var(--danger);
 }
+/* ADR-054 rule 8: a verified signature by a key the user trusted on the strength
+   of a key that has since been revoked. Warn palette: it is a thing to act on. */
+.signature-line-pin-voucher {
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+  border-color: var(--danger);
+}
+.pin-voucher-warning {
+  margin: 8px 0 0;
+}
 /* A signature by a key that has since expired (#795): neither the warn palette
    of a signature that does not check out, nor the plain note of one that does.
    The sunken background and the dashed edge mark it as a stale fact. */

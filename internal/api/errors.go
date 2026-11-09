@@ -83,6 +83,20 @@ type SetError struct {
 	// PendingActionID is set on a "pendingApproval" SetError: the call was
 	// held for a person, and this is the PendingAction to poll (#49, ADR-042 §7).
 	PendingActionID string `json:"pendingActionId,omitempty"`
+	// KeyChanges is set on a cannotEncrypt error caused by changed recipient keys
+	// (ADR-054): per address, whether the pinned key vouches for the new one or was
+	// reported compromised, so the dialogue can use the gentler or the harder
+	// sentence. Omitted otherwise.
+	KeyChanges []SetKeyChange `json:"keyChanges,omitempty"`
+}
+
+// SetKeyChange is one recipient of a cannotEncrypt key-changed error.
+type SetKeyChange struct {
+	Address                string `json:"address"`
+	PinnedFingerprint      string `json:"pinnedFingerprint"`
+	Fingerprint            string `json:"fingerprint"`
+	VouchedBy              string `json:"vouchedBy,omitempty"`
+	PreviousKeyCompromised bool   `json:"previousKeyCompromised,omitempty"`
 }
 
 // requestError is a JMAP request-level error (application/problem+json).

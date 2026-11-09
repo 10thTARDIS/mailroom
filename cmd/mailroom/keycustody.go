@@ -70,6 +70,21 @@ func (c *cryptoCustody) GenerateKey(ctx context.Context, userID ulid.ULID, name,
 	return custodyKey(res.Key), nil
 }
 
+func (c *cryptoCustody) GenerateKeyCertifiedBy(ctx context.Context, userID ulid.ULID, name, email string, exp api.KeyExpiry, certifier ulid.ULID) (api.CustodyKey, error) {
+	callCtx, cancel := context.WithTimeout(ctx, pgpwire.DefaultTimeout)
+	defer cancel()
+	res, err := c.w.Generate(callCtx, pgpwire.GenerateRequest{
+		UserID: userID.String(), Name: name, Email: email, ExpiresDays: exp.Days, ExpiresAt: exp.At,
+		CertifierKeyID: certifier.String(),
+	})
+	if err != nil {
+		return api.CustodyKey{}, custodyErr(err)
+	}
+	k := custodyKey(res.Key)
+	k.Certified, k.CertifyReason = res.Certified, res.CertifyReason
+	return k, nil
+}
+
 func (c *cryptoCustody) ImportKey(ctx context.Context, userID ulid.ULID, armoredPrivate, passphrase string) (api.CustodyKey, bool, error) {
 	callCtx, cancel := context.WithTimeout(ctx, pgpwire.DefaultTimeout)
 	defer cancel()
