@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**Searching by recipient and by mailing list now works properly in third-party mail apps and in AI tools that
+## [1.102.0-beta.6] — 2026-11-09
+
+**The sixth beta of v1.102: searching by recipient and by mailing list now works properly in third-party mail apps and in AI tools that
 use the standard mail protocol, and a recipient sort is available.** Mailroom now remembers who each message
 was sent to, copied to and blind-copied, and which mailing list it came from, so apps can filter and sort on
 them.
