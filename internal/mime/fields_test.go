@@ -203,3 +203,21 @@ func TestSplitHeaderFieldsCapsFieldCount(t *testing.T) {
 		t.Fatalf("got %d fields, truncated=%v; want %d and true", len(got), trunc, MaxHeaderFields)
 	}
 }
+
+// A long segment holding '@' followed by many colons: each ':' used to rescan the
+// whole segment, so this shape was quadratic (64 KiB + 64 KiB took ~3 s). Both
+// address forms go through splitAddressList.
+func TestAddressListLateColonsAreLinear(t *testing.T) {
+	raw := " " + strings.Repeat("a", 64<<10) + "@" + strings.Repeat(":", 64<<10)
+	start := time.Now()
+	FieldAddresses(raw)
+	FieldGroupedAddresses(raw)
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("splitting a 128 KiB address list with late colons took %v (quadratic?)", elapsed)
+	}
+	// Behaviour is unchanged for an ordinary group and a colon after an address.
+	g, ok := FieldGroupedAddresses(" team: a@example.com, b@example.com; c@example.com")
+	if !ok || len(g) != 2 || len(g[0].Addresses) != 2 {
+		t.Fatalf("group parse changed: %+v ok=%v", g, ok)
+	}
+}

@@ -214,7 +214,7 @@ func TestAddHeaderPropertiesComputesEachMeaningOnce(t *testing.T) {
 	before := headerValueComputations.Load()
 	obj := map[string]any{"id": "x"}
 	size := addHeaderProperties(obj, props, body)
-	// Three meanings: Received:all (x5 spellings, asRaw is the default form) and
+	// Two meanings: Received:all (x5 spellings, asRaw is the default form) and
 	// Received last-instance (x2).
 	if n := headerValueComputations.Load() - before; n != 2 {
 		t.Errorf("%d computations for 2 distinct meanings", n)

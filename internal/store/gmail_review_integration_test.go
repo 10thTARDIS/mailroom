@@ -133,6 +133,7 @@ func TestReapClearsGmailLabelViewPlacement(t *testing.T) {
 	if f.moved(t, draft) != f.drafts.String() || f.moved(t, inbox) != f.inbox.String() {
 		t.Fatal("setup: not placed")
 	}
+	seqBefore := f.count(t, `SELECT coalesce(max(seq), 0) FROM app.change_log WHERE user_id = $1 AND object_type = 'Mailbox'`, f.user.String())
 	var res ReapResult
 	if err := f.st.UserTx(ctx, f.user, func(tx *UserTx) error {
 		var err error
@@ -154,6 +155,14 @@ func TestReapClearsGmailLabelViewPlacement(t *testing.T) {
 	}
 	if res.MessagesVanished != 2 {
 		t.Errorf("vanished = %d, want 2", res.MessagesVanished)
+	}
+	// ADR-052 (#115): the label views the messages LEFT are reported as changed,
+	// or a client that follows Mailbox state keeps their old counts.
+	for name, mb := range map[string]ulid.ULID{"INBOX view": f.inbox, "Drafts view": f.drafts} {
+		if n := f.count(t, `SELECT count(*) FROM app.change_log WHERE user_id = $1 AND object_type = 'Mailbox'
+		                      AND object_id = $2 AND seq > $3 AND counts_only`, f.user.String(), mb.String(), seqBefore); n != 1 {
+			t.Errorf("%s: %d count rows after the reap cleared its placement, want 1", name, n)
+		}
 	}
 
 	// Control: a GENERIC account's placement is untouched by the same reap.

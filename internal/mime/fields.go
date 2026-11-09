@@ -277,10 +277,25 @@ func splitAddressList(s string) (segs []addrSegment, ok bool) {
 		comment int
 		angle   bool
 		group   *addrSegment
+		// sawAddr: the current segment holds '@' or '<'. Kept as state rather
+		// than rescanning cur at every ':' (strings.ContainsAny(cur.String(),..)),
+		// which made a long segment followed by many colons quadratic: a hostile
+		// 128 KiB header cost ~3 s per message (security review of v1.102 beta 3).
+		sawAddr bool
 	)
+	put := func(b byte) {
+		if b == '@' || b == '<' {
+			sawAddr = true
+		}
+		cur.WriteByte(b)
+	}
+	reset := func() {
+		cur.Reset()
+		sawAddr = false
+	}
 	emit := func() bool {
 		t := strings.TrimSpace(cur.String())
-		cur.Reset()
+		reset()
 		if t == "" {
 			return true
 		}
@@ -295,19 +310,19 @@ func splitAddressList(s string) (segs []addrSegment, ok bool) {
 		c := s[i]
 		switch {
 		case quoted:
-			cur.WriteByte(c)
+			put(c)
 			if c == '\\' && i+1 < len(s) {
 				i++
-				cur.WriteByte(s[i])
+				put(s[i])
 			} else if c == '"' {
 				quoted = false
 			}
 			continue
 		case comment > 0:
-			cur.WriteByte(c)
+			put(c)
 			if c == '\\' && i+1 < len(s) {
 				i++
-				cur.WriteByte(s[i])
+				put(s[i])
 			} else if c == '(' {
 				comment++
 			} else if c == ')' {
@@ -318,28 +333,28 @@ func splitAddressList(s string) (segs []addrSegment, ok bool) {
 		switch c {
 		case '"':
 			quoted = true
-			cur.WriteByte(c)
+			put(c)
 		case '(':
 			comment++
-			cur.WriteByte(c)
+			put(c)
 		case '<':
 			angle = true
-			cur.WriteByte(c)
+			put(c)
 		case '>':
 			angle = false
-			cur.WriteByte(c)
+			put(c)
 		case ':':
-			if angle || group != nil || strings.ContainsAny(cur.String(), "<@") {
-				cur.WriteByte(c)
+			if angle || group != nil || sawAddr {
+				put(c)
 				continue
 			}
 			g := addrSegment{named: true, name: strings.TrimSpace(cur.String())}
-			cur.Reset()
+			reset()
 			segs = append(segs, g)
 			group = &segs[len(segs)-1]
 		case ';':
 			if group == nil {
-				cur.WriteByte(c)
+				put(c)
 				continue
 			}
 			emit()
@@ -347,12 +362,12 @@ func splitAddressList(s string) (segs []addrSegment, ok bool) {
 			// Skip to the next top-level comma, if any.
 		case ',':
 			if angle {
-				cur.WriteByte(c)
+				put(c)
 				continue
 			}
 			emit()
 		default:
-			cur.WriteByte(c)
+			put(c)
 		}
 	}
 	if quoted || comment > 0 || angle {

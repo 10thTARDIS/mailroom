@@ -133,6 +133,8 @@ message, and the one migration is additive.
   changes an existing property.
 - A count-affecting write path added later must note its mailboxes
   (`NoteMailboxCountsBefore`/`After`, `NoteMailboxes`). Tests cover move, read,
-  bulk move, rollback and the other users' isolation; a path not listed there
-  (an account removal that clears a placement, for one) is a known edge that
-  falls back to the next change of that mailbox.
+  bulk move, rollback, the Gmail label-view placement a reap clears, and the
+  other users' isolation. Account removal notes the mailboxes its orphaned
+  messages were placed in before deleting them. Notes made inside a savepoint
+  that rolls back are still flushed: that over-reports (a client refetches
+  counts that did not move), never under-reports.

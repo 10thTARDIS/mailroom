@@ -603,6 +603,18 @@ func (tx *UserTx) DeleteAccount(ctx context.Context, id ulid.ULID) (found bool, 
 	}
 
 	if len(orphans) > 0 {
+		// An orphan may still be placed in a SURVIVING account's mailbox (a
+		// cross-account move); note those mailboxes before the rows go, so their
+		// counts are reported as changed (ADR-052, #115).
+		ids := make([]ulid.ULID, 0, len(orphans))
+		for _, o := range orphans {
+			if u, err := ulid.Parse(o); err == nil {
+				ids = append(ids, u)
+			}
+		}
+		if err := tx.NoteMailboxCountsBefore(ctx, ids...); err != nil {
+			return false, nil, fmt.Errorf("store: delete account (note orphan mailboxes): %w", err)
+		}
 		// Any submission still pointing at a captured message. This account's own
 		// submissions are already gone via the cascade above; this clears a rare
 		// cross-account draft submission, whose own account survives and therefore
