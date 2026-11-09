@@ -232,3 +232,28 @@ func TestEmailQueryWindowOffsetsAreBounded(t *testing.T) {
 		}
 	}
 }
+
+// to, cc, bcc and header (List-Id) are answered from the stored columns, so they
+// land on the store query and NOT in the search-index half (ADR-055). That the
+// text half is empty is the property: a `to` that went to the index again would
+// be a tokenised match, and not delta-stable.
+func TestRecipientAndListIDConditionsAreStoreConditions(t *testing.T) {
+	p, mErr := parseFilter(t, `{"to":"dana","cc":"ed","bcc":"hid","header":["list-ID","Plans"]}`, "")
+	if mErr != nil {
+		t.Fatal(mErr)
+	}
+	if !p.text.empty() {
+		t.Errorf("to/cc went to the search index: %+v", p.text)
+	}
+	q := p.query
+	if q.ToContains != "dana" || q.CcContains != "ed" || q.BccContains != "hid" ||
+		q.ListIDHeader == nil || q.ListIDHeader.Contains != "Plans" {
+		t.Errorf("store query = %+v", q)
+	}
+	if !p.stable {
+		t.Error("recipient and List-Id conditions are written at ingest only: delta-stable")
+	}
+	if p, _ := parseFilter(t, `{"header":["List-Id"]}`, ""); p.query.ListIDHeader == nil || p.query.ListIDHeader.Contains != "" {
+		t.Errorf("header List-Id (presence): %+v", p.query.ListIDHeader)
+	}
+}
