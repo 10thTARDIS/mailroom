@@ -76,11 +76,39 @@ search index.
 
 No new index ships with the columns. A substring `ILIKE '%x%'` cannot use a
 btree, every query already carries `user_id = ...` (RLS), and the existing
-`user_id`-led indexes bound the scan to one user's rows. The measurement at
-30,000 messages for one user (with the same rows again for a second user) is
-recorded under Consequences; pg_trgm is not required and not installed by the
-test database, and would be added in a later migration only if a measurement
-justified it. Any such index would lead with `user_id`.
+`user_id`-led index (a bitmap scan on `messages_user_msgid`) bounds the read to
+one user's rows. pg_trgm is not installed by the test database and was not
+needed:
+
+Measured with 30,000 synthetic messages for each of two users (60,002 rows; one
+to three recipients per message, a Cc on 30 percent, a List-Id on 20 percent;
+every message in one live mailbox), through `QueryEmails` as the application
+role with `LIMIT 50` and the total counted, median of 7 runs on a shared
+Postgres 18 container (so noisy: the same query varied by a factor of two
+between runs):
+
+| Query (30,000 messages of one user) | Median |
+|---|---|
+| default order (baseline) | 40 ms |
+| `from` substring (existing, baseline) | 74 to 244 ms |
+| `to` substring, 1,534 matches | 83 to 98 ms |
+| `to` substring, no match (worst case, whole user scanned) | 156 ms |
+| `cc` substring | 103 to 160 ms |
+| `bcc` substring | 72 to 81 ms |
+| List-Id present (5,893 matches) | 27 to 31 ms |
+| List-Id value | 47 to 58 ms |
+| `NOT` of a `to` substring | 110 to 114 ms |
+| sort by `from` (existing, baseline) | 65 to 108 ms |
+| sort by `to`, either collation | 50 to 70 ms |
+
+`EXPLAIN (ANALYZE)` of the statement shows one bitmap scan on the user's rows
+with the `ILIKE` as a filter (30,001 rows removed, 1,594 buffers), and for the
+sort a sequential scan of the user's rows plus a top-N heapsort, executing in
+45 to 130 ms. The recipient filters therefore cost the same order as the
+`from` filter and sort that already ship: linear in one user's mail, not in
+the page size or in other users' mail. A trigram index would be added in a later
+migration only if a larger measurement justified it, and would lead with
+`user_id`.
 
 ### The backfill
 
