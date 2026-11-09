@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**Replacing your own PGP key now tells your correspondents, and a correspondent who replaces theirs gets a gentler question from Mailroom.** Nothing is ever trusted without you.
+## [1.102.0-beta.7] — 2026-11-09
+
+**The seventh beta of v1.102: replacing your own PGP key now tells your correspondents, and a correspondent who replaces theirs gets a gentler question from Mailroom.** Nothing is ever trusted without you.
 
 ### Replacing a key: the old one vouches for the new one
 
