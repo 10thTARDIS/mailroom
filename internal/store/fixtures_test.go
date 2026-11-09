@@ -62,7 +62,7 @@ var appTables = []string{
 	"proxy_image_cache", "proxy_image_refs",
 	"contacts", "contact_addresses", "contact_keys",
 	"user_keys", "api_keys", "api_key_events", "api_key_pending", "api_key_drafts", "api_key_suppressed_refusals", "push_subscriptions",
-	"audit_log", "ai_providers", "sync_jobs",
+	"audit_log", "ai_providers",
 	"oauth_grants", "oauth_flows",
 	"sessions",
 	"oauth_tokens", "oauth_requests", "oauth_codes", "oauth_clients",
@@ -504,10 +504,6 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	exec(`INSERT INTO app.ai_providers (id, user_id, name, base_url)
 	      VALUES ($1, $2, 'local', 'http://ollama.example.com')`,
 		NewULID().String(), u.ID)
-
-	exec(`INSERT INTO app.sync_jobs (id, user_id, account_id, kind, source)
-	      VALUES ($1, $2, $3, 'bulk_import', 'mbox')`,
-		NewULID().String(), u.ID, u.AccountID)
 
 	// Mail-provider OAuth (#52, migration 00078): a grant on the seeded account
 	// and a pending flow, so the RLS suite proves B can neither see nor consume

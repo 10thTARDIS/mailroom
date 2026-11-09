@@ -3497,28 +3497,6 @@ CREATE POLICY ai_providers_isolation ON app.ai_providers
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
--- Long-running ingest runs: bulk import + backfill progress (spec §4).
-CREATE TABLE app.sync_jobs (
-  id            app.ulid PRIMARY KEY,
-  user_id       app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
-  account_id    app.ulid REFERENCES app.accounts(id) ON DELETE CASCADE,
-  kind          text NOT NULL,                 -- 'bulk_import','backfill','reindex'
-  source        text,                          -- 'mbox'|'maildir'|'takeout'|NULL
-  state         app.job_state NOT NULL DEFAULT 'pending',
-  progress_done bigint NOT NULL DEFAULT 0,
-  progress_total bigint,
-  cursor        jsonb NOT NULL DEFAULT '{}',   -- resumability (spec §4)
-  last_error    text,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  completed_at  timestamptz
-);
-ALTER TABLE app.sync_jobs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE app.sync_jobs FORCE ROW LEVEL SECURITY;
-CREATE POLICY sync_jobs_isolation ON app.sync_jobs
-  FOR ALL TO mailroom_app
-  USING (user_id = app.current_user_id())
-  WITH CHECK (user_id = app.current_user_id());
-
 -- ----------------------------------------------------------------------------
 -- 12. Areas, and desk/client preferences (migration 00046, #442 increment 1)
 -- ----------------------------------------------------------------------------
@@ -4578,7 +4556,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   -- (app.category_dismissals is granted separately below: it takes no UPDATE.)
   app.rule_corrections, app.remote_allows, app.compose_snippets, app.saved_searches,
   app.user_keys, app.api_keys, app.push_subscriptions,
-  app.ai_providers, app.sync_jobs,
+  app.ai_providers,
   app.areas, app.area_feeds, app.desk_preferences, app.client_preferences,
   app.drawer_archives, app.setup_runs, app.setup_journal,
   app.learned_placements, app.learned_placement_gate_resets,
