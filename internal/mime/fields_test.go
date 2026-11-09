@@ -112,8 +112,9 @@ func TestFieldGroupedAddresses(t *testing.T) {
 		t.Fatalf("got %#v", got)
 	}
 	for i := range want {
-		if got[i].Name != want[i].Name || got[i].Named != want[i].Named || !reflect.DeepEqual(got[i].Addresses, want[i].Addresses) &&
-			!(len(got[i].Addresses) == 0 && len(want[i].Addresses) == 0) {
+		bothEmpty := len(got[i].Addresses) == 0 && len(want[i].Addresses) == 0
+		if got[i].Name != want[i].Name || got[i].Named != want[i].Named ||
+			(!bothEmpty && !reflect.DeepEqual(got[i].Addresses, want[i].Addresses)) {
 			t.Errorf("group %d = %#v, want %#v", i, got[i], want[i])
 		}
 	}

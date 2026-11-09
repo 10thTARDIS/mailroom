@@ -16,7 +16,7 @@ func TestMailboxChangesNamesOnlyTheCountsAfterAMove(t *testing.T) {
 	h := newComposeHarness(t)
 	a, _ := seedTwo(t, h.super)
 	id := seedRawMessage(t, h, a, []byte(headerFixture))
-	trash := seedMailbox(t, h.super, a, "Trash", `\Trash`)
+	trash := a.TrashID
 
 	got := call(t, h.api.mailboxGet, a.UserID, map[string]any{"ids": nil, "properties": []string{"id"}})
 	since := got["state"].(string)
