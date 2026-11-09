@@ -56,11 +56,18 @@ as the `from` sort does (`lower(...) COLLATE "C"`), because the `i;octet`
 collation needs the unfolded value. The stored value is therefore the
 unlowered key, not the lowered one.
 
-**Bcc exists only on mail the user sent or drafted.** Compose stores the
+**Bcc is stored whenever the stored bytes carry it.** Compose stores the
 message with its Bcc header and removes it only from the bytes handed to SMTP
-(`compose.SendPayload`). Received mail never carries a Bcc header, so
-`rcpt_bcc` is empty for it. A `bcc` filter therefore finds the user's own sent
-mail and drafts, and nothing else.
+(`compose.SendPayload`), so the user's own drafts and sent mail have it. Mail
+synced or imported from elsewhere can carry it too: some providers keep Bcc in
+the Sent copy, and some mail programs send it. Either way a `bcc` filter can only
+find what Email/get already shows the same caller from the same bytes; it adds no
+new exposure.
+
+**Bounds.** Each column holds at most 200 recipients and 8 KiB (names 128,
+addresses 254 characters); past that the backfill and ingest count the message as
+truncated. A filter text is at most 512 characters, refused with invalidArguments
+beyond that, so a hostile pattern cannot cost a megabyte of work per row.
 
 ### The privacy trade-off
 

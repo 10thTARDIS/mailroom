@@ -5,7 +5,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/oklog/ulid/v2"
 
@@ -171,6 +173,18 @@ func parseFilterCondition(rawFilter json.RawMessage, base store.EmailQuery) (fil
 		q.ListIDHeader = lc
 	}
 	q.SubjectContains = f.Subject
+	// Substring conditions are bounded (security review of beta 6): ILIKE
+	// lowercases the pattern on every row, so a 1 MiB pattern cost ~1 MiB of work
+	// per message. Nothing stored is longer than a 254-character address or a
+	// 128-character name, so a longer pattern can match nothing anyway.
+	for name, v := range map[string]string{"from": f.From, "to": f.To, "cc": f.Cc, "bcc": f.Bcc, "subject": f.Subject} {
+		if utf8.RuneCountInString(v) > maxFilterTextRunes {
+			return c, &MethodError{Type: errInvalidArguments, Description: name + " is longer than " + strconv.Itoa(maxFilterTextRunes) + " characters"}
+		}
+	}
+	if q.ListIDHeader != nil && utf8.RuneCountInString(q.ListIDHeader.Contains) > maxFilterTextRunes {
+		return c, &MethodError{Type: errInvalidArguments, Description: "header text is longer than " + strconv.Itoa(maxFilterTextRunes) + " characters"}
+	}
 	q.HasAttachment = f.HasAttachment
 	for name, p := range map[string]struct {
 		in  *int64
@@ -392,3 +406,7 @@ func (t *filterTree) parse(raw json.RawMessage, depth int, conjunctive bool) (st
 	}
 	return store.EmailFilterNode{Leaf: std}, nil
 }
+
+// maxFilterTextRunes bounds every substring filter condition (from, to, cc, bcc,
+// subject, the List-Id header text): longer than anything stored.
+const maxFilterTextRunes = 512

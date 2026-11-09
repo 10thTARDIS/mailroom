@@ -99,3 +99,25 @@ func TestStoredTextHasNoNulOrInvalidUTF8(t *testing.T) {
 		}
 	}
 }
+
+// A whole column is bounded (security review of beta 6), not only its item count.
+func TestColumnIsBoundedInBytes(t *testing.T) {
+	var as []mime.Address
+	for i := 0; i < MaxRecipients; i++ {
+		as = append(as, mime.Address{Name: strings.Repeat("n", 128), Address: strings.Repeat("a", 240) + "@example.com"})
+	}
+	got, truncated := text(as)
+	if len(got) > MaxColumnBytes || !truncated {
+		t.Fatalf("column is %d bytes (truncated %v), want <= %d and truncated", len(got), truncated, MaxColumnBytes)
+	}
+}
+
+// clip cuts at a rune boundary without materialising a huge string as runes.
+func TestClipIsRuneSafe(t *testing.T) {
+	if got := clip("äöü"+strings.Repeat("x", 1<<20), 2); got != "äö" {
+		t.Fatalf("clip = %q", got)
+	}
+	if got := clip("ab", 5); got != "ab" {
+		t.Fatalf("short clip = %q", got)
+	}
+}

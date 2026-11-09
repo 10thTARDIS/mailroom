@@ -11,7 +11,6 @@ package rcptproj
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"mailroom/internal/mime"
 	"mailroom/internal/store"
@@ -26,6 +25,10 @@ const (
 	maxNameRunes  = 128
 	maxAddrRunes  = 254
 	maxKeyRunes   = 255
+	// MaxColumnBytes bounds a whole column (security review of beta 6): 200
+	// recipients at the per-item bounds could reach ~76 KB, scanned on every
+	// recipient filter. Lines past it are dropped and reported as truncated.
+	MaxColumnBytes = 8 << 10
 )
 
 // Project derives the five columns of m. A nil message yields filled, empty
@@ -55,7 +58,7 @@ func Project(m *mime.Message) store.RecipientCols {
 func text(as []mime.Address) (string, bool) {
 	var lines []string
 	truncated := false
-	n := 0
+	n, size := 0, 0
 	for _, a := range as {
 		name := clip(fold(a.Name), maxNameRunes)
 		addr := clip(strings.ToLower(strings.TrimSpace(a.Address)), maxAddrRunes)
@@ -66,6 +69,12 @@ func text(as []mime.Address) (string, bool) {
 			truncated = true
 			break
 		}
+		add := len(name) + len(addr) + 2
+		if size+add > MaxColumnBytes {
+			truncated = true
+			break
+		}
+		size += add
 		n++
 		if name != "" {
 			lines = append(lines, name)
@@ -116,9 +125,14 @@ func fold(s string) string {
 // rejects NUL and invalid UTF-8, and the input is sender-controlled.
 func clip(s string, runes int) string {
 	s = strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "\uFFFD")
-	if utf8.RuneCountInString(s) <= runes {
-		return s
+	// Cut at the byte offset of the rune limit, without materialising the whole
+	// (sender-controlled, possibly megabyte) string as runes.
+	n := 0
+	for i := range s {
+		if n == runes {
+			return s[:i]
+		}
+		n++
 	}
-	r := []rune(s)
-	return string(r[:runes])
+	return s
 }

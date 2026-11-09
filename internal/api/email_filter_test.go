@@ -257,3 +257,20 @@ func TestRecipientAndListIDConditionsAreStoreConditions(t *testing.T) {
 		t.Errorf("header List-Id (presence): %+v", p.query.ListIDHeader)
 	}
 }
+
+// Substring conditions are bounded (security review of beta 6).
+func TestSubstringFilterTextIsBounded(t *testing.T) {
+	long := strings.Repeat("a", maxFilterTextRunes+1)
+	for _, f := range []string{
+		`{"from":"` + long + `"}`, `{"to":"` + long + `"}`, `{"cc":"` + long + `"}`,
+		`{"bcc":"` + long + `"}`, `{"subject":"` + long + `"}`, `{"header":["List-Id","` + long + `"]}`,
+	} {
+		if _, err := parseFilterCondition(json.RawMessage(f), store.EmailQuery{}); err == nil || err.Type != errInvalidArguments {
+			t.Errorf("%.30s…: %v, want invalidArguments", f, err)
+		}
+	}
+	ok := strings.Repeat("a", maxFilterTextRunes)
+	if _, err := parseFilterCondition(json.RawMessage(`{"to":"`+ok+`"}`), store.EmailQuery{}); err != nil {
+		t.Errorf("a filter at the bound was refused: %v", err)
+	}
+}

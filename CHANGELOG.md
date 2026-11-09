@@ -35,6 +35,13 @@ them.
   database backup can therefore show who each message was sent to, copied to and blind-copied. The message
   itself stays encrypted. A very long recipient list is kept up to its first 200 people.
 
+- **For AI tools and API keys:** searching by sender, recipient or subject now
+  needs only permission to read mail, not the search permission, because these now
+  match stored text rather than the search index. Free-text search still needs the
+  search permission.
+- **Search text is limited to 512 characters** for sender, recipient, subject and
+  mailing-list searches. Longer text could never match anything stored.
+
 ### Upgrading
 
 - **Run the backfill after upgrading, or older mail will not match the new filters.** Mail that arrives or is
