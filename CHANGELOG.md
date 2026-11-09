@@ -9,6 +9,44 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**Searching by recipient and by mailing list now works properly in third-party mail apps and in AI tools that
+use the standard mail protocol, and a recipient sort is available.** Mailroom now remembers who each message
+was sent to, copied to and blind-copied, and which mailing list it came from, so apps can filter and sort on
+them.
+
+### What's new
+
+- **Filter by recipient.** An app can ask for mail whose To, Cc or Bcc contains some text, matching names and
+  addresses without regard to case. Before, To and Cc used the full-text search (which matches whole words,
+  not parts) and Bcc was refused. Bcc finds only mail you sent or drafted, because received mail never
+  carries one.
+- **Sort by recipient.** An app can sort by the first person a message was addressed to (their name, or their
+  address when they have no name), in either direction.
+- **Filter by mailing list.** An app can ask for mail that has a List-Id header, or one whose list id contains
+  some text. Only List-Id is supported; any other header name is still refused with a clear "unsupported filter"
+  answer rather than ignored.
+- **Works inside AND, OR and NOT.** These filters combine with the others like the sender and subject
+  filters, and an AI tool key limited to some accounts still only ever sees those accounts' mail.
+
+### Safety and behaviour
+
+- **Who a message went to is now stored beside the message, not only inside it.** Like the sender and the
+  subject, the recipients and the list id are kept in the database in readable form so they can be searched. A
+  database backup can therefore show who each message was sent to, copied to and blind-copied. The message
+  itself stays encrypted. A very long recipient list is kept up to its first 200 people.
+
+### Upgrading
+
+- **Run the backfill after upgrading, or older mail will not match the new filters.** Mail that arrives or is
+  written after the upgrade is covered automatically. Mail already stored has nothing recorded yet, so until the
+  backfill has run it does not match the recipient or list filters and sorts as if it had no recipient. Run
+  `mailroom-admin backfill-recipients` first: it only reports, per kind, how many messages it would fill and
+  how many it cannot read, and writes nothing. When the report looks right, run
+  `mailroom-admin backfill-recipients --apply`. It works in small batches while Mailroom keeps running, can be
+  stopped and run again, and a second run changes nothing. `--user` limits it to one user and `--batch`
+  changes the batch size.
+- One database migration adds five empty columns on start. It needs no action and is quick.
+
 ## [1.102.0-beta.5] — 2026-11-09
 
 **The fifth beta of v1.102: a new Activity page shows what happened to your mail in one list.** What your AI
