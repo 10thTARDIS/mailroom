@@ -50,7 +50,7 @@ func TestActivityReportListsEveryKind(t *testing.T) {
 
 // A name a user typed must not reach the operator's terminal as an escape.
 func TestActivityDetailNeutralisesTerminalEscapes(t *testing.T) {
-	evil := "a\x1b[2Jb\x1b]0;evil\x07c‮d\x00e\nf"
+	evil := "a\x1b[2Jb\x1b]0;evil\x07c\u202ed\x00e\nf"
 	e := store.ActivityEntry{Kind: store.ActivityKindRuleApply, ID: "7", Outcome: "rule.apply", KeyName: evil,
 		ObjectType: "Rule", ObjectID: "x\x1b[31m", ObjectExists: true, Count: 2}
 	got := activityDetail(e)
