@@ -328,6 +328,8 @@ func TestActivityDeletedObjectKeepsEntryLosesLink(t *testing.T) {
 	// A message of its own, decrypted: deleting it must not take the entry along.
 	msg := NewULID().String()
 	hash := sha256.Sum256([]byte("gone-soon-" + msg))
+	exec(`INSERT INTO app.blobs (user_id, content_hash, size_plain, size_stored, dek_id) VALUES ($1,$2,100,132,$3)`,
+		a.ID, hash[:], NewULID().String())
 	exec(`INSERT INTO app.messages (id, user_id, content_hash, subject, from_address, received_at, size_bytes)
 	      VALUES ($1,$2,$3,'gone soon','friend@example.com',now(),100)`, msg, a.ID, hash[:])
 	exec(`INSERT INTO app.pgp_decrypt_audit (id, user_id, message_id, purpose, outcome, key_fingerprint, decrypted_at)

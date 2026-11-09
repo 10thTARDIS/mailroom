@@ -207,7 +207,8 @@ func sourcesText(s []string) string {
 // reports how many entries it counted and whether it stopped at the cap.
 func countUserActivity(ctx context.Context, st *store.Store, uid ulid.ULID, o activityOptions,
 	counts map[string]int, oldest map[string]*time.Time) (int, bool, error) {
-	f := store.ActivityFilter{Sources: o.Sources, Since: o.Since, Limit: store.ActivityMaxLimit}
+	// A page never exceeds what is left of the cap, so the cap is a real bound.
+	f := store.ActivityFilter{Sources: o.Sources, Since: o.Since, Limit: min(store.ActivityMaxLimit, o.Cap)}
 	n := 0
 	for {
 		var page store.ActivityPage

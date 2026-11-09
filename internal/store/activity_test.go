@@ -3,6 +3,7 @@
 package store
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 
 // No database: the SQL's shape. Per-branch cursor conditions must stay index
 // conditions built from the branch's own constant kind (ADR-053).
+var userWhere = regexp.MustCompile(`\n\s*WHERE [a-z]+\.user_id = \$1`)
+
 func TestActivityBranchCursorShape(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0).UTC()
 	f := ActivityFilter{After: &ActivityCursor{At: at, Kind: ActivityKindPurge, ID: "42"}}
@@ -25,8 +28,10 @@ func TestActivityBranchCursorShape(t *testing.T) {
 		if !strings.Contains(sql, want) {
 			t.Errorf("%s: branch lacks %q:\n%s", kind, want, sql)
 		}
-		if !strings.Contains(sql, "user_id = $1") {
-			t.Errorf("%s: branch has no user predicate:\n%s", kind, sql)
+		// The branch's own WHERE (at a line start: the EXISTS inside a select list
+		// has its own user predicate and must not stand in for it).
+		if !userWhere.MatchString(sql) {
+			t.Errorf("%s: branch has no user predicate of its own:\n%s", kind, sql)
 		}
 		if !strings.Contains(sql, "LIMIT 51") {
 			t.Errorf("%s: branch is not bounded:\n%s", kind, sql)
