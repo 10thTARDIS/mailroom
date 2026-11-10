@@ -164,7 +164,9 @@ describe("a risky download asks first (ADR-056)", () => {
     expect(clean.violations.map((v) => v.id)).toEqual([]);
 
     const bad = document.createElement("div");
-    bad.innerHTML = '<button type="button"></button>';
+    const unnamed = document.createElement("button");
+    unnamed.type = "button";
+    bad.appendChild(unnamed);
     document.body.appendChild(bad);
     const res = await axe.run(bad);
     bad.remove();
