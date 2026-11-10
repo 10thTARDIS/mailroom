@@ -1225,6 +1225,9 @@ func WithProxyCacheObserver(fn func(userID ulid.ULID, split store.ProxyCacheSpli
 func writeProxyImageHeaders(w http.ResponseWriter, contentType string) {
 	h := w.Header()
 	h.Set("Content-Type", contentType)
+	// A cheap extra layer for browsers with weaker nosniff on a top-level
+	// navigation: an image, displayed inline, never a document.
+	h.Set("Content-Disposition", `inline; filename="image"`)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
 	h.Set("Cache-Control", "private, max-age=300")
