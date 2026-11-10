@@ -539,3 +539,58 @@ func TestRegisteredClientsAreReachableOnlyThroughTheDefiners(t *testing.T) {
 		t.Error("the sweep deleted a client a live grant uses")
 	}
 }
+
+// A refusal for a disabled user must leave the authorization code UNUSED, as it
+// leaves a refresh token (migration 00097). A code burned by the refusal would
+// read as a replay on the retry after re-enabling, and a replay revokes the
+// family. Real reuse is still detected.
+func TestOAuthCodeConsumeChecksUserFirst(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, _ := seedTwoUsers(t, h.super)
+	s := h.appStore()
+	au := mustULID(t, a.ID)
+	k := oaGrant(t, s, au, "https://app.example.com/code-user.json")
+	if err := s.UserTx(ctx, au, func(tx *UserTx) error {
+		return tx.InsertOAuthCode(ctx, NewOAuthCode{ID: NewULID(), Hash: oaSum("code-dis"), APIKeyID: k.ID,
+			ClientID: "c", RedirectURI: "https://app.example.com/cb", CodeChallenge: "ch", Resource: "r", TTL: time.Minute})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	usedAt := func() (used bool) {
+		t.Helper()
+		hash := oaSum("code-dis")
+		if err := h.super.QueryRow(ctx, `SELECT used_at IS NOT NULL FROM app.oauth_codes WHERE code_hash = $1`,
+			hash[:]).Scan(&used); err != nil {
+			t.Fatal(err)
+		}
+		return used
+	}
+	for _, col := range []string{"disabled_at", "deleted_at"} {
+		if _, err := h.super.Exec(ctx, `UPDATE app.users SET `+col+`=now() WHERE id=$1`, a.ID); err != nil {
+			t.Fatal(err)
+		}
+		// Twice: the first refusal must not turn the second into a replay.
+		for i := 0; i < 2; i++ {
+			c, found, err := s.ConsumeOAuthCode(ctx, oaSum("code-dis"))
+			if err != nil || !found || c.UserOK || c.Replay {
+				t.Fatalf("%s, try %d: %+v found=%v err=%v; want found, user not ok, no replay", col, i, c, found, err)
+			}
+			if usedAt() {
+				t.Fatalf("%s, try %d: a refused exchange marked the code used", col, i)
+			}
+		}
+		if _, err := h.super.Exec(ctx, `UPDATE app.users SET `+col+`=NULL WHERE id=$1`, a.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Enabled again: the first use works, the second is a replay.
+	c, found, err := s.ConsumeOAuthCode(ctx, oaSum("code-dis"))
+	if err != nil || !found || !c.UserOK || c.Replay || !usedAt() {
+		t.Fatalf("after re-enabling: %+v found=%v err=%v used=%v", c, found, err, usedAt())
+	}
+	c, _, _ = s.ConsumeOAuthCode(ctx, oaSum("code-dis"))
+	if !c.Replay || !c.UserOK {
+		t.Errorf("real reuse not detected: %+v", c)
+	}
+}
