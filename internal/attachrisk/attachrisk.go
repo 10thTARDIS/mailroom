@@ -58,6 +58,16 @@ func Reasons() []string {
 	return []string{Program, Script, Installer, MacroDocument, Shortcut, DiskImage, Disguised}
 }
 
+// Extensions lists every extension the classifier knows (without the dot), so a
+// caller that bounds filenames can check its bound against the longest one.
+func Extensions() []string {
+	out := make([]string, 0, len(extReason))
+	for e := range extReason {
+		out = append(out, e)
+	}
+	return out
+}
+
 var extReason = map[string]string{
 	"exe": Program, "com": Program, "scr": Program, "dll": Program, "cpl": Program,
 	"jar": Program, "app": Program, "apk": Program, "pif": Program, "msc": Program,

@@ -538,10 +538,16 @@ func bodyPartObject(n *bodyNode, all map[*mime.Structure]*bodyNode, want map[str
 	// not a script.
 	full["riskyType"] = nil
 	if !isMultipart(st.ContentType) && (st.Filename != "" || !strings.HasPrefix(st.ContentType, "text/")) {
-		// ⚠ THE NAME THE SERVER SENDS, NOT THE RAW ONE. The download route saves the
-		// file under sanitizeFilename's name (NULs dropped, length bounded); judging
-		// the raw header let "invoice.pdf\x00.exe" be .pdf here and .exe on disk.
-		if r := attachrisk.Classify(sanitizeFilename(st.Filename), st.ContentType, st.Data); r.Risky {
+		// ⚠ BOTH NAMES, because either can be the one that matters. The download
+		// route (downloadName) saves the file as sanitizeFilename of the {name}
+		// the client put in the URL, else sanitizeFilename of THIS part's filename,
+		// so the sanitised name is what lands on disk (NULs dropped, length
+		// bounded, extension kept): "invoice.pdf\x00.exe" is saved as
+		// "invoice.pdf.exe". The raw name is what a client that ignores the server
+		// would show. Risky if EITHER is; the reason comes from the sanitised name
+		// when it is risky, otherwise from the raw one. (A client that picks its
+		// own URL {name} chooses its own file name; that is its own input.)
+		if r := classifyAttachment(st.Filename, sanitizeFilename(st.Filename), st.ContentType, st.Data); r.Risky {
 			full["riskyType"] = r.Reason
 		}
 	}
@@ -685,4 +691,14 @@ func addressList(in []mime.Address) []map[string]any {
 		out = append(out, map[string]any{"name": nilIfEmpty(a.Name), "email": a.Address})
 	}
 	return out
+}
+
+// classifyAttachment is the either-name rule: risky if the sanitised name OR the
+// raw name is. The reason comes from the sanitised name when it is risky (it is
+// what is saved), otherwise from the raw one.
+func classifyAttachment(raw, sanitised, contentType string, data []byte) attachrisk.Result {
+	if r := attachrisk.Classify(sanitised, contentType, data); r.Risky {
+		return r
+	}
+	return attachrisk.Classify(raw, contentType, data)
 }

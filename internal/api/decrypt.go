@@ -109,7 +109,7 @@ func WithOnDemandScanner(s OnDemandScanner) Option { return func(a *API) { a.onD
 // refuses by the verdict that stands.
 type OpenRescanner interface {
 	// BeforeServe runs before a download or preview reads the stored verdict.
-	BeforeServe(ctx context.Context, userID, messageID ulid.ULID)
+	BeforeServe(ctx context.Context, userID, messageID ulid.ULID, partPath string)
 	// OnOpen runs after a body fetch, for the messages it returned.
 	OnOpen(ctx context.Context, userID ulid.ULID, messageIDs []ulid.ULID)
 }

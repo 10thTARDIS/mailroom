@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+
+	"mailroom/internal/attachrisk"
 )
 
 func riskyFixture() string {
@@ -147,5 +149,46 @@ func TestSanitizeFilenameKeepsTheExtensionWhenTruncating(t *testing.T) {
 		if !strings.HasSuffix(got, tc.wantSuffix) {
 			t.Errorf("sanitizeFilename(%.30q...) = ...%q, want suffix %q", tc.in, got[max(0, len(got)-12):], tc.wantSuffix)
 		}
+	}
+}
+
+// Either name makes a part risky; the reason comes from the sanitised one when
+// it is risky. The two names almost always agree, so the combining rule is tested
+// directly with names that disagree.
+func TestRiskyIfEitherNameIs(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, san string
+		risky          bool
+		reason         string
+	}{
+		{"risky only raw", "evil.exe", "evil.pdf", true, attachrisk.Program},
+		{"risky only sanitised", "evil.pdf", "evil.exe", true, attachrisk.Program},
+		{"both, reason from sanitised", "evil.bat", "evil.pdf.exe", true, "disguised"},
+		{"neither (control)", "evil.pdf", "evil.pdf", false, ""},
+	} {
+		r := classifyAttachment(tc.raw, tc.san, "application/octet-stream", []byte("hello"))
+		if r.Risky != tc.risky || r.Reason != tc.reason {
+			t.Errorf("%s: %+v, want risky=%v reason=%q", tc.name, r, tc.risky, tc.reason)
+		}
+	}
+}
+
+// The extension kept on truncation must fit every extension the classifier knows,
+// or a long name with that extension would be cut through it. A longer entry added
+// later fails here.
+func TestKeptExtensionFitsEveryRiskyExtension(t *testing.T) {
+	longest := ""
+	for _, e := range attachrisk.Extensions() {
+		if len(e)+1 > maxKeptExtensionRunes {
+			t.Errorf("extension .%s (%d runes with the dot) exceeds maxKeptExtensionRunes=%d", e, len(e)+1, maxKeptExtensionRunes)
+		}
+		if len(e) > len(longest) {
+			longest = e
+		}
+	}
+	// And it is really kept: a long name ending in the longest one stays risky.
+	got := sanitizeFilename(strings.Repeat("a", 200) + "." + longest)
+	if !strings.HasSuffix(got, "."+longest) || len([]rune(got)) != maxFilenameRunes {
+		t.Errorf("long name with .%s saved as ...%q (%d runes)", longest, got[len(got)-10:], len([]rune(got)))
 	}
 }
