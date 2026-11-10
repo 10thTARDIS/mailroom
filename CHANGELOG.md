@@ -20,13 +20,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 - **If the check cannot finish, you still get your file.** When the virus scanner is slow
   or unavailable, the download goes ahead under the earlier result (whose age is still
   shown) and the check is retried later. A failed check never turns a file that was
-  marked clean into a withheld one.
+  marked clean into a withheld one. One slow attachment no longer stops the others in the
+  same message from being checked: each is given its own share of the time, so an
+  infected attachment next to a slow one is still found and withheld. If the scanner
+  itself keeps failing, checking pauses for a minute and then tries again.
 - **Risky files ask before they download.** Programs, scripts, installers, documents that
   can contain macros, shortcuts and disk images now show a plain-language question first:
   "This is a program file. Only open it if you expected it from someone you trust." with
   Download anyway and Cancel (Cancel is selected, and Escape also cancels). Files that
   pretend to be something harmless, such as `invoice.pdf.exe` or a program named `.pdf`,
-  are caught too, by looking at both the name and the file itself. Compressed archives
+  are caught too, by looking at both the name and the file itself, including names padded
+  with hidden characters or made very long to push the real ending out of sight. Compressed archives
   are not opened, so a program inside a zip is not flagged.
 - **Nothing is blocked.** Risky files are still handed over when you ask, exactly as
   before, and previews of them are still refused.

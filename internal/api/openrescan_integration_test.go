@@ -44,6 +44,19 @@ func (s *scriptScanner) Version(context.Context) (clamd.Version, error) {
 	return clamd.Version{Engine: "1.5.4", Database: 28110, Published: time.Now()}, nil
 }
 
+// byBytesScanner calls the PDF infected and the HTML part a transient failure.
+type byBytesScanner struct{ scriptScanner }
+
+func (b *byBytesScanner) Scan(_ context.Context, data []byte) (clamd.Verdict, error) {
+	b.mu.Lock()
+	b.n++
+	b.mu.Unlock()
+	if bytes.HasPrefix(data, []byte("%PDF")) {
+		return clamd.Verdict{State: clamd.Flagged, Signature: "Test-Signature"}, nil
+	}
+	return clamd.Verdict{State: clamd.Unknown, Reason: "scan failed but the daemon is alive", Transient: true}, nil
+}
+
 type apiBlobs struct{ a *API }
 
 func (b apiBlobs) Raw(ctx context.Context, u ulid.ULID, h []byte) ([]byte, error) {
@@ -62,10 +75,10 @@ func ageMessage(t *testing.T, h *composeHarness, user, msg ulid.ULID, days int) 
 func TestDownloadRescansOldMailAndRefusesByTheFreshVerdict(t *testing.T) {
 	h := newComposeHarness(t)
 	a, _ := seedTwo(t, h.super)
-	sc := &scriptScanner{seq: []clamd.Verdict{
-		{State: clamd.Flagged, Signature: "Test-Signature"},                                    // part 2
-		{State: clamd.Unknown, Reason: "scan failed but the daemon is alive", Transient: true}, // part 3
-	}}
+	// Answers by the part's bytes, not by call order: only STALE parts are scanned
+	// now, so a part left stale by a transient answer is asked again on the next
+	// request and a call-order script would hand it the other part's verdict.
+	sc := &byBytesScanner{}
 	h.api.openRescan = rescan.NewOpenRescan(h.store, apiBlobs{h.api}, sc, nil, nil)
 	srv := httptest.NewServer(blobHandler(h, a))
 	defer srv.Close()

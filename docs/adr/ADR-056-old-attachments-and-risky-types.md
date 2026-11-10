@@ -36,11 +36,13 @@ Three events, and only these:
 
 | Event | Where | What happens |
 |---|---|---|
-| the reading pane fetches a body | `Email/get` with `bodyValues`, `textBody`, `htmlBody` or `attachments` fetched, for the messages returned | a **queued** re-scan job, if any attachment is stale and old |
+| the reading pane fetches a body | `Email/get` that fetches body VALUES (`fetchTextBodyValues`, `fetchHTMLBodyValues` or `fetchAllBodyValues`), for the messages returned | a **queued** re-scan job, if any attachment is stale and old |
 | an attachment is **downloaded** | `GET /jmap/download/.../{blobId}` for a part | a **synchronous** re-scan before serving |
 | an attachment is **previewed** | `GET /jmap/preview/.../{blobId}` | a **synchronous** re-scan before serving |
 
-A list or search request that does not fetch bodies triggers nothing. Mail nobody
+A list or search request that does not fetch body values triggers nothing, and
+neither does an `Email/get` that asks only for the `attachments` property: the
+trigger is the body-value fetch, which is what the reading pane does. Mail nobody
 opens costs nothing.
 
 ### When it applies
@@ -106,19 +108,51 @@ finds a fresh verdict.
 **A transient failure never downgrades a verdict, and it is judged per part.**
 clamd reports some per-file failures as `unknown` rather than as an error (the scan
 failed on a live daemon, the stream was refused, the reply was not understood).
-`clamd.Verdict.Transient` marks exactly those. Writing one over a stored `clean`
-would block ordinary old mail because the daemon had a bad second, so such a part
-keeps its stored `clean` (and its age), counts as `inconclusive`, and a job is
-enqueued. The rule is applied **to each part, never to the message**: every other
+`clamd.Verdict.Transient` marks exactly those. Writing one over a stored verdict
+that did not block (`clean`, unscanned, empty, or released) would block a file
+that was being served because the daemon had a bad second, so such a part keeps
+its stored verdict (and its age), counts as `inconclusive`, and a job is
+enqueued. A part that already blocks (`flagged`, `unknown`) takes the new answer. The rule is applied **to each part, never to the message**: every other
 verdict in the same message is written, and a `flagged` verdict always wins and
 quarantines immediately. A policy `unknown` (encrypted, over the size limit, a
 heuristic "could not examine", a part with no bytes) is a real answer for those
 bytes and is written as designed. The same function serves the synchronous and the
 queued path.
 
-After a synchronous failure the process skips the synchronous path for 60 s and
-goes straight to the queue, so a hung scanner costs one request 10 s, not every
-download.
+### One slow part must not shield the message (amendment, security review)
+
+The re-scan of an open path (the synchronous scan, `OnOpen`'s queued job and the
+`attachment_rescan_open` handler; the tiered re-scan of ADR-027 is unchanged) works
+part by part:
+
+- it scans only the **stale** parts (`store.OpenRescanStaleParts`), the requested
+  part first on a download or preview, then the others smallest first;
+- each part gets its own **slice** of what is left of the overall budget: the
+  remaining time divided by the parts still to scan, and the requested part takes
+  half when it is not alone. A decoy that uses its whole slice leaves the others a
+  share, where before the first `Scan` error abandoned the message, wrote nothing
+  and put the real payload one slow file away from never being refreshed;
+- a part that runs out of its slice keeps its stored verdict, is counted as a
+  `timeout`, and the next part is scanned. The verdicts that finished are written
+  by the same `SetScanVerdicts` call, and a job is queued for what was left;
+- a scanner error that is not a deadline stops the loop (the next part would meet
+  the same dead scanner) and counts as `unavailable`.
+
+### The breaker counts scanner failures, not slow files
+
+The synchronous path is skipped for 60 s (`BreakerPause`) after **3** failures
+within 60 s (`BreakerThreshold`, `BreakerWindow`). A failure is the scanner being
+unavailable: its `VERSION` call failing, or a `Scan` returning an error that is
+not a deadline, at most once per refresh however many parts it had. A part that
+merely ran out of its own slice is **not** a failure. One crafted attachment must
+not be able to switch the synchronous path off for every user; the cost of that
+choice is that a scanner that answers `VERSION` but hangs on every `Scan` costs
+each request up to its budget (bounded by the two synchronous slots) rather than
+tripping the breaker.
+
+A failed `VERSION` call is remembered for 30 s (`versionFailTTL`): later calls
+fail fast without dialling, so a hung scanner costs one open the 2 s version
+timeout, not every open. It counts once toward the breaker, when it happened.
 
 ### Opening a message: one bounded, deduplicated job
 
@@ -133,7 +167,8 @@ outbound mail stops. The job is therefore bounded three ways:
 | Bound | Value | Why |
 |---|---|---|
 | per message | one job per message per 10 minutes, counting finished and failed ones | a message whose re-scan cannot complete is not retried by every open; repeated opens of the same message coalesce |
-| per user per minute | at most **2** such jobs created in any 60 s | a burst of opens (scrolling a list of old mail with previews on) cannot flood the queue |
+| per user per minute | at most **2** such jobs created in any 60 s |
+| per process per minute | at most **6** such jobs created, across ALL users, in any 60 s (`GlobalEnqueueCap`) | a burst of opens (scrolling a list of old mail with previews on) cannot flood the queue |
 | per job | **20 s** budget, one message | the handler gives up and returns normally (no dispatcher retry) |
 
 Worst case, with a hung scanner, the open jobs occupy 40 s of a minute, and a
@@ -144,7 +179,25 @@ not a guarantee of zero delay, and it is stated as one. A body fetch inspects at
 most 10 messages and a request that finds the cap or the per-message cooldown
 reached simply does not enqueue.
 
-The check-then-insert for the cap is one SQL statement, but concurrent requests can
+The per-process cap is a sliding window held in memory by `OpenRescan`. It is **per
+process**, not per deployment: each running instance keeps its own window, so N
+instances admit up to 6N a minute. A slot is taken before the INSERT and given
+back when the INSERT created nothing (deduped, throttled, error), so the cap counts
+jobs created, not attempts. When it refuses, the enqueue is skipped and counted as
+`global_cap`.
+
+- **Fairness.** The per-user bound of 2 a minute, enforced in the INSERT, means one
+  account can hold at most 2 of the 6 global slots. Starving everyone needs three
+  or more accounts acting together, and accounts are created by the operator.
+- **A refusal is not lost work.** It persists nothing and starts no cooldown, so the
+  next open of that message tries again (a test pins it).
+- **The synchronous path is unaffected.** Download and preview still re-scan
+  synchronously under their own in-flight and breaker bounds, so the cap only delays
+  the background refresh. It never decides what is served.
+- **The trade-off.** The cap exists so that queued re-scans can never delay outgoing
+  mail without bound across users.
+
+The check-then-insert for the per-user cap is one SQL statement, but concurrent requests can
 overshoot it by the number of requests racing in the same instant; the per-message
 live-key unique index keeps that to one job per message.
 
@@ -168,6 +221,7 @@ boot:
 | `inconclusive` | the scan could not support a downgrade of a stored `clean` |
 | `busy` | the synchronous slots were full or the breaker was open; queued instead |
 | `throttled` | the per-user per-minute cap refused an enqueue |
+| `global_cap` | the per-process cap across all users refused an enqueue |
 | `deduped` | a job for this message already exists or was created within the cooldown |
 
 "Synchronous versus queued" is `sync` versus `job`; "timeouts" is `timeout`.
@@ -191,12 +245,12 @@ bidi control must not hide an extension):
 
 | Reason code | Extensions |
 |---|---|
-| `program` | .exe .com .scr .dll .cpl .jar .app .apk |
-| `script` | .bat .cmd .ps1 .psm1 .vbs .vbe .js .jse .wsf .wsh .hta .sh .reg |
-| `installer` | .msi .msp .dmg .pkg .deb .rpm |
-| `macro_document` | .docm .dotm .xlsm .xltm .xlam .pptm .potm .ppam .ppsm .sldm |
-| `shortcut` | .lnk .url |
-| `disk_image` | .iso .img |
+| `program` | .exe .com .scr .dll .cpl .jar .app .apk .pif .msc .chm .gadget |
+| `script` | .bat .cmd .ps1 .psm1 .ps1xml .vbs .vbe .vb .js .jse .wsf .wsh .ws .sct .hta .sh .reg .inf .command .scpt |
+| `installer` | .msi .msp .dmg .pkg .deb .rpm .appx .msix .appxbundle .msixbundle .application .appref-ms |
+| `macro_document` | .docm .dotm .xlsm .xltm .xlam .xlsb .pptm .potm .ppam .ppsm .sldm |
+| `shortcut` | .lnk .url .library-ms .search-ms .settingcontent-ms |
+| `disk_image` | .iso .img .vhd .vhdx |
 
 By the **sniffed type** of the decoded bytes (leading bytes only):
 
@@ -212,8 +266,28 @@ A small set of declared media types (`application/x-msdownload`,
 `application/x-dosexec`, `application/vnd.microsoft.portable-executable`,
 `application/x-msdos-program`, `application/x-sh`, `application/java-archive`,
 `application/x-msi`, `application/x-apple-diskimage`, and the
-`macroenabled` Office types) count too. Declared types are attacker-chosen, so
+`macroenabled` Office types, including binary workbooks, templates, add-ins and
+PowerPoint slideshows) count too. Declared types are attacker-chosen, so
 they can only add a warning, never remove one.
+
+### The classified name is the saved name
+
+The download route saves a file as `sanitizeFilename` of the URL `{name}`, else of
+the part's own filename. Two evasions made the classifier judge a different name
+from the one on disk, and both are closed:
+
+- a NUL (`invoice.pdf\x00.exe`, or its RFC 2231 `%00` and RFC 2047 `=00` forms) is
+  dropped by the sanitiser, so the file is saved as `invoice.pdf.exe`. The
+  classifier now skips control characters instead of stopping at the first;
+- the sanitiser cut names at 100 runes whatever they ended in, so
+  96 x `a` + `.exe.pdf` was judged `.pdf` and saved as `...a.exe`. It now cuts the
+  stem and keeps the final extension when that extension, dot included, is at most
+  24 runes (longer than the longest known one, `.settingcontent-ms`; a test walks
+  the list). The total stays at most 100 runes.
+
+A part is risky if the sanitised name **or** the raw name is; the reason is the
+sanitised one's when that is risky. Extensions are matched case-folded through
+upper then lower case, so a long s (`.ſcr`) is `.scr`.
 
 ### Both signals, and the disguised cases
 
@@ -245,7 +319,8 @@ scan walk ever learns members.
 
 - The server adds one property to every `EmailBodyPart`: **`riskyType`**, a reason
   code from the closed set above (`program`, `script`, `installer`,
-  `macro_document`, `shortcut`, `disk_image`, `disguised`) or `null`. It is in the
+  `macro_document`, `shortcut`, `disk_image`, `disguised`) or `null`. The MCP
+  `read_message` tool passes it through on each attachment. It is in the
   default body-property set, so a client that names no `bodyProperties` gets it. It
   is computed from the bytes already loaded to build the body; it costs no extra
   blob read, and it is not stored (no migration, no change rows). It applies to

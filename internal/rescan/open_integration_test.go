@@ -249,7 +249,19 @@ func TestGlobalEnqueueCapAcrossMessages(t *testing.T) {
 		t.Errorf("global_cap=%d jobs=%d queued=%d: the cap did not stop the enqueue",
 			ev.get(EventGlobalCap), f.openJobs(t, f.userID), ev.get(EventQueued))
 	}
+	// A refusal is not lost work: it persisted nothing and started no cooldown, so
+	// the same message enqueues on a later open once the window has passed.
+	base := time.Now()
+	o.now = func() time.Time { return base.Add(GlobalCapWindow + time.Second) }
+	o.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
+	if ev.get(EventQueued) != 1 || f.openJobs(t, f.userID) != 1 {
+		t.Errorf("after the window: queued=%d jobs=%d, want the refused message enqueued (no cooldown was started)",
+			ev.get(EventQueued), f.openJobs(t, f.userID))
+	}
 	// CONTROL: a fresh instance (empty window) enqueues the same open.
+	if _, err := f.super.Exec(f.ctx, `DELETE FROM app.jobs WHERE user_id=$1 AND kind=$2`, f.userID.String(), store.OpenRescanJobKind); err != nil {
+		t.Fatal(err)
+	}
 	o2, ev2 := f.open(f.scan)
 	o2.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
 	if ev2.get(EventQueued) != 1 || f.openJobs(t, f.userID) != 1 {

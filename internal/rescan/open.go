@@ -86,6 +86,16 @@ const (
 	// GlobalCapWindow, per process. The per-user bound lives in the INSERT; this
 	// one stops many users, each inside their own bound, from flooding the
 	// sequential dispatcher together.
+	//
+	// Fairness: the per-user bound (MaxQueuedPerMinute = 2, in the INSERT) means
+	// one account can hold at most 2 of the 6 slots; starving everyone takes three
+	// or more accounts acting together, and accounts are created by the operator.
+	// A refusal is not lost work: it persists nothing and starts no cooldown, so
+	// the next open of that message tries again. The synchronous path (download,
+	// preview) is unaffected: it re-scans under its own in-flight and breaker
+	// bounds, so the cap only delays the background refresh and never decides what
+	// is served. The trade-off: queued re-scans can never delay outgoing mail
+	// without bound across users.
 	GlobalEnqueueCap = 6
 	GlobalCapWindow  = time.Minute
 	// JobBudget bounds one queued re-scan (one message).
