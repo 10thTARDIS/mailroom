@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -709,7 +710,7 @@ type proxyFetchFailure struct {
 // outcome carries the sender's host (hostLoggedReasons) — never the URL.
 func (p *imageProxy) openProxyImage(ctx context.Context, target string) (*http.Response, string, *proxyFetchFailure) {
 	host := loggableHost(target)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizeProxyTarget(target), nil)
 	if err != nil {
 		return nil, "", &proxyFetchFailure{http.StatusBadGateway, "bad image reference",
 			ProxyOutcome{Reason: reasonBadRequest, Host: host}}
@@ -738,7 +739,23 @@ func (p *imageProxy) openProxyImage(ctx context.Context, target string) (*http.R
 		return nil, "", &proxyFetchFailure{http.StatusBadGateway, "the sender's server refused the image",
 			ProxyOutcome{Reason: reasonUpstreamStatus, Status: resp.StatusCode, Host: host}}
 	}
-	ct := proxyImageContentType(resp.Header.Get("Content-Type"))
+	// ⚠ THE DECISION IS MADE ON THE BYTES, NOT THE LABEL (#26). Real senders
+	// serve images as image/jpg, application/octet-stream or with no type at
+	// all, and refusing those left a broken image for a picture that was fine.
+	// The label is not consulted to accept; the first bytes must sniff as an
+	// allowed raster type, and the SNIFFED type is what is served. SVG, HTML
+	// labelled image/png and an empty body never sniff, so they are still
+	// refused, whatever they say they are.
+	br := bufio.NewReaderSize(resp.Body, 512)
+	head, perr := br.Peek(512)
+	if len(head) == 0 && perr != nil && perr != io.EOF {
+		// The body failed before a single byte: a body failure, not a type
+		// refusal (the cap and an aborted connection keep their own reasons).
+		_ = resp.Body.Close()
+		return nil, "", &proxyFetchFailure{http.StatusBadGateway, "image could not be fetched",
+			ProxyOutcome{Reason: bodyFailureReason(perr), Host: host}}
+	}
+	ct := sniffProxyImageType(head)
 	if ct == "" {
 		// Not an image type we will re-serve. Refusing beats relaying an
 		// unknown type into an <img>, and beats echoing the sender's own
@@ -748,6 +765,7 @@ func (p *imageProxy) openProxyImage(ctx context.Context, target string) (*http.R
 		return nil, "", &proxyFetchFailure{http.StatusUnsupportedMediaType, "not an image",
 			ProxyOutcome{Reason: reasonContentType, ContentType: loggableMediaType(declared), Host: host}}
 	}
+	resp.Body = &sniffedBody{Reader: br, c: resp.Body}
 	return resp, ct, nil
 }
 
@@ -928,26 +946,54 @@ func ProxyURLHash(rawURL string) []byte { return proxyURLHash(rawURL) }
 // none is configured, exported so the report applies the same one.
 const DefaultProxyPerMessage = defaultProxyPerMessage
 
-// proxyImageContentType maps a fetched Content-Type onto one we will re-serve,
-// or "" to refuse.
+// normalizeProxyTarget is the ONE place an empty scheme is read as https (#26).
+// A protocol-relative reference (//host/x.png) is ordinary in mail and the
+// sanitiser already classes it as remote, but it reached egress with no scheme
+// and was refused 403. Only the exact "//" prefix is promoted: javascript:,
+// data: and every other scheme still reach egress unchanged and are refused by
+// its scheme rule, and a relative path is left alone.
+func normalizeProxyTarget(target string) string {
+	if strings.HasPrefix(target, "//") {
+		return "https:" + target
+	}
+	return target
+}
+
+// sniffedBody serves the bytes already peeked, then the rest, and closes the
+// original body.
+type sniffedBody struct {
+	io.Reader
+	c io.Closer
+}
+
+func (b *sniffedBody) Close() error { return b.c.Close() }
+
+// sniffProxyImageType maps the first bytes of a response onto an allowed raster
+// type, or "" to refuse. It never looks at a Content-Type label.
 //
 // ⚠ IT IS AN ALLOWLIST AND IT DOES NOT INCLUDE SVG. An SVG is a scripting
 // context wearing an image's costume; the sanitizer already refuses
-// data:image/svg+xml for the same reason. Serving one here from a CSP'd,
-// sandboxed, nosniff response would probably be inert, but "probably inert" is
-// not a reason to carry attacker-authored markup when the alternative is a
-// broken image.
-func proxyImageContentType(declared string) string {
-	t := strings.ToLower(strings.TrimSpace(declared))
-	if i := strings.IndexByte(t, ';'); i >= 0 {
-		t = strings.TrimSpace(t[:i])
+// data:image/svg+xml for the same reason. SVG, HTML and text have no signature
+// here, so they are refused whatever their label.
+func sniffProxyImageType(b []byte) string {
+	switch {
+	case bytes.HasPrefix(b, []byte{0xFF, 0xD8, 0xFF}):
+		return "image/jpeg"
+	case bytes.HasPrefix(b, []byte("\x89PNG\r\n\x1a\n")):
+		return "image/png"
+	case bytes.HasPrefix(b, []byte("GIF87a")), bytes.HasPrefix(b, []byte("GIF89a")):
+		return "image/gif"
+	case len(b) >= 12 && bytes.Equal(b[:4], []byte("RIFF")) && bytes.Equal(b[8:12], []byte("WEBP")):
+		return "image/webp"
+	case len(b) >= 12 && bytes.Equal(b[4:8], []byte("ftyp")) &&
+		(bytes.Equal(b[8:12], []byte("avif")) || bytes.Equal(b[8:12], []byte("avis"))):
+		return "image/avif"
+	case bytes.HasPrefix(b, []byte("BM")) && len(b) >= 14:
+		return "image/bmp"
+	case bytes.HasPrefix(b, []byte{0, 0, 1, 0}) && len(b) >= 6:
+		return "image/x-icon"
 	}
-	switch t {
-	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon":
-		return t
-	default:
-		return ""
-	}
+	return ""
 }
 
 // newProxyEgressClient builds the guarded client the endpoint fetches through.
@@ -1179,8 +1225,27 @@ func WithProxyCacheObserver(fn func(userID ulid.ULID, split store.ProxyCacheSpli
 func writeProxyImageHeaders(w http.ResponseWriter, contentType string) {
 	h := w.Header()
 	h.Set("Content-Type", contentType)
+	// A cheap extra layer for browsers with weaker nosniff on a top-level
+	// navigation: an image, displayed inline, never a document.
+	h.Set("Content-Disposition", `inline; filename="image"`)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
 	h.Set("Cache-Control", "private, max-age=300")
 	h.Set("Referrer-Policy", "no-referrer")
+}
+
+// proxyImageContentType maps a STORED content type (one this proxy wrote after
+// sniffing) onto one we will re-serve, or "" to refuse. It is not consulted for
+// a fresh upstream response: that is decided by sniffProxyImageType (#26).
+func proxyImageContentType(declared string) string {
+	t := strings.ToLower(strings.TrimSpace(declared))
+	if i := strings.IndexByte(t, ';'); i >= 0 {
+		t = strings.TrimSpace(t[:i])
+	}
+	switch t {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon":
+		return t
+	default:
+		return ""
+	}
 }

@@ -812,6 +812,18 @@ func TestSanitizeHTMLIsIdempotent(t *testing.T) {
 	for _, in := range hostileCorpus() {
 		once := SanitizeHTML(in)
 		twice := SanitizeHTML(once)
+		// A PARKED remote image or background is not a fixed point by design: the
+		// second pass treats the server's own data-mailroom-* attribute as one a
+		// sender forged and drops it (fail closed). Assert that drop instead of
+		// equality, so the remote table background stays in the corpus.
+		if strings.Contains(once, "data-mailroom-") {
+			for _, name := range []string{remoteSrcAttr, remoteSrcsetAttr, remoteBackgroundAttr} {
+				if strings.Contains(twice, name+"=") {
+					t.Errorf("a second pass kept the parked %s (a forged one would survive):\n  once:  %s\n  twice: %s", name, once, twice)
+				}
+			}
+			continue
+		}
 		if once != twice {
 			t.Errorf("not a fixed point:\n  in:    %s\n  once:  %s\n  twice: %s", in, once, twice)
 		}
@@ -870,6 +882,7 @@ func hostileCorpus() []string {
 		`<object data="https://evil.example/x.swf"></object>`,
 		`<body background="https://t.example/x.png">`,
 		`<video poster="https://t.example/x.png"><source src="https://t.example/v.mp4"></video>`,
+		`<table background="javascript:alert(1)"><tr><td>x</td></tr></table>`,
 		`<table background="https://t.example/x.png"><tr><td>x</td></tr></table>`,
 		`<!--<img src=x onerror=alert(1)>-->`,
 		`<div title='&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'>t</div>`,
@@ -887,7 +900,8 @@ func TestRemoteContentContract(t *testing.T) {
 		remoteSrcsetAttr != "data-mailroom-remote-srcset" ||
 		blockedAttr != "data-mailroom-blocked" ||
 		pixelSrcAttr != "data-mailroom-pixel-src" ||
-		pixelSrcsetAttr != "data-mailroom-pixel-srcset" {
+		pixelSrcsetAttr != "data-mailroom-pixel-srcset" ||
+		remoteBackgroundAttr != "data-mailroom-remote-background" {
 		t.Fatalf("the remote-content attribute names changed: web/src/app/ui/messageDocument.ts " +
 			"hard-codes them and must be changed in the same commit")
 	}
@@ -899,7 +913,8 @@ func TestRemoteContentContract(t *testing.T) {
 	// families of names being unrelated as strings, which is easy to break by
 	// choosing a "tidier" name later.
 	for _, p := range []string{pixelSrcAttr, pixelSrcsetAttr} {
-		if strings.HasPrefix(p, remoteSrcAttr) || strings.HasPrefix(p, remoteSrcsetAttr) {
+		if strings.HasPrefix(p, remoteSrcAttr) || strings.HasPrefix(p, remoteSrcsetAttr) ||
+			strings.HasPrefix(p, remoteBackgroundAttr) {
 			t.Errorf("the pixel attribute %q starts with a restorable name — the client's "+
 				"literal replacement would un-park beacons", p)
 		}

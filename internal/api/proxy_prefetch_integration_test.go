@@ -77,7 +77,7 @@ func (f *recordingFetcher) asked(url string) bool {
 
 // pngFor is the body served for a URL, distinct per URL so a cache hit can be
 // checked byte for byte.
-func pngFor(url string) string { return "\x89PNG-bytes-of-" + url }
+func pngFor(url string) string { return "\x89PNG\r\n\x1a\n-bytes-of-" + url }
 
 func servesImages(url string) (*http.Response, error) {
 	return imgResp(200, "image/png", pngFor(url)), nil
@@ -358,7 +358,7 @@ func TestPrefetchRefusesExactlyWhatAnOpenRefusesAndLogsTheHost(t *testing.T) {
 			return imgResp(200, "text/html", "<p>not an image</p>"), nil
 		case bigURL:
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}},
-				Body: errBody{egress.ErrTooLarge}}, nil
+				Body: &midStreamErrBody{err: egress.ErrTooLarge}}, nil
 		}
 		return servesImages(url)
 	}
@@ -670,7 +670,9 @@ func TestPrefetchRefusesANonDefaultPortThatAnOpenFetches(t *testing.T) {
 
 // TestPrefetchDoesNotCountAnEmptyBodyAsFetched: a 200 with no bytes leaves
 // nothing to keep, so it is neither cached, referenced nor counted as fetched
-// (#922 review L3).
+// (#922 review L3). Since #26 the type is decided on the bytes, so an empty body
+// sniffs as nothing and is refused at the open (content_type) before the Empty
+// path in the prefetch is reached; the Empty path stays as a defence.
 func TestPrefetchDoesNotCountAnEmptyBodyAsFetched(t *testing.T) {
 	h := newPrefetchHarness(t, prefetchCfg(), func(string) (*http.Response, error) {
 		return imgResp(200, "image/png", ""), nil
@@ -678,8 +680,8 @@ func TestPrefetchDoesNotCountAnEmptyBodyAsFetched(t *testing.T) {
 	h.clearCache(t)
 	msg := h.seedHTMLMessage(t, "letters@news.example", `<img src="https://cdn.news.example/blank.png">`, time.Now())
 	res := h.prefetch(t, msg)
-	if res.Fetched != 0 || res.Empty != 1 {
-		t.Errorf("prefetch = %+v, want 0 fetched and 1 empty", res)
+	if res.Fetched != 0 || res.Refused != 1 {
+		t.Errorf("prefetch = %+v, want 0 fetched and 1 refused", res)
 	}
 	if h.cached(t) != 0 || h.refs(t, msg) != 0 {
 		t.Errorf("an empty body left %d cache row(s) and %d reference(s)", h.cached(t), h.refs(t, msg))

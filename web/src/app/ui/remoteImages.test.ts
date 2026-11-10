@@ -209,3 +209,48 @@ describe("fetchAllowedImages", () => {
     expect(got.size).toBe(2);
   });
 });
+
+// A table-cell background= (#26) is parked by the server under its own name and
+// goes through the same fetch-and-inline path as an <img>.
+describe("a parked background= attribute", () => {
+  const CELL = `<table><tr><td data-mailroom-remote-background="${path(7)}" data-mailroom-blocked="">x</td></tr></table>`;
+
+  it("is found, counted and inlined as a background attribute, never as CSS", () => {
+    expect(proxiedImageRefs(CELL)).toEqual([path(7)]);
+    expect(proxiedImageCount(CELL)).toBe(1);
+    expect(failedImageCount(CELL, new Map())).toBe(1);
+    const out = inlineProxiedImages(CELL, new Map([[path(7), PNG]]));
+    expect(out).toContain(` background="${PNG}"`);
+    expect(out).not.toContain("url(");
+    expect(out).not.toContain("data-mailroom-remote-background");
+  });
+
+  it("is consumed, not left restorable, when it did not resolve", () => {
+    const out = inlineProxiedImages(CELL, new Map());
+    expect(out).not.toContain("background");
+    expect(out).not.toContain("/jmap/proxy/");
+  });
+
+  it("fetches nothing and restores nothing when remote content is not allowed", () => {
+    const doc = messageFrameDocument(CELL, {
+      proxied: true,
+      allowRemote: false,
+      resolved: new Map([[path(7), PNG]]),
+      origin: ORIGIN,
+    });
+    expect(doc).not.toMatch(/ background="/);
+    expect(doc).not.toContain(PNG);
+    expect(doc).toContain("data-mailroom-remote-background"); // still parked, inert
+    expect(messageCSP(false)).not.toContain("http");
+  });
+
+  it("is restored for an allowed message with the proxy off, and only then", () => {
+    const direct = `<table><tr><td data-mailroom-remote-background="https://news.example/bg.png" data-mailroom-blocked="">x</td></tr></table>`;
+    expect(messageFrameDocument(direct, { proxied: false, allowRemote: true, resolved: null, origin: ORIGIN })).toContain(
+      ' background="https://news.example/bg.png"',
+    );
+    expect(
+      messageFrameDocument(direct, { proxied: false, allowRemote: false, resolved: null, origin: ORIGIN }),
+    ).not.toMatch(/ background="/);
+  });
+});

@@ -85,8 +85,12 @@ import (
 // sender's URL and the browser fetches it directly.
 //
 // Everything else that fetches — CSS url() and @import, <link>, <style
-// src>, background=, poster=, <video>/<audio>/<source>, <object>/<embed> — is
-// removed outright and is NOT restorable. Those are the channels whose only use
+// src>, poster=, <video>/<audio>/<source>, <object>/<embed> — is removed
+// outright and is NOT restorable. (A background= on table/tr/td/th is the one
+// exception since #26: parked as data-mailroom-remote-background, restored only
+// as a background ATTRIBUTE under the <img> rule. <picture> is unwrapped and its
+// <source> elements dropped, so the fallback <img> shows and no source is ever
+// fetched.) Those are the channels whose only use
 // in mail is tracking; a decorative CSS background is not worth an origin.
 //
 // "Removed outright" is worth one more sentence, because for CSS it was not true
@@ -123,6 +127,10 @@ const (
 	blockedAttr      = "data-mailroom-blocked"
 	pixelSrcAttr     = "data-mailroom-pixel-src"
 	pixelSrcsetAttr  = "data-mailroom-pixel-srcset"
+	// remoteBackgroundAttr parks a remote background= (table/tr/td/th only, #26).
+	// It is restored by the client under exactly the rule that restores an <img>
+	// src, and as a background= ATTRIBUTE — never as CSS url().
+	remoteBackgroundAttr = "data-mailroom-remote-background"
 )
 
 // SanitizeHTML returns a safe rendering of one HTML message body on the READ
@@ -545,9 +553,36 @@ func sanitizeAttrs(elem string, in []html.Attribute, outbound bool, st *cssStats
 		case "background", "poster", "action", "formaction", "cite", "data",
 			"longdesc", "profile", "usemap", "ping", "srcdoc", "http-equiv",
 			"lowsrc", "dynsrc", "codebase", "archive", "manifest":
-			// Measurement only (#674): a background= naming a remote URL is
-			// dropped here and never reaches the proxy. ⚠ GUARDED HERE, not
-			// after the classify — the render path passes a nil *cssStats.
+			// #26: a remote background= on a table cell or table is PARKED the
+			// same way an <img src> is — proxy URL instead of the sender's when
+			// the proxy is on, a beacon under the pixel name nothing restores,
+			// and nothing at all outbound. Everything else here stays dropped,
+			// and a non-remote value (cid:, data:, javascript:) is dropped too:
+			// only a remote URL is ever parked.
+			if key == "background" && !outbound && backgroundCarriers[elem] &&
+				classifyImageSrc(a.Val) == srcRemote {
+				parkAs := remoteBackgroundAttr
+				beacon := isTrackingPixelAttrs(in)
+				if beacon {
+					parkAs = pixelSrcAttr
+				}
+				parked := strings.TrimSpace(a.Val)
+				// ⚠ UNCONDITIONAL ASSIGNMENT, as for <img src> above: never keep
+				// the sender's URL when the rewriter is in play.
+				if px != nil && !beacon {
+					parked = px(parked)
+				}
+				out = append(out, html.Attribute{Key: parkAs, Val: parked})
+				blocked = true
+				if st != nil {
+					st.remoteImage(imageFactsFrom(in, a.Val, false))
+				}
+				continue
+			}
+			// Measurement only (#674): a background= naming a remote URL that is
+			// still dropped here (outbound, or on an element that does not paint
+			// one). ⚠ GUARDED HERE, not after the classify — the render path
+			// passes a nil *cssStats.
 			if st != nil {
 				if key == "background" && classifyImageSrc(a.Val) == srcRemote {
 					st.Silent.BackgroundAttr++
@@ -861,6 +896,10 @@ var allowedElements = map[string]bool{
 	"td": true, "tfoot": true, "th": true, "thead": true, "time": true,
 	"tr": true, "tt": true, "u": true, "ul": true, "var": true, "wbr": true,
 }
+
+// backgroundCarriers are the elements on which a background= attribute paints an
+// image in a browser. Only these may park one (#26).
+var backgroundCarriers = map[string]bool{"table": true, "tr": true, "td": true, "th": true}
 
 // voidElements have no closing tag.
 var voidElements = map[string]bool{
