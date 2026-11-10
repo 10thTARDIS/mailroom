@@ -670,16 +670,18 @@ func TestPrefetchRefusesANonDefaultPortThatAnOpenFetches(t *testing.T) {
 
 // TestPrefetchDoesNotCountAnEmptyBodyAsFetched: a 200 with no bytes leaves
 // nothing to keep, so it is neither cached, referenced nor counted as fetched
-// (#922 review L3).
+// (#922 review L3). Since #26 the type is decided on the bytes, so an empty body
+// sniffs as nothing and is refused at the open (content_type) before the Empty
+// path in the prefetch is reached; the Empty path stays as a defence.
 func TestPrefetchDoesNotCountAnEmptyBodyAsFetched(t *testing.T) {
 	h := newPrefetchHarness(t, prefetchCfg(), func(string) (*http.Response, error) {
-		return imgResp(200, "image/png", pngSig), nil
+		return imgResp(200, "image/png", ""), nil
 	})
 	h.clearCache(t)
 	msg := h.seedHTMLMessage(t, "letters@news.example", `<img src="https://cdn.news.example/blank.png">`, time.Now())
 	res := h.prefetch(t, msg)
-	if res.Fetched != 0 || res.Empty != 1 {
-		t.Errorf("prefetch = %+v, want 0 fetched and 1 empty", res)
+	if res.Fetched != 0 || res.Refused != 1 {
+		t.Errorf("prefetch = %+v, want 0 fetched and 1 refused", res)
 	}
 	if h.cached(t) != 0 || h.refs(t, msg) != 0 {
 		t.Errorf("an empty body left %d cache row(s) and %d reference(s)", h.cached(t), h.refs(t, msg))
