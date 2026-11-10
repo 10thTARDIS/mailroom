@@ -421,6 +421,19 @@ func TestPlacementBackfillUndo(t *testing.T) {
 	if f.bfLabels(t, a2)[areas["Primary"].LabelID.String()] != "" {
 		t.Fatal("fixture: the apply must have taken a2's setup label off")
 	}
+	// The apply wrote ONE Activity summary row for the batch (ADR-053 amendment).
+	summary := func(action string) int {
+		return f.scalar(t, `SELECT COALESCE(sum((detail->>'count')::int), 0) FROM app.audit_log
+			WHERE user_id = $1 AND object_type = 'PlacementBackfillSummary' AND object_id = $2 AND action = $3`,
+			f.userID.String(), res.BatchID.String(), action)
+	}
+	if n := summary("placement.backfill.move"); n != 3 {
+		t.Errorf("move summary counts %d messages, want 3", n)
+	}
+	if n := f.scalar(t, `SELECT count(*) FROM app.audit_log WHERE user_id = $1 AND object_type = 'PlacementBackfillSummary'`,
+		f.userID.String()); n != 1 {
+		t.Errorf("%d summary rows after one apply, want 1", n)
+	}
 	// The user re-files a3 into Promotions after the batch.
 	f.lpRefile(t, a3, areas, "Promotions")
 
@@ -454,10 +467,35 @@ func TestPlacementBackfillUndo(t *testing.T) {
 	if got := f.lpOutcome(t, a3); got != "corrected//true" {
 		t.Errorf("a3 placement = %q, want corrected", got)
 	}
+	if n := summary("placement.backfill.undo"); n != 2 {
+		t.Errorf("undo summary counts %d messages, want 2", n)
+	}
+	// Activity shows the two entries from the summaries, with these counts.
+	if err := f.st.UserTx(ctx, f.userID, func(tx *store.UserTx) error {
+		page, err := tx.ListActivity(ctx, store.ActivityFilter{Sources: []string{store.ActivitySourceBulk}})
+		if err != nil {
+			return err
+		}
+		got := map[string]int{}
+		for _, e := range page.Entries {
+			if e.Kind == store.ActivityKindPlacement {
+				got[e.Outcome] = e.Count
+			}
+		}
+		if got["placement.backfill.move"] != 3 || got["placement.backfill.undo"] != 2 || len(got) != 2 {
+			t.Errorf("Activity placement entries = %v, want move 3 and undo 2", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Again: nothing more to do.
 	again, err := f.st.UndoPlacementBackfill(ctx, f.userID, res.BatchID)
 	if err != nil || again.Outcomes[store.BackfillAlreadyUndone] != 2 || again.Outcomes[store.BackfillRefiled] != 1 {
 		t.Errorf("second undo = %+v (%v), want 2 already undone, 1 refiled", again, err)
+	}
+	if n := summary("placement.backfill.undo"); n != 2 {
+		t.Errorf("a second undo that undid nothing changed the undo summary to %d, want 2", n)
 	}
 	if _, err := f.st.UndoPlacementBackfill(ctx, f.userID, ulid.Make()); !errors.Is(err, store.ErrNoSuchBackfillBatch) {
 		t.Errorf("unknown batch: err = %v, want ErrNoSuchBackfillBatch", err)
