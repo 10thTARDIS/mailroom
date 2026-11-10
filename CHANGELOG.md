@@ -9,6 +9,28 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Safer attachments: old ones are checked again when you open them, and risky files ask first
+
+- **Old attachments are checked again when you open them.** Mailroom stops re-checking
+  attachments on mail older than six months, so an attachment that looked fine years ago
+  was judged by an out-of-date virus database. Now, when you open an old message or
+  download or preview one of its attachments, Mailroom checks it again against the
+  current database. If the check finds something, the attachment is withheld straight
+  away. Mail you never open costs nothing, and sending mail is never held up by this.
+- **If the check cannot finish, you still get your file.** When the virus scanner is slow
+  or unavailable, the download goes ahead under the earlier result (whose age is still
+  shown) and the check is retried later. A failed check never turns a file that was
+  marked clean into a withheld one.
+- **Risky files ask before they download.** Programs, scripts, installers, documents that
+  can contain macros, shortcuts and disk images now show a plain-language question first:
+  "This is a program file. Only open it if you expected it from someone you trust." with
+  Download anyway and Cancel (Cancel is selected, and Escape also cancels). Files that
+  pretend to be something harmless, such as `invoice.pdf.exe` or a program named `.pdf`,
+  are caught too, by looking at both the name and the file itself. Compressed archives
+  are not opened, so a program inside a zip is not flagged.
+- **Nothing is blocked.** Risky files are still handed over when you ask, exactly as
+  before, and previews of them are still refused.
+
 ## [1.102.0] — 2026-11-09
 
 **v1.102 makes Mailroom a good citizen for other mail apps and AI tools, and gives you

@@ -29,7 +29,7 @@ package rescan
 // (JobBudget), and its creation is limited per message (Cooldown) and per user
 // per minute (MaxQueuedPerMinute) in the INSERT itself.
 //
-// # ⚠ A FRESH `unknown` NEVER REPLACES A STORED `clean`
+// # ⚠ A TRANSIENT `unknown` NEVER REPLACES A STORED `clean`, PART BY PART
 //
 // clamd reports a per-file failure as `unknown`, not as an error. `unknown` blocks
 // (ADR-027 §5b), so writing one over a `clean` would lock the person out of
@@ -105,6 +105,8 @@ type OpenRescan struct {
 	now     func() time.Time
 
 	slots chan struct{}
+	// syncBudget is SyncBudget; a field so a test can shorten it.
+	syncBudget time.Duration
 
 	mu           sync.Mutex
 	ver          clamd.Version
@@ -121,7 +123,7 @@ func NewOpenRescan(st *store.Store, blobs BlobReader, scanner Scanner, log *slog
 		observe = func(string) {}
 	}
 	return &OpenRescan{st: st, blobs: blobs, scanner: scanner, log: log, observe: observe,
-		now: time.Now, slots: make(chan struct{}, MaxSyncScans)}
+		now: time.Now, slots: make(chan struct{}, MaxSyncScans), syncBudget: SyncBudget}
 }
 
 // currentVersion is the scanner's signature version, cached for versionTTL and
@@ -157,6 +159,13 @@ func (o *OpenRescan) tripBreaker() {
 	o.mu.Lock()
 	o.breakerUntil = o.now().Add(BreakerPause)
 	o.mu.Unlock()
+}
+
+// WithSyncBudget overrides SyncBudget for this instance and returns it. For
+// tests and for tuning; the default is the value the ADR argues for.
+func (o *OpenRescan) WithSyncBudget(d time.Duration) *OpenRescan {
+	o.syncBudget = d
+	return o
 }
 
 // BeforeServe is called by the download and preview routes BEFORE the quarantine
@@ -204,12 +213,16 @@ func (o *OpenRescan) BeforeServe(ctx context.Context, userID, messageID ulid.ULI
 		o.enqueue(ctx, userID, messageID)
 		return
 	}
-	sctx, cancel := context.WithTimeout(ctx, SyncBudget)
+	sctx, cancel := context.WithTimeout(ctx, o.syncBudget)
 	defer cancel()
 	outcome, err := o.refresh(sctx, userID, messageID, version)
 	switch {
-	case err == nil && outcome == outcomeRefreshed:
+	case err == nil && (outcome == outcomeRefreshed || outcome == outcomeRefreshedPartly):
 		o.observe(EventSync)
+		if outcome == outcomeRefreshedPartly {
+			o.observe(EventInconclusive)
+			o.enqueue(ctx, userID, messageID)
+		}
 	case err == nil && outcome == outcomeInconclusive:
 		o.observe(EventInconclusive)
 		o.enqueue(ctx, userID, messageID)
@@ -308,6 +321,9 @@ const (
 	outcomeNothing openOutcome = iota
 	outcomeRefreshed
 	outcomeInconclusive
+	// outcomeRefreshedPartly: verdicts were written, but at least one part kept
+	// its stored clean because its scan failed transiently.
+	outcomeRefreshedPartly
 )
 
 // refresh re-scans one message's parts and writes the verdicts, unless the answer
@@ -345,7 +361,13 @@ func (o *OpenRescan) refresh(ctx context.Context, userID, messageID ulid.ULID, v
 	if len(verdicts) == 0 {
 		return outcomeNothing, nil
 	}
-	if regressesCleanToUnknown(prior, verdicts) {
+	// ⚠ PER PART, NEVER PER MESSAGE. A transient failure on one attachment must
+	// not stop a `flagged` verdict on another from being written: dropping the
+	// whole write would leave an infected part served as clean. Only the
+	// transient unknowns that would overwrite a stored `clean` are dropped; every
+	// other verdict, flagged ones above all, is written.
+	verdicts, dropped := dropTransientRegressions(prior, verdicts)
+	if len(verdicts) == 0 {
 		return outcomeInconclusive, nil
 	}
 	if err := o.st.UserTx(ctx, userID, func(tx *store.UserTx) error {
@@ -355,23 +377,32 @@ func (o *OpenRescan) refresh(ctx context.Context, userID, messageID ulid.ULID, v
 	}); err != nil {
 		return outcomeNothing, err
 	}
+	if dropped > 0 {
+		return outcomeRefreshedPartly, nil
+	}
 	return outcomeRefreshed, nil
 }
 
-// regressesCleanToUnknown reports whether writing verdicts would turn a stored
-// `clean` into `unknown`. See the package comment: that is a transient scanner
-// failure, and `unknown` blocks.
-func regressesCleanToUnknown(prior []store.PartScanState, verdicts []store.ScanVerdict) bool {
+// dropTransientRegressions removes, from the verdicts to write, each `unknown`
+// that is a transient scan failure AND would overwrite a stored `clean`; the old
+// clean (with its age) stands for that part. It returns the rest and how many
+// were dropped. Policy unknowns (encrypted, over the limit, forced) are real
+// answers and are kept, as is every flagged verdict.
+func dropTransientRegressions(prior []store.PartScanState, verdicts []store.ScanVerdict) ([]store.ScanVerdict, int) {
 	was := make(map[string]string, len(prior))
 	for _, p := range prior {
 		was[p.PartPath] = p.Status
 	}
+	out := make([]store.ScanVerdict, 0, len(verdicts))
+	dropped := 0
 	for _, v := range verdicts {
-		if was[v.PartPath] == string(clamd.Clean) && v.Status == string(clamd.Unknown) {
-			return true
+		if v.Transient && v.Status == string(clamd.Unknown) && was[v.PartPath] == string(clamd.Clean) {
+			dropped++
+			continue
 		}
+		out = append(out, v)
 	}
-	return false
+	return out, dropped
 }
 
 // Handle runs one queued open re-scan: one message, bounded by JobBudget.
@@ -407,8 +438,11 @@ func (o *OpenRescan) Handle(ctx context.Context, job store.Job) error {
 	}
 	outcome, err := o.refresh(jctx, userID, messageID, version)
 	switch {
-	case err == nil && outcome == outcomeRefreshed:
+	case err == nil && (outcome == outcomeRefreshed || outcome == outcomeRefreshedPartly):
 		o.observe(EventJob)
+		if outcome == outcomeRefreshedPartly {
+			o.observe(EventInconclusive)
+		}
 	case err == nil && outcome == outcomeInconclusive:
 		o.observe(EventInconclusive)
 	case err == nil:

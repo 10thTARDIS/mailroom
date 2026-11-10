@@ -615,6 +615,27 @@ const en = {
   "attachment.releaseConfirmBody":
     "Releasing this file lets it be downloaded and attached to outgoing mail, permanently — Mailroom keeps checking it, but this override does not come with an undo here. Only do this if you know what the file is and where it came from.",
   "attachment.releaseAnyway": "Release anyway",
+  // The question before downloading a risky file type (ADR-056). The server says
+  // why in one word; the sentence is ours.
+  "attachment.risky.title": "Download {name}?",
+  "attachment.risky.program":
+    "This is a program file. Only open it if you expected it from someone you trust.",
+  "attachment.risky.script":
+    "This is a script, a file that runs commands when opened. Only open it if you expected it from someone you trust.",
+  "attachment.risky.installer":
+    "This is an installer. Only run it if you expected it from someone you trust.",
+  "attachment.risky.macro_document":
+    "This document can contain macros, small programs that run when it is opened. Only open it if you expected it from someone you trust.",
+  "attachment.risky.shortcut":
+    "This is a shortcut that can start a program or open a link. Only open it if you expected it from someone you trust.",
+  "attachment.risky.disk_image":
+    "This is a disk image, which can contain programs. Only open it if you expected it from someone you trust.",
+  "attachment.risky.disguised":
+    "This file is not what its name suggests: it is built to look like something harmless. Only open it if you expected it from someone you trust.",
+  "attachment.risky.generic":
+    "This type of file can run programs. Only open it if you expected it from someone you trust.",
+  "attachment.risky.cancel": "Cancel",
+  "attachment.risky.confirm": "Download anyway",
   "attachment.keepWithheld": "Keep it withheld",
 
   // THE ATTACHMENT VIEWER (#449, design pass-2 §9). The lightbox's words, plus the

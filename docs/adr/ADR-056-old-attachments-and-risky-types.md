@@ -103,13 +103,18 @@ finds a fresh verdict.
   age already shown. An operator whose scanner is down sees a rising count rather
   than silence.
 
-**An inconclusive answer never downgrades a verdict.** clamd reports a per-file
-failure as `unknown` rather than as an error. Writing that over an existing
-`clean` would block ordinary old mail because the daemon had a bad second. So a
-fresh `unknown` that would replace a stored `clean` is treated as inconclusive:
-nothing is written, the request is served under the existing verdict, and a job is
-enqueued. (A part that was already `unknown`, or that clamd now flags, is written
-normally.) This guard is shared by the synchronous and queued paths.
+**A transient failure never downgrades a verdict, and it is judged per part.**
+clamd reports some per-file failures as `unknown` rather than as an error (the scan
+failed on a live daemon, the stream was refused, the reply was not understood).
+`clamd.Verdict.Transient` marks exactly those. Writing one over a stored `clean`
+would block ordinary old mail because the daemon had a bad second, so such a part
+keeps its stored `clean` (and its age), counts as `inconclusive`, and a job is
+enqueued. The rule is applied **to each part, never to the message**: every other
+verdict in the same message is written, and a `flagged` verdict always wins and
+quarantines immediately. A policy `unknown` (encrypted, over the size limit, a
+heuristic "could not examine", a part with no bytes) is a real answer for those
+bytes and is written as designed. The same function serves the synchronous and the
+queued path.
 
 After a synchronous failure the process skips the synchronous path for 60 s and
 goes straight to the queue, so a hung scanner costs one request 10 s, not every

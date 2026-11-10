@@ -2342,7 +2342,22 @@ components:
         bodyStructure: { type: object, description: RFC 8621 §4.1.4 EmailBodyPart tree (when requested). }
         textBody: { type: array, items: { type: object } }
         htmlBody: { type: array, items: { type: object } }
-        attachments: { type: array, items: { type: object } }
+        attachments:
+          type: array
+          description: |
+            RFC 8621 EmailBodyPart objects. Each part (in `attachments`, `textBody`,
+            `htmlBody` and `bodyStructure`) also carries the Mailroom property
+            `riskyType` (ADR-056): why a client should ask before this file is saved,
+            or null. One of `program`, `script`, `installer`, `macro_document`,
+            `shortcut`, `disk_image` or `disguised` (a double extension such as
+            `invoice.pdf.exe`, or bytes that are a program under another name). It is
+            decided from the filename AND the leading bytes, is in the default
+            `bodyProperties`, and is computed on read (not stored, no change rows).
+            ⚠ IT IS A WARNING SIGNAL, NOT A CONTROL: the download route neutralises
+            every type it does not know whether or not a client reads this, and
+            preview stays refused for these types. Archives are not opened, so a zip
+            holding a program is not marked.
+          items: { type: object, properties: { riskyType: { type: [string, "null"], enum: [program, script, installer, macro_document, shortcut, disk_image, disguised, null] } } }
         bodyValues: { type: object, description: partId → EmailBodyValue (when requested). }
 
     EmailAddress:

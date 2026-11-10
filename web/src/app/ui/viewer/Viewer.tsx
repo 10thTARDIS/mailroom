@@ -218,6 +218,7 @@ export function Viewer({
       className="button"
       href={downloadHref}
       download={dlName}
+      risky={part.riskyType}
       ariaLabel={t("attachment.downloadNamed", { name })}
     >
       {t("attachment.download")}
@@ -299,6 +300,7 @@ export function Viewer({
         held={held}
         downloadHref={downloadHref}
         downloadName={dlName}
+        downloadRisky={part.riskyType}
         tabHref={tabHref}
         guard={guard}
         onForward={onForward}
@@ -306,7 +308,7 @@ export function Viewer({
       />
 
       <div className="viewer-file">
-        <BlobNotice notice={guard.notice} />
+        <BlobNotice notice={guard.notice} guard={guard} />
         {held ? (
           part.partId ? (
             <HeldPanel

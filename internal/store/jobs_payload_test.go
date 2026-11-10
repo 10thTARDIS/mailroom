@@ -90,3 +90,13 @@ func TestJobPayloadKeysCoversEveryLiveKind(t *testing.T) {
 			len(jobPayloadKeys), len(live))
 	}
 }
+
+// The open-time re-scan job carries a message id and nothing else (ADR-056).
+func TestOpenRescanJobPayloadIsReferencesOnly(t *testing.T) {
+	if bad, known := PayloadKeysOutsideAllowlist(OpenRescanJobKind, []string{"message_id"}); !known || len(bad) != 0 {
+		t.Errorf("message_id rejected: bad=%v known=%v", bad, known)
+	}
+	if bad, _ := PayloadKeysOutsideAllowlist(OpenRescanJobKind, []string{"message_id", "filename"}); len(bad) != 1 || bad[0] != "filename" {
+		t.Errorf("a content-bearing key was allowed: %v", bad)
+	}
+}

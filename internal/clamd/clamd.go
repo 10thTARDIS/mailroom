@@ -93,6 +93,13 @@ type Verdict struct {
 	Signature string
 	// Reason explains an Unknown in Mailroom's words, for the operator.
 	Reason string
+	// Transient marks an Unknown that says nothing about the FILE: the scan
+	// failed on a live daemon, the daemon refused the stream, or its reply was
+	// not understood. A retry may well answer. A policy Unknown (over the size
+	// limit, a heuristic "could not examine") is not transient: it is the real
+	// answer for these bytes. ADR-056 uses it to decide that a failed re-scan
+	// must not overwrite a stored `clean`.
+	Transient bool
 }
 
 // ErrDaemonUnreachable means the daemon itself did not answer — established by
@@ -270,8 +277,9 @@ func (c *Client) Scan(ctx context.Context, data []byte) (Verdict, error) {
 		}
 		// Daemon alive: the failure belongs to this file, not the service.
 		return Verdict{
-			State:  Unknown,
-			Reason: fmt.Sprintf("scan failed but the daemon is alive: %v", scanErr),
+			State:     Unknown,
+			Reason:    fmt.Sprintf("scan failed but the daemon is alive: %v", scanErr),
+			Transient: true,
 		}, nil
 	}
 	return parseResponse(resp)
@@ -350,8 +358,9 @@ func parseResponse(resp string) (Verdict, error) {
 		// with a closed connection. It is per-file, never an outage — the
 		// caller has already established the daemon is alive by this point.
 		return Verdict{
-			State:  Unknown,
-			Reason: "clamd refused the stream: " + resp,
+			State:     Unknown,
+			Reason:    "clamd refused the stream: " + resp,
+			Transient: true,
 		}, nil
 
 	case strings.HasSuffix(resp, "FOUND"):
@@ -373,8 +382,9 @@ func parseResponse(resp string) (Verdict, error) {
 	// An unrecognised reply is NOT clean. Defaulting to Clean here would make
 	// every future protocol change silently safe-looking.
 	return Verdict{
-		State:  Unknown,
-		Reason: "unrecognised clamd reply: " + resp,
+		State:     Unknown,
+		Reason:    "unrecognised clamd reply: " + resp,
+		Transient: true,
 	}, nil
 }
 

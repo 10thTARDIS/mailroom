@@ -20,7 +20,7 @@
 // NOT COLOUR-ONLY: the message begins with the word "Blocked" and is a live
 // region (role="alert"), so it is read out when it appears.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX, MouseEvent, ReactNode } from "react";
 
 import { isDecryptedPartUrl } from "../../core/jmap/blobs";
@@ -54,23 +54,62 @@ function nameFromUrl(url: string): string {
   }
 }
 
+/** What a download is opened with. `risky` is the server's `riskyType` reason for
+ * the part (ADR-056), or null/absent for an ordinary file. */
+export type OpenOpts = { download?: string; newTab?: boolean; risky?: string | null };
+
+/** The risky-type reasons the server sends (internal/attachrisk). Anything else is
+ * shown with the generic sentence rather than dropped. */
+const RISKY_KEYS = {
+  program: "attachment.risky.program",
+  script: "attachment.risky.script",
+  installer: "attachment.risky.installer",
+  macro_document: "attachment.risky.macro_document",
+  shortcut: "attachment.risky.shortcut",
+  disk_image: "attachment.risky.disk_image",
+  disguised: "attachment.risky.disguised",
+} as const;
+
+/** The plain-language sentence for a risky reason. */
+export function riskyMessage(reason: string): string {
+  const key = (RISKY_KEYS as Record<string, (typeof RISKY_KEYS)[keyof typeof RISKY_KEYS] | undefined>)[reason];
+  return key ? t(key) : t("attachment.risky.generic");
+}
+
+type PendingRisky = { url: string; opts: OpenOpts; name: string; reason: string };
+
 export type BlobGuard = {
   /** The message to show, or null. */
   notice: string | null;
   clear: () => void;
-  /** Checks `url`, then opens it (a download, or a new tab) only when served. */
-  open: (url: string, opts: { download?: string; newTab?: boolean }) => Promise<void>;
+  /** A risky download waiting for the person's decision, or null. */
+  pending: { name: string; reason: string } | null;
+  /** Download anyway. */
+  confirmRisky: () => void;
+  /** Cancel: nothing is downloaded. */
+  cancelRisky: () => void;
+  /** Checks `url`, then opens it (a download, or a new tab) only when served.
+   * A risky part asks first (ADR-056). */
+  open: (url: string, opts: OpenOpts) => Promise<void>;
 };
 
 export function useBlobGuard(): BlobGuard {
   const { client } = useApp();
   const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingRisky | null>(null);
 
   const clear = useCallback(() => setNotice(null), []);
 
   const open = useCallback(
-    async (url: string, opts: { download?: string; newTab?: boolean }): Promise<void> => {
+    async (url: string, opts: OpenOpts, confirmed = false): Promise<void> => {
       setNotice(null);
+      // ⚠ A RISKY TYPE ASKS BEFORE ANYTHING IS FETCHED OR NAVIGATED (ADR-056). The
+      // warning is a courtesy of this client, not a control: the server already
+      // neutralises the response.
+      if (opts.risky && !confirmed) {
+        setPending({ url, opts, name: opts.download ?? nameFromUrl(url), reason: opts.risky });
+        return;
+      }
       // A PART OF A DECRYPTED MESSAGE IS NEVER PROBED (#804). Its verdict exists
       // only once the server has decrypted and scanned it, and it does so on
       // every request, so "ask, then fetch" is two of each. A download is fetched
@@ -124,16 +163,94 @@ export function useBlobGuard(): BlobGuard {
     [client],
   );
 
-  return { notice, clear, open };
+  const confirmRisky = useCallback(() => {
+    if (!pending) return;
+    const p = pending;
+    setPending(null);
+    void open(p.url, p.opts, true);
+  }, [pending, open]);
+  const cancelRisky = useCallback(() => setPending(null), []);
+
+  return {
+    notice,
+    clear,
+    pending: pending ? { name: pending.name, reason: pending.reason } : null,
+    confirmRisky,
+    cancelRisky,
+    open: (url, opts) => open(url, opts),
+  };
+}
+
+/**
+ * THE QUESTION BEFORE A RISKY DOWNLOAD (ADR-056, operator decision Q81).
+ *
+ * Cancel is the default: it takes focus when the dialog opens, Escape cancels, and
+ * focus goes back to the control the person used. An `alertdialog`, so the title and
+ * the sentence are read out on open. The sentence says WHY in plain words and does
+ * not name a threat it cannot know about.
+ */
+export function RiskyDownloadDialog({ guard }: { guard: BlobGuard }): JSX.Element | null {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const openerRef = useRef<Element | null>(null);
+  const open = guard.pending !== null;
+  useEffect(() => {
+    if (!open) return;
+    openerRef.current = document.activeElement;
+    cancelRef.current?.focus();
+    return () => {
+      const el = openerRef.current;
+      if (el instanceof HTMLElement && el.isConnected) el.focus();
+    };
+  }, [open]);
+  if (!guard.pending) return null;
+  const { name, reason } = guard.pending;
+  const title = t("attachment.risky.title", { name: stripBidiControls(name) });
+  return (
+    <div className="modal-backdrop" onKeyDown={(e) => e.key === "Escape" && guard.cancelRisky()}>
+      <div
+        className="sheet"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-describedby="risky-download-body"
+      >
+        <header className="sheet-header">
+          <h2>{title}</h2>
+        </header>
+        <div className="sheet-body">
+          <p id="risky-download-body">{riskyMessage(reason)}</p>
+          <div className="sheet-actions">
+            <button type="button" className="button" ref={cancelRef} onClick={guard.cancelRisky}>
+              {t("attachment.risky.cancel")}
+            </button>
+            <button type="button" className="button button-danger" onClick={guard.confirmRisky}>
+              {t("attachment.risky.confirm")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** The refusal, where the user is looking. Renders nothing without one. */
-export function BlobNotice({ notice }: { notice: string | null }): JSX.Element | null {
-  if (!notice) return null;
+export function BlobNotice({
+  notice,
+  guard,
+}: {
+  notice: string | null;
+  /** When given, the risky-download question is rendered here too. */
+  guard?: BlobGuard;
+}): JSX.Element | null {
   return (
-    <p className="banner banner-error blob-notice" role="alert">
-      {notice}
-    </p>
+    <>
+      {notice ? (
+        <p className="banner banner-error blob-notice" role="alert">
+          {notice}
+        </p>
+      ) : null}
+      {guard ? <RiskyDownloadDialog guard={guard} /> : null}
+    </>
   );
 }
 
@@ -143,6 +260,7 @@ export function GuardedBlobLink({
   href,
   download,
   newTab = false,
+  risky = null,
   className,
   title,
   ariaLabel,
@@ -152,6 +270,8 @@ export function GuardedBlobLink({
   href: string;
   download?: string;
   newTab?: boolean;
+  /** The part's `riskyType`; a download of a risky part asks first. */
+  risky?: string | null;
   className?: string;
   title?: string;
   ariaLabel?: string;
@@ -168,7 +288,7 @@ export function GuardedBlobLink({
       aria-label={ariaLabel}
       onClick={(ev: MouseEvent<HTMLAnchorElement>) => {
         ev.preventDefault();
-        void guard.open(href, { download, newTab });
+        void guard.open(href, { download, newTab, risky });
       }}
     >
       {children}

@@ -846,6 +846,7 @@ export function AttachmentList({
                   className="attachment"
                   href={client.blobUrl(at.blobId, dlName, at.type)}
                   download={dlName}
+                  risky={at.riskyType}
                   title={t("attachment.noPreview")}
                 >
                   📎 <span className="attachment-name">{label}</span> {size}
@@ -866,6 +867,7 @@ export function AttachmentList({
                     className="attachment-download"
                     href={client.blobUrl(at.blobId, dlName, at.type)}
                     download={dlName}
+                    risky={at.riskyType}
                     ariaLabel={t("attachment.downloadNamed", { name: label })}
                     title={t("attachment.download")}
                   >
@@ -878,7 +880,7 @@ export function AttachmentList({
           );
         })}
       </ul>
-      <BlobNotice notice={guard.notice} />
+      <BlobNotice notice={guard.notice} guard={guard} />
 
       {confirming ? (
         <ReleaseConfirmDialog
