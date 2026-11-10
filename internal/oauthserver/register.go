@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // Dynamic Client Registration (RFC 7591), ADR-050 section 4. POST /oauth/register
@@ -25,8 +26,9 @@ import (
 //   - Public clients only (token_endpoint_auth_method none). No client secret
 //     and no registration access token (RFC 7592 management is not offered), so
 //     a registration is nothing but a name and a list of redirect URIs.
-//   - The client name is SELF-ASSERTED. It is cleaned the way a learned contact
-//     name is (control, directional and invisible format characters removed),
+//   - The client name is SELF-ASSERTED. A name carrying a control, bidi or other
+//     format character is refused (textcheck); the rest is cleaned the way a
+//     learned contact name is (invisible characters trimmed),
 //     bounded, and the consent screen labels it unverified. client_uri, logo_uri,
 //     tos_uri, policy_uri and every other field are ignored and never stored:
 //     a self-asserted logo or link on the consent page is a phishing aid.
@@ -351,6 +353,11 @@ func validateRegistration(req registrationRequest) (grants, responses []string, 
 	}
 	if req.ClientName == nil {
 		return bad("client_name is required")
+	}
+	// Refused, not cleaned: a name with a control, bidi or other invisible
+	// format character is not one a client displays honestly (#148).
+	if err := textcheck.CheckName(*req.ClientName); err != nil {
+		return bad("client_name " + err.Error())
 	}
 	name = store.CleanLearnedContactName(*req.ClientName)
 	if name == "" {

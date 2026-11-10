@@ -17,6 +17,7 @@ import (
 
 	"mailroom/internal/auth"
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // ApiKey/get, ApiKey/set and ApiKey/getEvents (#49, ADR-042 §1). SESSION ONLY:
@@ -218,6 +219,11 @@ func invalidKey(prop, desc string) *SetError {
 // scope newly granted without confirmScopes starts in confirm mode.
 func applyKeySettings(ctx context.Context, tx *store.UserTx, k *store.APIKey, s keySettings, prev *store.APIKey) *SetError {
 	if s.Name != nil {
+		// Checked on the raw value: TrimSpace would quietly strip a leading or
+		// trailing U+2028 and hide it from the check.
+		if err := textcheck.CheckName(*s.Name); err != nil {
+			return invalidKey("name", "a key name "+err.Error())
+		}
 		name := strings.TrimSpace(*s.Name)
 		if name == "" || len([]rune(name)) > maxKeyNameRunes || strings.IndexFunc(name, func(r rune) bool {
 			return unicode.IsControl(r) || unicode.Is(unicode.Cf, r)

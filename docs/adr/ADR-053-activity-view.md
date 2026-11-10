@@ -211,6 +211,43 @@ time present per source. Account deletion cascades as it does now.
 - A deleted object keeps its entry and loses its link.
 - The axe surface for Settings > Activity in light and dark.
 
+## Amendments
+
+### Placement backfills read one summary row per batch (v1.103)
+
+The placement branch used to group every per-message journal row of the user's
+backfills on each request (`GROUP BY object_id, action`). Later pages were bounded
+by the cursor, but the first page read all of them, and they grow with the mailbox.
+
+- **Write.** `placement-backfill --apply` and `--undo` each write ONE summary audit row
+  per batch and direction when they finish, through the same audit writer as the
+  journal (`object_type = PlacementBackfillSummary`, the journal's two action names,
+  `detail = {"v":1,"count":N}`). The object type is its own so the journal readers
+  (undo, the batch report, learned placement) never see it. A batch has no single
+  transaction (one per message, so a failure leaves earlier moves committed), so the
+  summary is its own write at the end, made however the loop ends, including a
+  failure part-way.
+- **Read.** The branch groups the summary rows and sums their counts. That is
+  O(batches and runs), not O(messages). A batch undone twice in one direction has two
+  summaries and still reads as one entry whose count is the sum, as before. Entries are
+  unchanged: same time (a summary written for old history carries its batch's newest
+  journal time), same id, direction and count.
+- **Existing history: choice (a), a report-first backfill, not (b).** History written
+  before this change has journal rows and no summary. `mailroom-admin
+  placement-backfill-summaries --user-id` reports, per direction, the batches missing
+  a summary and the journal rows they cover; `--apply` writes them (rows minus the
+  counts already summarised, so a partly summarised batch is topped up), re-reads and
+  must find none left; running it again finds nothing. Choice (b), reading the old
+  per-message grouping for batches with no summary, was rejected: finding "the
+  batches with no summary" means reading every journal row, which is the unbounded
+  first page this change removes. The cost of (a) is that old batches are absent from
+  Activity until the command has run once, which the release notes say. A batch whose
+  summary write was lost to a crash is repaired the same way.
+- **Measured.** First-page cost on a synthetic history of 50,000 backfill rows is in the
+  change's notes; the guard in the test suite is deliberately generous.
+- **Probe.** The test deletes every per-message row after summarising; a branch that
+  still grouped the journal would show nothing.
+
 ## References
 
 ADR-008, ADR-009, ADR-037, ADR-042, ADR-048, ADR-050; data-model s5.

@@ -4,6 +4,7 @@ package oauthserver
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,6 +54,16 @@ func TestCIMDDocumentValidation(t *testing.T) {
 	good := `{"client_id":"` + id + `","client_name":"App","redirect_uris":["https://app.example.com/cb"],"token_endpoint_auth_method":"none"}`
 	if _, err := parseCIMD(id, []byte(good)); err != nil {
 		t.Fatalf("good document: %v", err)
+	}
+	// A client_name with a control, bidi or format character is refused (#148);
+	// an international one passes (positive control).
+	for _, nm := range []string{`A\u202epp`, `A\u2066pp`, `A\u200bpp`, `A\npp`, `A\u2028pp`} {
+		if _, err := parseCIMD(id, []byte(strings.Replace(good, `"App"`, `"`+nm+`"`, 1))); err == nil {
+			t.Errorf("client_name %q accepted", nm)
+		}
+	}
+	if d, err := parseCIMD(id, []byte(strings.Replace(good, `"App"`, `"\u30a2\u30d7\u30ea \ud83d\udcec"`, 1))); err != nil || d.Name != "アプリ 📬" {
+		t.Errorf("international client_name: %q %v", d.Name, err)
 	}
 	for name, doc := range map[string]string{
 		"mismatch":     `{"client_id":"https://app.example.com/other.json","client_name":"App","redirect_uris":["https://app.example.com/cb"]}`,

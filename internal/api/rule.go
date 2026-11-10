@@ -11,6 +11,7 @@ import (
 
 	"mailroom/internal/rules"
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // Rule method handlers for the `urn:mailroom:rules` extension (spec §8, T0 rules
@@ -341,6 +342,10 @@ func createRule(ctx context.Context, tx *store.UserTx, raw json.RawMessage) (map
 		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
 			Description: "rule name is required", Properties: []string{"name"}}
 	}
+	if err := textcheck.CheckName(*c.Name); err != nil {
+		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
+			Description: "rule name " + err.Error(), Properties: []string{"name"}}
+	}
 	if c.Conditions == nil {
 		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
 			Description: "rule conditions are required", Properties: []string{"conditions"}}
@@ -405,6 +410,10 @@ func updateRule(ctx context.Context, tx *store.UserTx, id ulid.ULID, patch json.
 			if err := json.Unmarshal(val, &s); err != nil || s == "" {
 				return &SetError{Type: setInvalidProps,
 					Description: "name must be a non-empty string", Properties: []string{"name"}}
+			}
+			if err := textcheck.CheckName(s); err != nil {
+				return &SetError{Type: setInvalidProps,
+					Description: "rule name " + err.Error(), Properties: []string{"name"}}
 			}
 			p.Name = &s
 		case "priority":

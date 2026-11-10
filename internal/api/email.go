@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -1911,6 +1912,13 @@ func (a *API) emailSet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 			res.Created[cid] = obj
 		}
 
+		// A bulk move resolves every source mailbox in one statement instead of
+		// one per message (ADR-052 amendment). Only patches that can move a
+		// message are looked up: an explicit mailboxIds change, or the "not
+		// junk" keyword removal, which files the message in the inbox.
+		if err := prefetchMoveSources(ctx, tx, args.Update); err != nil {
+			return err
+		}
 		for id, patch := range args.Update {
 			mid, perr := ulid.Parse(id)
 			if perr != nil {
@@ -1979,6 +1987,18 @@ func (a *API) emailSet(ctx context.Context, userID ulid.ULID, rawArgs json.RawMe
 			a.emitEmailSetFeedback(ctx, tx, mid, up)
 		}
 
+		// A destroy is a move to Trash: resolve the sources in one statement.
+		if len(args.Destroy) > 1 {
+			ids := make([]ulid.ULID, 0, len(args.Destroy))
+			for _, id := range args.Destroy {
+				if mid, perr := ulid.Parse(id); perr == nil {
+					ids = append(ids, mid)
+				}
+			}
+			if err := tx.PrefetchMailboxCountsBefore(ctx, ids...); err != nil {
+				return err
+			}
+		}
 		for _, id := range args.Destroy {
 			mid, ok := resolveSetID(id, created)
 			if !ok {
@@ -2487,4 +2507,28 @@ func parseIDs(raw []string) (valid []ulid.ULID, notFound []string, requested []r
 		requested = append(requested, requestedID{raw: s, id: id, ok: true})
 	}
 	return valid, notFound, requested
+}
+
+// prefetchMoveSources resolves, in one store call, the mailboxes of every
+// message in an Email/set update whose patch can move it, so the per-message
+// "before" note finds them already known. Fewer than two such messages is not
+// worth a batch. It decides nothing: a message it did not prefetch (or one whose
+// patch turns out not to move it) is handled exactly as before.
+func prefetchMoveSources(ctx context.Context, tx *store.UserTx, update map[string]json.RawMessage) error {
+	if len(update) < 2 {
+		return nil
+	}
+	ids := make([]ulid.ULID, 0, len(update))
+	for id, patch := range update {
+		if !bytes.Contains(patch, []byte("mailboxIds")) && !bytes.Contains(patch, []byte(store.KeywordJunk)) {
+			continue
+		}
+		if mid, err := ulid.Parse(id); err == nil {
+			ids = append(ids, mid)
+		}
+	}
+	if len(ids) < 2 {
+		return nil
+	}
+	return tx.PrefetchMailboxCountsBefore(ctx, ids...)
 }

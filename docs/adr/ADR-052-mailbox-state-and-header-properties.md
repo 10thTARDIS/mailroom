@@ -138,3 +138,37 @@ message, and the one migration is additive.
   messages were placed in before deleting them. Notes made inside a savepoint
   that rolls back are still flushed: that over-reports (a client refetches
   counts that did not move), never under-reports.
+
+## Amendments
+
+### Bulk moves resolve their source mailboxes in one statement (v1.103)
+
+`NoteMailboxCountsBefore` looked up a message's mailboxes with one statement per
+message, which on a synthetic 5,000-message move cost about 2.7 ms a message
+(roughly 31 s became 44 s). Email/set now calls `PrefetchMailboxCountsBefore` before
+its update loop (for patches that can move a message) and before its destroy loop
+(a destroy is a move to Trash), which resolves the sources of all of them in a few
+statements, 5,000 ids at a time.
+
+- **The query is driven from the ids.** The per-message statement filters each branch
+  with `= ANY($2)`. Fine for one id, quadratic for thousands (the provenance branch
+  re-tests the array for every joined row): on a 5,000-message move over tables not yet
+  analysed it took 48 s. The batch form unnests the ids and joins them to each branch,
+  0.3 s in that same state and about 16 ms once analysed. It is a second statement of
+  the derivation (`batchMembershipSQL`); a test compares what it notes with the
+  per-message lookup's over moved, local-mailbox, provenance, two-folder and
+  no-folder messages.
+
+- **Identical rows.** Each message gets the same mailbox set the per-message lookup
+  would have found (an empty set for a message in no mailbox), so the flush appends the
+  same counts_only Mailbox rows: one per touched mailbox per transaction. A test runs
+  the same bulk move both ways and compares the rows by mailbox name, including a
+  message in two folders and one in none.
+- **Used once.** A prefetched answer is consumed by the first note for that message;
+  a second note, or a message that was not prefetched, is looked up live as before.
+- **What can differ.** Between the prefetch and a message's own write only that write
+  changes its mailbox ids (a flag or trash change never does), so inside the
+  transaction the answers are the same. Against ANOTHER transaction moving the same
+  message, the window is the bulk's duration instead of one statement. The per-message
+  lookup took no row lock before it either, so this widens an existing window rather
+  than opening one.

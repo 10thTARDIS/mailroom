@@ -13,11 +13,23 @@ func TestValidateRegistrationBounds(t *testing.T) {
 	name := func(s string) registrationRequest {
 		return registrationRequest{ClientName: &s, RedirectURIs: []string{"https://app.example.com/cb"}}
 	}
-	if _, _, got, code, _ := validateRegistration(name("  A\u200bpp\u202e ")); code != "" || got != "App" {
+	if _, _, got, code, _ := validateRegistration(name("  App ")); code != "" || got != "App" {
 		t.Errorf("cleaned name = %q (%s)", got, code)
 	}
 	if _, _, _, code, _ := validateRegistration(name(strings.Repeat("é", 100))); code != "" {
 		t.Errorf("100 characters refused: %s", code)
+	}
+	// Control, bidi, other format and separator characters are refused, not cleaned (#148).
+	for _, bad := range []string{"A\u200bpp", "App\u202e", "A\u2066pp", "A\x1bpp", "A\npp", "A\u2028pp", "A\u0085pp"} {
+		if _, _, _, code, desc := validateRegistration(name(bad)); code != "invalid_client_metadata" || !strings.HasPrefix(desc, "client_name") {
+			t.Errorf("name %q accepted or wrong error (%q, %q)", bad, code, desc)
+		}
+	}
+	// POSITIVE CONTROL: international names pass.
+	for _, ok := range []string{"アプリ", "تطبيق", "Мой клиент", "App \U0001F4EC", "e\u0301cole"} {
+		if _, _, got, code, desc := validateRegistration(name(ok)); code != "" || got != ok {
+			t.Errorf("name %q refused or altered: %q %q %q", ok, got, code, desc)
+		}
 	}
 	for _, bad := range []string{"", " ", "\u200b", strings.Repeat("é", 101), strings.Repeat("a", 5000)} {
 		if _, _, _, code, _ := validateRegistration(name(bad)); code != "invalid_client_metadata" {

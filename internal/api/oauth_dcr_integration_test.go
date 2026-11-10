@@ -334,8 +334,28 @@ func TestDCRRefusals(t *testing.T) {
 }
 
 func TestDCRNameIsCleanedLikeALearnedContactName(t *testing.T) {
-	h, _ := newDCRHarness(t, nil)
-	dirty := "  Evil\u202eApp\u200b\u0007 Na\nme\u2066 "
+	h, clock := newDCRHarness(t, nil)
+	// Control, bidi, format and separator characters are REFUSED now (#148), not
+	// cleaned, and nothing is stored for a refused name. (The unit test in
+	// internal/oauthserver covers every class; the registration limit allows only
+	// a few attempts a minute here, so this keeps to a bidi override and a newline.)
+	var before int
+	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.oauth_clients`).Scan(&before)
+	for _, bad := range []string{"Evil\u202eApp", "Na\nme"} {
+		st, out, _ := h.register(t, goodRegistration(map[string]any{"client_name": bad}))
+		if st != http.StatusBadRequest || out["error"] != "invalid_client_metadata" {
+			t.Errorf("client_name %q: %d %v, want 400 invalid_client_metadata", bad, st, out)
+		}
+	}
+	var refused int
+	_ = h.super.QueryRow(context.Background(), `SELECT count(*) FROM app.oauth_clients`).Scan(&refused)
+	if refused != before {
+		t.Errorf("%d clients stored after refused names", refused-before)
+	}
+	clock.Advance(time.Minute)
+	// What is left to clean is the invisible characters that are not Cf (a Hangul
+	// filler) and surrounding space.
+	dirty := "  Evil\u3164App Name  "
 	st, out, _ := h.register(t, goodRegistration(map[string]any{"client_name": dirty}))
 	if st != http.StatusCreated {
 		t.Fatalf("register: %d %v", st, out)
@@ -352,7 +372,7 @@ func TestDCRNameIsCleanedLikeALearnedContactName(t *testing.T) {
 	}
 	_, challenge := pkce()
 	_, page := h.authorize(t, h.a.UserID, h.authorizeURL(cid, challenge, nil))
-	for _, r := range []string{"\u202e", "\u200b", "\u0007", "\u2066"} {
+	for _, r := range []string{"\u3164", "\u202e", "\u200b", "\u0007", "\u2066"} {
 		if strings.Contains(page, r) {
 			t.Errorf("the consent page carries U+%04X", []rune(r)[0])
 		}

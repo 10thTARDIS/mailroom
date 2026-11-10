@@ -35,6 +35,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // activityKindsInOrder is every branch, in the order the report prints them.
@@ -326,9 +327,13 @@ func activityDetail(e store.ActivityEntry) string {
 // entries. Each such rune becomes U+FFFD, a visible placeholder, never silence.
 func safeText(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r == utf8.RuneError || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) ||
-			unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Variation_Selector, r) ||
-			r == '\u2028' || r == '\u2029' {
+		// textcheck.IsUnsafeRune is the class a name is refused for at save time;
+		// the terminal adds the invisible characters that are only worth
+		// replacing, not refusing.
+		// The zero-width joiners are allowed in a saved name but still invisible
+		// on a terminal, so they are replaced here.
+		if r == utf8.RuneError || textcheck.IsUnsafeRune(r) || r == '\u200c' || r == '\u200d' ||
+			unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Variation_Selector, r) {
 			return '\uFFFD'
 		}
 		return r
