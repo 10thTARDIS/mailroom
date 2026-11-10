@@ -33,7 +33,6 @@ type bytesScanner struct {
 	seen             []string
 	versionErr       error
 	versionCalls     int
-	db               int
 }
 
 func (s *bytesScanner) Scan(ctx context.Context, data []byte) (clamd.Verdict, error) {
