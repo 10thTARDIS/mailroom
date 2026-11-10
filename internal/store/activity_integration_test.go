@@ -74,6 +74,8 @@ func seedActivity(t *testing.T, super *pgxpool.Pool, u fixtureUser, base time.Ti
 	audit(PurgeAction, "Email", s.purgeMsg, `{"content_hash_prefix":"abcd"}`, 5)
 	audit(backfillActionMove, backfillObjectType, s.batchID, `{}`, 6)
 	audit(backfillActionMove, backfillObjectType, s.batchID, `{}`, 7)
+	// The Activity entry reads the batch's SUMMARY row (one per batch and direction).
+	audit(backfillActionMove, backfillSummaryObjectType, s.batchID, `{"v":1,"count":2}`, 6)
 	audit(RuleApplyAction, RuleApplyObjectType, s.ruleID, `{"changed":12}`, 8)
 	// An audit row of an unrelated kind: never listed.
 	audit("conflict.resolved", "Email", u.MessageID, `{}`, 9)

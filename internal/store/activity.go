@@ -295,19 +295,21 @@ func (b *actBuilder) activityBranch(kind string, f ActivityFilter, n string) str
 			b.timeCond(f, kind, "s.revoked_at", "s.id", false) + `
 		  ORDER BY s.revoked_at DESC, s.id DESC LIMIT ` + n + `)`
 	case ActivityKindPlacement:
-		// One entry per batch and direction (a backfill writes one audit row per
-		// message moved). Reads that user's backfill rows, which are operator-run
-		// and few; the group is bounded by LIMIT like every other branch.
+		// One entry per batch and direction. A backfill writes one audit row per
+		// message for its journal, and ONE SUMMARY ROW per batch and direction
+		// (PlacementBackfillSummary, ADR-053 amendment) carrying the count. This
+		// branch reads only the summaries, so it is bounded by the number of
+		// batches and runs, never by the messages they moved. A batch run twice
+		// in one direction (an undo that stopped and was run again) has two
+		// summaries, which the GROUP BY folds into one entry as before.
 		cond := b.timeCond(f, kind, "g.at", "g.bid", false)
 		if cond != "" {
 			cond = " WHERE true" + cond
 		}
-		// The same upper bound INSIDE the grouping (security review of beta 5):
+		// The cursor's upper bound INSIDE the grouping (security review of beta 5):
 		// a group's max(created_at) is <= X only if every one of its rows is, so
 		// bounding the rows by the cursor's time (and by until) never changes
-		// which groups qualify or their counts, and a "Load more" no longer
-		// re-reads every newer backfill row. The first page still reads the
-		// user's backfill rows; those are operator-run and bounded by mailbox.
+		// which groups qualify or their counts.
 		inner := ""
 		if !f.Until.IsZero() {
 			inner += " AND a.created_at < " + b.param(f.Until.UTC())
@@ -319,9 +321,10 @@ func (b *actBuilder) activityBranch(kind string, f ActivityFilter, n string) str
 			NULL::text AS key_name, NULL::text AS method, NULL::text AS reason,
 			NULL::text AS purpose, NULL::text AS fingerprint, NULL::text AS user_agent, g.cnt AS cnt,
 			NULL::text AS object_type, NULL::text AS object_id, false AS object_exists
-		   FROM (SELECT max(a.created_at) AS at, a.object_id::text AS bid, a.action::text AS action, count(*)::int AS cnt
+		   FROM (SELECT max(a.created_at) AS at, a.object_id::text AS bid, a.action::text AS action,
+		                COALESCE(sum((a.detail->>'count')::bigint), 0)::int AS cnt
 		           FROM app.audit_log a
-		          WHERE a.user_id = $1 AND a.object_type = '` + backfillObjectType + `'
+		          WHERE a.user_id = $1 AND a.object_type = '` + backfillSummaryObjectType + `'
 		            AND a.action IN ('` + backfillActionMove + `', '` + backfillActionUndo + `')` + inner + `
 		          GROUP BY a.object_id, a.action) g` + cond + `
 		  ORDER BY g.at DESC, g.bid DESC LIMIT ` + n + `)`

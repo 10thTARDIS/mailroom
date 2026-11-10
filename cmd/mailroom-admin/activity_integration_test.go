@@ -41,7 +41,8 @@ func seedAdminActivity(t *testing.T, super *pgxpool.Pool, tag string) adminActiv
 	exec(`INSERT INTO app.api_key_events (id, user_id, key_id, method, outcome, reason) VALUES ($1,$2,$3,'Email/set','denied','scope')`, store.NewULID().String(), s.user, key)
 	for _, a := range [][3]string{
 		{"api_key.create", "ApiKey", key}, {store.PurgeAction, "Email", s.purged},
-		{"placement.backfill.move", "PlacementBackfill", store.NewULID().String()},
+		// The placement entry reads the batch's SUMMARY row (ADR-053 amendment).
+		{"placement.backfill.move", "PlacementBackfillSummary", store.NewULID().String()},
 		{store.RuleApplyAction, store.RuleApplyObjectType, s.ruleID},
 	} {
 		exec(`INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail) VALUES ($1,'user',$2,$3,$4,'{"changed":3}')`, s.user, a[0], a[1], a[2])
