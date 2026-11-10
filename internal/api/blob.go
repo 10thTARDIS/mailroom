@@ -455,6 +455,12 @@ func (a *API) servePart(w http.ResponseWriter, r *http.Request, userID ulid.ULID
 		a.serveDecryptedPart(w, r, userID, ref, messageID, false)
 		return
 	}
+	// ⚠ RE-SCAN OF OLD MAIL RUNS BEFORE THE GATE, so the gate reads the fresh
+	// verdict (ADR-056). It never fails the request: on a timeout or a scanner
+	// error the gate below simply sees the verdict that was already stored.
+	if a.openRescan != nil {
+		a.openRescan.BeforeServe(r.Context(), userID, messageID)
+	}
 	// ⚠ THE GATE RUNS BEFORE THE BYTES ARE READ, not after. Deciding to refuse
 	// only once the plaintext is in hand would still have decrypted and parsed
 	// attacker-controlled content on every blocked request, and would leave the
@@ -610,6 +616,10 @@ func (a *API) PreviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Old mail is re-scanned before the gate reads the verdict (ADR-056).
+	if a.openRescan != nil {
+		a.openRescan.BeforeServe(r.Context(), userID, messageID)
+	}
 	// The quarantine applies here too. ADR-027 §8 calls the download route the
 	// single enforcement point because it is the one that covers CID rendering,
 	// client-side previews and foreign clients — but this route hands the same

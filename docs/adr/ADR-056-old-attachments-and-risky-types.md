@@ -162,7 +162,8 @@ boot:
 | `unavailable` | the scanner could not be reached or errored |
 | `inconclusive` | the scan could not support a downgrade of a stored `clean` |
 | `busy` | the synchronous slots were full or the breaker was open; queued instead |
-| `throttled` | the per-minute cap or per-message cooldown refused an enqueue |
+| `throttled` | the per-user per-minute cap refused an enqueue |
+| `deduped` | a job for this message already exists or was created within the cooldown |
 
 "Synchronous versus queued" is `sync` versus `job`; "timeouts" is `timeout`.
 

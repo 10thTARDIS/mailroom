@@ -446,6 +446,9 @@ type API struct {
 	// onDemandScan scans attachments of decrypted messages at download. Nil
 	// means no scanner: those parts are `unscanned`, which does not block.
 	onDemandScan OnDemandScanner
+	// openRescan re-scans stale attachments of mail older than six months when it
+	// is opened (ADR-056). Nil means no scanner: nothing is re-scanned.
+	openRescan OpenRescanner
 	// onDemandObserve counts each on-demand verdict (WithOnDemandObserver).
 	onDemandObserve func(verdict string)
 	// keyFetcher looks up recipients' keys over WKD for RecipientKey/lookup

@@ -47,6 +47,7 @@ var wiredBy = map[string]string{
 	"ProxyCacheEntries":          "cmd/mailroom's proxyCacheObserver, same call sites as ProxyCacheBytes",
 	"LocalDKIMTotal":             "cmd/mailroom's localDKIMObserver, via ingest.WithLocalDKIM — one increment per newly ingested message that reached the check",
 	"OnDemandScanTotal":          "cmd/mailroom's onDemandScanObserver, via api.WithOnDemandObserver — one increment per judged attachment of a decrypted message",
+	"OpenRescanTotal":            "cmd/mailroom's openRescanObserver, via rescan.NewOpenRescan — one increment per open-time re-scan event (sync, queued, job, timeout, ...)",
 	"SearchDuration":             "cmd/mailroom's searchTimingObserver, via search.WithSearchTiming — one observation per index read",
 	"LearnedPlacementTotal":      "cmd/mailroom's learnedPlacementObserver, via ingest.WithLearnedPlacement — one increment per learned-placement arrival decision",
 	"FlagRefreshAbortedTotal":    "cmd/mailroom's syncObserver, via mailsync.WithObserver (Observer.FlagRefreshAborted)",

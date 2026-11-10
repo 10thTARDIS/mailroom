@@ -89,6 +89,10 @@ var jobPayloadKeys = map[string]map[string]bool{
 	// its parked image URLs under the user's identity, so no URL — which carries
 	// a per-recipient token — ever crosses the definer.
 	"proxy_prefetch": {"message_id": true, "round": true, "rate_rounds": true},
+	// Re-scan of an old message's stale attachments after it was opened (ADR-056):
+	// the message id and nothing else. The worker re-reads the message under the
+	// target user's identity, so no filename or verdict crosses the definer.
+	"attachment_rescan_open": {"message_id": true},
 }
 
 // PayloadKeysOutsideAllowlist reports the payload keys a job of this kind must

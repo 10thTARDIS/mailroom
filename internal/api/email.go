@@ -516,6 +516,18 @@ func (a *API) loadBodies(ctx context.Context, userID ulid.ULID, props map[string
 		}
 		out[id] = b
 	}
+	// The reading pane's fetch (it asks for body values) is what "opens" a
+	// message for re-scan purposes (ADR-056). List and search requests do not ask
+	// for values, so mail nobody opens costs nothing. Never fails the request.
+	if a.openRescan != nil && (args.FetchTextBodyValues || args.FetchHTMLBodyValues || args.FetchAllBodyValues) {
+		opened := make([]ulid.ULID, 0, len(out))
+		for id, b := range out {
+			if !b.unreadable {
+				opened = append(opened, id)
+			}
+		}
+		a.openRescan.OnOpen(ctx, userID, opened)
+	}
 	return out, nil
 }
 

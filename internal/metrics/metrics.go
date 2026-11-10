@@ -167,6 +167,14 @@ type Metrics struct {
 	// and unscanned (no scanner configured).
 	OnDemandScanTotal *prometheus.CounterVec // labels: verdict
 
+	// OpenRescanTotal counts what happened to attachments of mail older than six
+	// months when the mail was opened (ADR-056): re-scanned synchronously on a
+	// download or preview ("sync"), queued ("queued") and completed by the job
+	// ("job"), timed out or scanner unavailable (fail-open), refused by a bound
+	// ("throttled", "deduped", "busy"), or inconclusive. Label is a closed set
+	// (rescan.OpenEvents).
+	OpenRescanTotal *prometheus.CounterVec // labels: event
+
 	// SearchDuration is how long one search-index read took, kind="search"
 	// (Email/query's candidate set) or kind="snippet" (SearchSnippet/get's
 	// highlighting), #724. It is the engine's time alone — what the web
@@ -346,6 +354,12 @@ func New() *Metrics {
 			Name:      "ondemand_scan_total",
 			Help:      "Verdicts of the download-time scan of attachments of decrypted messages, by verdict.",
 		}, []string{"verdict"}),
+
+		OpenRescanTotal: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "attachment_open_rescan_total",
+			Help:      "Re-scans of attachments on mail older than six months when it is opened, by event: sync, queued, job, timeout, unavailable, inconclusive, busy, throttled, deduped.",
+		}, []string{"event"}),
 
 		SearchDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,

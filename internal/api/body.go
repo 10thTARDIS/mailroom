@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"mailroom/internal/attachrisk"
 	"mailroom/internal/ical"
 	"mailroom/internal/mime"
 	"mailroom/internal/ml"
@@ -108,6 +109,9 @@ var defaultBodyProperties = []string{
 	"partId", "blobId", "size", "name", "type", "charset",
 	"format", "delSp",
 	"disposition", "cid", "language", "location",
+	// riskyType (ADR-056): in the default set so a client that names no
+	// bodyProperties still gets the warning signal.
+	"riskyType",
 }
 
 // bodyArgs are the Email/get arguments that shape the body properties
@@ -526,6 +530,17 @@ func bodyPartObject(n *bodyNode, all map[*mime.Structure]*bodyNode, want map[str
 	}
 	if isMultipart(st.ContentType) {
 		full["size"] = 0
+	}
+	// riskyType (ADR-056): why the client should ask before this part is saved, or
+	// null. Decided by the filename AND the bytes already in hand, so it costs no
+	// extra read. A multipart container and a nameless text body are never risky:
+	// their "bytes" are the message's own text, and a `#!` in a plain-text body is
+	// not a script.
+	full["riskyType"] = nil
+	if !isMultipart(st.ContentType) && (st.Filename != "" || !strings.HasPrefix(st.ContentType, "text/")) {
+		if r := attachrisk.Classify(st.Filename, st.ContentType, st.Data); r.Risky {
+			full["riskyType"] = r.Reason
+		}
 	}
 
 	out := map[string]any{}
