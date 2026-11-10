@@ -84,3 +84,7 @@ img.shields.io
 # The public npm registry: the only registry the editor's supply-chain test
 # (web/src/core/supplyChain/checkLock.ts) accepts in package-lock.json (ADR-051).
 registry.npmjs.org
+
+# The W3C SVG namespace URI: an XML namespace name, never fetched. It appears in
+# test bodies that prove the image proxy refuses SVG (internal/api/proxy_sniff_test.go).
+www.w3.org
