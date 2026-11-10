@@ -9,6 +9,34 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Fixes and hardening
+
+- **Moving or deleting many messages at once is faster.** Folder counts still update the
+  same way, but the server now works out where a large selection came from in a few
+  lookups instead of one per message.
+- **Names are checked when you save them.** Rule names, API key names and the names AI
+  tools register for themselves can no longer contain control characters, invisible
+  formatting characters, text-direction overrides or line and paragraph separators;
+  the save is refused with a message naming the field. Ordinary names in any script,
+  with accents or emoji, are unaffected, and names saved earlier are left as they are.
+  One consequence: the zero-width joiner and non-joiner (used in some emoji sequences and
+  in Persian and similar scripts) count as invisible formatting and are refused.
+- **A disabled user's sign-in attempt no longer uses up an AI tool's authorization code.**
+  The code stays valid until it expires, as a refresh token already did, so connecting
+  again after the user is re-enabled works as expected.
+- **Activity's learned-placement entries load without reading every moved message.** The
+  placement entries now come from one summary per batch, so the page stays quick as the
+  number of moved messages grows.
+
+### Upgrading
+
+- Placement backfills run before this version have no summary and will not show in
+  Activity until you run `mailroom-admin placement-backfill-summaries --user-id <id>`
+  once for each user who has run one. It prints what it would write; add `--apply` to
+  write it. Running it again does nothing.
+- This version adds one database migration (it replaces a single function) and applies
+  it on start.
+
 ## [1.102.0] — 2026-11-09
 
 **v1.102 makes Mailroom a good citizen for other mail apps and AI tools, and gives you
