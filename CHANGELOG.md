@@ -19,8 +19,8 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   formatting characters, text-direction overrides or line and paragraph separators;
   the save is refused with a message naming the field. Ordinary names in any script,
   with accents or emoji, are unaffected, and names saved earlier are left as they are.
-  One consequence: the zero-width joiner and non-joiner (used in some emoji sequences and
-  in Persian and similar scripts) count as invisible formatting and are refused.
+  The zero-width joiner and non-joiner, which emoji sequences and Persian and similar
+  scripts need, are still allowed.
 - **A disabled user's sign-in attempt no longer uses up an AI tool's authorization code.**
   The code stays valid until it expires, as a refresh token already did, so connecting
   again after the user is re-enabled works as expected.

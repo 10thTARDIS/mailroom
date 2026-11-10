@@ -330,7 +330,9 @@ func safeText(s string) string {
 		// textcheck.IsUnsafeRune is the class a name is refused for at save time;
 		// the terminal adds the invisible characters that are only worth
 		// replacing, not refusing.
-		if r == utf8.RuneError || textcheck.IsUnsafeRune(r) ||
+		// The zero-width joiners are allowed in a saved name but still invisible
+		// on a terminal, so they are replaced here.
+		if r == utf8.RuneError || textcheck.IsUnsafeRune(r) || r == '\u200c' || r == '\u200d' ||
 			unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Variation_Selector, r) {
 			return '\uFFFD'
 		}

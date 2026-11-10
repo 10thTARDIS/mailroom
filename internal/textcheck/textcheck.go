@@ -19,12 +19,21 @@ import (
 // control (newline and tab included, so a name is one line), any Unicode
 // format (Cf) character (which covers the bidi overrides U+202A to U+202E, the
 // isolates U+2066 to U+2069, the marks U+200E, U+200F and U+061C, and the
-// zero-width joiners), and the line and paragraph separators U+2028 and U+2029.
+// zero-width space), and the line and paragraph separators U+2028 and U+2029.
+//
+// Two Cf characters are allowed: the zero-width non-joiner U+200C and joiner
+// U+200D. They are part of ordinary writing (Persian, and other scripts that
+// use the non-joiner) and of emoji sequences (a family, a flag, skin tones in
+// a profession), they never reorder text, and refusing them stops real names
+// being saved.
 //
 // The admin CLI's safeText uses this same class and adds the rest of
 // Default_Ignorable_Code_Point on top, because it only replaces and so can be
 // stricter than a refusal that stops a real name being saved.
 func IsUnsafeRune(r rune) bool {
+	if r == '\u200c' || r == '\u200d' {
+		return false
+	}
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
 }
 

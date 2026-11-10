@@ -30,7 +30,7 @@ func TestCheckNameAcceptsInternationalNames(t *testing.T) {
 	for _, in := range []string{
 		"Quarterly invoices", "Zoë's rules", "قواعد البريد", "שלום", "請求書フィルター", "한국어 규칙", "Правила",
 		"mail 📬 sorter", "👍🏽 thumbs", "❤️ heart", "é combining acute", "นามสกุล ไทย", "देवनागरी नाम",
-		"a-b_c.d (1)", "x y", "� replacement char",
+		"a-b_c.d (1)", "family \U0001F468\u200d\U0001F469\u200d\U0001F467", "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", "x y", "� replacement char",
 	} {
 		if err := CheckName(in); err != nil {
 			t.Errorf("%q refused: %v", in, err)
