@@ -77,7 +77,7 @@ func (f *recordingFetcher) asked(url string) bool {
 
 // pngFor is the body served for a URL, distinct per URL so a cache hit can be
 // checked byte for byte.
-func pngFor(url string) string { return "\x89PNG-bytes-of-" + url }
+func pngFor(url string) string { return "\x89PNG\r\n\x1a\n-bytes-of-" + url }
 
 func servesImages(url string) (*http.Response, error) {
 	return imgResp(200, "image/png", pngFor(url)), nil
@@ -358,7 +358,7 @@ func TestPrefetchRefusesExactlyWhatAnOpenRefusesAndLogsTheHost(t *testing.T) {
 			return imgResp(200, "text/html", "<p>not an image</p>"), nil
 		case bigURL:
 			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}},
-				Body: errBody{egress.ErrTooLarge}}, nil
+				Body: &midStreamErrBody{err: egress.ErrTooLarge}}, nil
 		}
 		return servesImages(url)
 	}
@@ -673,7 +673,7 @@ func TestPrefetchRefusesANonDefaultPortThatAnOpenFetches(t *testing.T) {
 // (#922 review L3).
 func TestPrefetchDoesNotCountAnEmptyBodyAsFetched(t *testing.T) {
 	h := newPrefetchHarness(t, prefetchCfg(), func(string) (*http.Response, error) {
-		return imgResp(200, "image/png", ""), nil
+		return imgResp(200, "image/png", pngSig), nil
 	})
 	h.clearCache(t)
 	msg := h.seedHTMLMessage(t, "letters@news.example", `<img src="https://cdn.news.example/blank.png">`, time.Now())

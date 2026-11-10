@@ -870,7 +870,7 @@ func hostileCorpus() []string {
 		`<object data="https://evil.example/x.swf"></object>`,
 		`<body background="https://t.example/x.png">`,
 		`<video poster="https://t.example/x.png"><source src="https://t.example/v.mp4"></video>`,
-		`<table background="https://t.example/x.png"><tr><td>x</td></tr></table>`,
+		`<table background="javascript:alert(1)"><tr><td>x</td></tr></table>`,
 		`<!--<img src=x onerror=alert(1)>-->`,
 		`<div title='&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'>t</div>`,
 		`<p>ordinary <b>mail</b> with a <a href="https://example.com">link</a></p>`,

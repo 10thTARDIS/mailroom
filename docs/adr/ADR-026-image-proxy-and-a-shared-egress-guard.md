@@ -589,6 +589,65 @@ the feature runs.
 and `app.proxy_image_refs` does not either. Both are operational state, not JMAP-visible
 objects, and nothing a client syncs changes when an image is cached or released.
 
+## Amendment: the remaining silent and refused cases (#26)
+
+**What was measured.** A report-only run over a real mailbox found images the proxy never
+saw (a remote `background=` attribute, a remote `<picture>`/`<source>`), plus images it
+saw and refused. The numbers are operator-private and are not recorded here; they are why
+this amendment exists. No security property above changes: no direct remote fetch from
+the reader, beacons never fetched or proxied, the egress guard unchanged apart from item
+1, only allowed senders' images, and the stricter fail-closed allow rule.
+
+**1. Protocol-relative URLs (`//host/x.png`).** The sanitiser already classed them as
+remote and rewrote them to the proxy, which then refused them with 403 because egress saw
+an empty scheme. `normalizeProxyTarget` (`internal/api/proxy.go`) now reads exactly a
+leading `//` as `https:`, in that one place, immediately before the request is built. It
+is the single place an empty scheme becomes https. Every other form (`javascript:`,
+`data:`, `ftp:`, a relative path) reaches egress unchanged and is refused by its scheme
+rule; egress itself is untouched. The scheme set is still https and http, so the plain
+`http` decision (appendix A) is unchanged.
+
+**2. The type is decided on the bytes, not the label.** Senders serve real images as
+`image/jpg`, `application/octet-stream` or with no type. The proxy now peeks the first
+512 bytes and accepts only when they sniff as an allowed raster type (JPEG, PNG, GIF,
+WebP, AVIF, and the BMP and ICO types that were already allowed), whatever the
+`Content-Type` says. The SNIFFED type is what is served, with `nosniff`, and what is
+cached. SVG, HTML (including HTML labelled `image/png`), a polyglot whose first bytes are
+not an image signature, and an empty body never sniff, so they are still refused with the
+`content_type` reason (the label is logged, bounded, as before). A body that fails before
+its first byte keeps its `too_large` / `body_aborted` reason. The label is never consulted
+to accept.
+
+**3. `background=`.** A remote `background=` on `table`, `tr`, `td` or `th` (the elements a
+browser paints one on) is parked by the reader sanitiser as `data-mailroom-remote-background`
+exactly as `<img src>` is parked: the proxy path replaces the sender's URL when the proxy
+is on, a 1x1 beacon cell is parked under the pixel name that nothing restores and is never
+proxied, and it counts among the proxy-eligible images, so allow-checking, the per-message
+cap, prefetch and the cache apply to it unchanged. The client restores it only under the
+rule that restores an `<img>` (remote content allowed for that sender): with the proxy on
+the parent fetches it and hands the frame a `background="data:…"` attribute; with the proxy
+off it is restored as `background=` by the same switch as `src`. It is never turned into
+CSS `url()`. Outbound mail still drops it; any other element, a non-remote value
+(`cid:`, `data:`, `javascript:`) and an author-written `data-mailroom-*` attribute are
+still dropped.
+
+**4. `<picture>` / `<source>`.** Two safe options existed: park the `<source srcset>`
+candidates, or drop the `<source>` elements and keep the `<img>`. The second is chosen.
+Parking candidates would need the srcset grammar parsed (the reason srcset is dropped with
+the proxy on), and a parked candidate list restored by name would be fetched directly by the
+browser. `<picture>` is unwrapped, every `<source>` is dropped, and the fallback `<img>`
+inside it goes through the normal parked-and-proxied path, so the picture shows (at the
+fallback's resolution) and no `<source>` URL is ever fetched. A follow-up could proxy the
+sources once someone has measured the loss.
+
+**5. Measurement.** No new counters and no persistence layer. `proxy-report` now lists a
+background on a table cell under "would be proxied" and keeps "left unparked" and
+"`<source>` dropped" rows for what is still not carried. The refusal and fetch counters
+reset on every deploy; to measure content-type refusals (or any reason) over a long window,
+scrape the counters from outside the process on an interval and keep the series there.
+
+**change_log.** None; no migration.
+
 ---
 
 ## Appendix: the four decisions, as they were put

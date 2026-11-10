@@ -39,6 +39,7 @@ export function isProxyPath(path: string): boolean {
 // escaped to `&#34;`, so ` data-mailroom-remote-src="` can only be an attribute
 // NAME the server wrote. The leading space is the attribute boundary.
 const PARKED_SRC = / data-mailroom-remote-src="([^"]*)"/g;
+const PARKED_BACKGROUND = / data-mailroom-remote-background="([^"]*)"/g;
 const PARKED_SRCSET = / data-mailroom-remote-srcset="[^"]*"/g;
 
 /** The most one image may weigh: the proxy's own ceiling (ProxyConfig.MaxBytes). */
@@ -63,24 +64,30 @@ export function proxiedImageRefs(html: string): string[] {
     const path = m[1] ?? "";
     if (isProxyPath(path)) seen.add(path);
   }
+  for (const m of html.matchAll(PARKED_BACKGROUND)) {
+    const path = m[1] ?? "";
+    if (isProxyPath(path)) seen.add(path);
+  }
   return [...seen];
 }
 
-/** How many `<img>` elements carry a proxy reference (a path used twice counts
+/** How many `<img>` elements (and table-cell backgrounds) carry a proxy reference (a path used twice counts
  * twice: this is what the reader sees, not what is fetched). */
 export function proxiedImageCount(html: string): number {
   let n = 0;
-  for (const m of html.matchAll(PARKED_SRC)) if (isProxyPath(m[1] ?? "")) n += 1;
+  for (const re of [PARKED_SRC, PARKED_BACKGROUND])
+    for (const m of html.matchAll(re)) if (isProxyPath(m[1] ?? "")) n += 1;
   return n;
 }
 
 /** How many of those elements have no entry in `resolved`. */
 export function failedImageCount(html: string, resolved: ReadonlyMap<string, string>): number {
   let n = 0;
-  for (const m of html.matchAll(PARKED_SRC)) {
-    const path = m[1] ?? "";
-    if (isProxyPath(path) && !resolved.has(path)) n += 1;
-  }
+  for (const re of [PARKED_SRC, PARKED_BACKGROUND])
+    for (const m of html.matchAll(re)) {
+      const path = m[1] ?? "";
+      if (isProxyPath(path) && !resolved.has(path)) n += 1;
+    }
   return n;
 }
 
@@ -94,12 +101,16 @@ export function failedImageCount(html: string, resolved: ReadonlyMap<string, str
  * content OFF. A tracking pixel is parked under a different name
  * (`data-mailroom-pixel-src`) and is not touched here at all. */
 export function inlineProxiedImages(html: string, resolved: ReadonlyMap<string, string>): string {
+  const inline = (attr: string) => (_whole: string, path: string) => {
+    const url = isProxyPath(path) ? resolved.get(path) : undefined;
+    // A data: URL never contains a `"`, so it is safe to inline unescaped.
+    return url !== undefined && url.startsWith("data:image/") ? ` ${attr}="${url}"` : "";
+  };
+  // A parked background= (#26) is consumed the same way and comes back as a
+  // background ATTRIBUTE holding a data: URL, never as CSS.
   return html
-    .replace(PARKED_SRC, (_whole, path: string) => {
-      const url = isProxyPath(path) ? resolved.get(path) : undefined;
-      // A data: URL never contains a `"`, so it is safe to inline unescaped.
-      return url !== undefined && url.startsWith("data:image/") ? ` src="${url}"` : "";
-    })
+    .replace(PARKED_SRC, inline("src"))
+    .replace(PARKED_BACKGROUND, inline("background"))
     .replace(PARKED_SRCSET, "");
 }
 

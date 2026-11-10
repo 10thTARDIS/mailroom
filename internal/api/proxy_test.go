@@ -279,11 +279,30 @@ func imgResp(status int, ctype, body string) *http.Response {
 	return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}
 }
 
-// errBody fails mid-stream the way egress's cappedBody does past MaxBytes.
+// errBody fails mid-stream the way egress's cappedBody does past MaxBytes: it
+// serves a PNG signature first (the proxy decides on the bytes, #26), then errs.
 type errBody struct{ err error }
 
 func (b errBody) Read([]byte) (int, error) { return 0, b.err }
 func (b errBody) Close() error             { return nil }
+
+// midStreamErrBody is errBody with the signature served first.
+type midStreamErrBody struct {
+	err error
+	n   int
+}
+
+func (b *midStreamErrBody) Read(p []byte) (int, error) {
+	if b.n == 0 {
+		b.n = copy(p, pngSig)
+		return b.n, nil
+	}
+	return 0, b.err
+}
+func (b *midStreamErrBody) Close() error { return nil }
+
+// pngSig is the PNG signature plus filler: enough to sniff as a PNG.
+var pngSig = "\x89PNG\r\n\x1a\n-synthetic"
 
 // proxyHarness builds an API whose proxy resolves to trackerURL (or refuses with
 // `resolveWhy`), fetches through `client`, and records every outcome and log line.
@@ -359,7 +378,7 @@ func TestProxyEveryRefusalIsCountedUnderItsOwnReason(t *testing.T) {
 			}},
 		{name: "resolve not allowed", client: stubFetcher{}, resolveErr: reasonNotAllowed, reason: reasonNotAllowed, status: 404},
 		{name: "resolve token", client: stubFetcher{}, resolveErr: reasonTokenMissing, reason: reasonTokenMissing, status: 404},
-		{name: "rate limited", cfg: ProxyConfig{PerMinute: 1}, client: stubFetcher{resp: imgResp(200, "image/png", "x")},
+		{name: "rate limited", cfg: ProxyConfig{PerMinute: 1}, client: stubFetcher{resp: imgResp(200, "image/png", pngSig)},
 			reason: reasonRateLimited, status: 429,
 			drive: func(h *proxyHarness) *httptest.ResponseRecorder {
 				if rec := h.doOK(); rec.Code != 200 { // spends the one allowed fetch
@@ -378,10 +397,10 @@ func TestProxyEveryRefusalIsCountedUnderItsOwnReason(t *testing.T) {
 		{name: "content type", client: stubFetcher{resp: imgResp(200, "image/svg+xml; charset=utf-8", "<svg/>")},
 			reason: reasonContentType, status: 415, wantCT: "image/svg+xml"},
 		{name: "too large", client: stubFetcher{resp: &http.Response{StatusCode: 200,
-			Header: http.Header{"Content-Type": {"image/png"}}, Body: errBody{egress.ErrTooLarge}}},
+			Header: http.Header{"Content-Type": {"image/png"}}, Body: &midStreamErrBody{err: egress.ErrTooLarge}}},
 			reason: reasonTooLarge, status: 200},
 		{name: "body aborted", client: stubFetcher{resp: &http.Response{StatusCode: 200,
-			Header: http.Header{"Content-Type": {"image/png"}}, Body: errBody{io.ErrUnexpectedEOF}}},
+			Header: http.Header{"Content-Type": {"image/png"}}, Body: &midStreamErrBody{err: io.ErrUnexpectedEOF}}},
 			reason: reasonBodyAborted, status: 200},
 	}
 	seen := map[string]bool{}
@@ -456,7 +475,7 @@ func TestProxyFailureReasonSeparatesCancelFromTimeout(t *testing.T) {
 }
 
 func TestProxyServedAndCachedAreCounted(t *testing.T) {
-	h := newProxyHarness(t, ProxyConfig{}, stubFetcher{resp: imgResp(200, "image/png", "png")}, "")
+	h := newProxyHarness(t, ProxyConfig{}, stubFetcher{resp: imgResp(200, "image/png", pngSig)}, "")
 	if rec := h.doOK(); rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -484,7 +503,7 @@ func TestProxyRefusalLogNeverCarriesTheURL(t *testing.T) {
 		"guard":           stubFetcher{err: fmt.Errorf("dial tracker.example: %w", egress.ErrBlockedAddress)},
 		"content type":    stubFetcher{resp: imgResp(200, "text/html", "<p>")},
 		"too large": stubFetcher{resp: &http.Response{StatusCode: 200,
-			Header: http.Header{"Content-Type": {"image/png"}}, Body: errBody{egress.ErrTooLarge}}},
+			Header: http.Header{"Content-Type": {"image/png"}}, Body: &midStreamErrBody{err: egress.ErrTooLarge}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newProxyHarness(t, ProxyConfig{}, client, "")
@@ -511,7 +530,7 @@ func TestProxyRefusalLogNeverCarriesTheURL(t *testing.T) {
 // resolve refusals return the URL's host nowhere, so the smuggling case below
 // is what proves noteProxy itself refuses to print a host for them.
 func TestProxyAuthorizationRefusalsNeverLogAHost(t *testing.T) {
-	ok := stubFetcher{resp: imgResp(200, "image/png", "png")}
+	ok := stubFetcher{resp: imgResp(200, "image/png", pngSig)}
 	cases := map[string]func(t *testing.T) *proxyHarness{
 		"not allowed": func(t *testing.T) *proxyHarness {
 			h := newProxyHarness(t, ProxyConfig{}, ok, reasonNotAllowed)
