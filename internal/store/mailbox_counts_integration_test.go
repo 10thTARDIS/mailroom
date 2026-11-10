@@ -14,7 +14,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,4 +301,162 @@ func TestEmailStreamIsUnchangedByMailboxCountRows(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// The prefetch (#146) must leave the Mailbox change rows IDENTICAL to the
+// per-message lookup it replaces. Two users get the same layout (inbox, archive,
+// a folder, a message in two folders through provenance, a message with no
+// folder at all) and the same bulk move; user A moves with one lookup per
+// message (the old path), user B resolves the sources first. The rows are
+// compared by mailbox NAME, since the ids differ, and so are the elapsed times:
+// the guard is generous (the prefetch must not be slower than 1.25x the old path
+// plus a second), because the point is that it is not a regression on a noisy
+// runner; the measured gain is in the issue's notes (MAILROOM_BULK_MOVE=5000).
+func TestBulkMovePrefetchIsIdenticalToThePerMessageLookup(t *testing.T) {
+	n := 500
+	if v, err := strconv.Atoi(os.Getenv("MAILROOM_BULK_MOVE")); err == nil && v > 0 {
+		n = v
+	}
+	h := newHarness(t)
+	ctx := context.Background()
+	a, b := seedTwoUsers(t, h.super)
+	s := h.appStore()
+
+	type result struct {
+		elapsed time.Duration
+		rows    map[string]int // mailbox name -> Mailbox change rows
+		only    int
+		emails  int
+	}
+	run := func(u fixtureUser, prefetch bool, tag string) result {
+		uid := mustULID(t, u.ID)
+		inbox := mustULID(t, u.MailboxID)
+		archive := seedMailbox(t, ctx, h, u, "Archive#"+tag, `\Archive`)
+		receipts := seedMailbox(t, ctx, h, u, "Receipts#"+tag, "")
+		trash := seedMailbox(t, ctx, h, u, "Trash#"+tag, `\Trash`)
+		spare := seedMailbox(t, ctx, h, u, "Spare#"+tag, "")
+		ids := append(seedBulkMessages(t, h, u, inbox, n/2),
+			append(seedBulkMessages(t, h, u, archive, n/4), seedBulkMessages(t, h, u, receipts, n-n/2-n/4)...)...)
+		// One message in TWO folders (a second live provenance row), and one that
+		// is in none (its provenance gone): the lookups must agree on both.
+		two := seedBulkMessages(t, h, u, inbox, 1)[0]
+		if _, err := h.super.Exec(ctx, `
+			INSERT INTO app.message_provenance (id, user_id, message_id, account_id, mailbox_id, uid, uidvalidity)
+			VALUES ($6, $2, $1, $3, $4, $5, 1)`,
+			two.String(), u.ID, u.AccountID, spare.String(), nextSeededUID+5000, NewULID().String()); err != nil {
+			t.Fatal(err)
+		}
+		none := seedBulkMessages(t, h, u, inbox, 1)[0]
+		if _, err := h.super.Exec(ctx, `UPDATE app.message_provenance SET state = 'stale_uidvalidity' WHERE message_id = $1`, none.String()); err != nil {
+			t.Fatal(err)
+		}
+		// A draft-like message: a local mailbox and no provenance at all.
+		local := seedBulkMessages(t, h, u, inbox, 1)[0]
+		if _, err := h.super.Exec(ctx, `DELETE FROM app.message_provenance WHERE message_id = $1`, local.String()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.super.Exec(ctx, `UPDATE app.messages SET local_mailbox_id = $2 WHERE id = $1`, local.String(), spare.String()); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, two, none, local)
+
+		mbBefore := stateOf(t, ctx, s, uid, ObjectMailbox)
+		emBefore := stateOf(t, ctx, s, uid, ObjectEmail)
+		start := time.Now()
+		if err := s.UserTx(ctx, uid, func(tx *UserTx) error {
+			if prefetch {
+				pst := time.Now()
+				if err := tx.PrefetchMailboxCountsBefore(ctx, ids...); err != nil {
+					return err
+				}
+				t.Logf("prefetch of %d messages took %v", len(ids), time.Since(pst))
+			}
+			for _, id := range ids {
+				if _, _, err := tx.ApplyEmailUpdate(ctx, id, EmailUpdate{MoveToMailboxID: &trash}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r := result{elapsed: time.Since(start), rows: map[string]int{}}
+		rows, err := h.super.Query(ctx, `
+			SELECT mb.imap_name, count(*), count(*) FILTER (WHERE c.counts_only)
+			  FROM app.change_log c JOIN app.mailboxes mb ON mb.user_id = c.user_id AND mb.id::text = c.object_id::text
+			 WHERE c.user_id = $1 AND c.object_type = 'Mailbox' AND c.seq > $2 GROUP BY mb.imap_name`, u.ID, mbBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var c, co int
+			if err := rows.Scan(&name, &c, &co); err != nil {
+				t.Fatal(err)
+			}
+			r.rows[strings.SplitN(name, "#", 2)[0]], r.only = c, r.only+co
+		}
+		r.emails = changeRowsSince(t, ctx, h, u.ID, ObjectEmail, emBefore)
+		return r
+	}
+	// ABBA, because every run grows the same tables: comparing one run against the
+	// next would charge the second for the first's rows (measured: 30%).
+	r1, r2, r3, r4 := run(a, false, "1"), run(b, true, "1"), run(a, true, "2"), run(b, false, "2")
+	oldT, preT := r1.elapsed+r4.elapsed, r2.elapsed+r3.elapsed
+	t.Logf("moved %d messages four times (ABBA): per-message lookup %v + %v = %v, prefetch %v + %v = %v",
+		n+3, r1.elapsed, r4.elapsed, oldT, r2.elapsed, r3.elapsed, preT)
+	if len(r1.rows) != 5 || r1.rows["Spare"] != 1 {
+		t.Fatalf("old path rows = %v; want inbox, archive, receipts, spare (the two-folder message) and trash, one each", r1.rows)
+	}
+	for i, r := range []result{r2, r3, r4} {
+		if !reflect.DeepEqual(r.rows, r1.rows) || r.only != r1.only || r.emails != r1.emails {
+			t.Errorf("run %d: rows %v counts-only %d emails %d; first old run: %v %d %d", i+2, r.rows, r.only, r.emails, r1.rows, r1.only, r1.emails)
+		}
+	}
+	if preT > oldT*5/4+time.Second {
+		t.Errorf("the prefetch (%v) is slower than the per-message lookup (%v)", preT, oldT)
+	}
+}
+
+// A prefetched answer is used once, and only for the message it was read for: a
+// second note for the same message looks it up live, and a message that was not
+// prefetched is looked up live.
+func TestPrefetchedMailboxAnswerIsConsumedOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, _ := seedTwoUsers(t, h.super)
+	s := h.appStore()
+	aID := mustULID(t, a.ID)
+	inbox := mustULID(t, a.MailboxID)
+	archive := seedMailbox(t, ctx, h, a, "Archive", `\Archive`)
+	m := seedBulkMessages(t, h, a, inbox, 2)
+	if err := s.UserTx(ctx, aID, func(tx *UserTx) error {
+		if err := tx.PrefetchMailboxCountsBefore(ctx, m[0]); err != nil {
+			return err
+		}
+		// Move m[0] after the prefetch, with no note of its own: a second note must
+		// see the NEW membership (live), not the prefetched inbox.
+		if _, err := tx.tx.Exec(ctx, `UPDATE app.messages SET moved_mailbox_id = $3 WHERE user_id = $1 AND id = $2`,
+			tx.userID.String(), m[0].String(), archive.String()); err != nil {
+			return err
+		}
+		if err := tx.NoteMailboxCountsBefore(ctx, m[0]); err != nil { // consumes the prefetch: inbox
+			return err
+		}
+		got := tx.notes().mailboxes
+		if _, ok := got[inbox]; !ok || len(got) != 1 {
+			t.Errorf("first note = %v, want the prefetched inbox only", got)
+		}
+		clear(got)
+		if err := tx.NoteMailboxCountsBefore(ctx, m[0], m[1]); err != nil { // live for both
+			return err
+		}
+		if _, ok := got[archive]; !ok || len(got) != 2 {
+			t.Errorf("second note = %v, want archive (live) and inbox (m[1])", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
