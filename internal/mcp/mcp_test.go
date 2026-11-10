@@ -345,3 +345,42 @@ func TestStatelessTransport(t *testing.T) {
 		}
 	}
 }
+
+// read_message passes an attachment's riskyType through, so an AI tool can tell
+// the person a file is a program or a macro document before it suggests opening it.
+// The fake answers with the attachment's riskyType and a field the tool must NOT
+// pass (blobId), which is the control that the pick is a pick.
+func TestReadMessageReportsAttachmentRiskyType(t *testing.T) {
+	f := &fakeBackend{allowed: map[string]bool{"Email/get": true}}
+	f.answer = func(c Invocation) Invocation {
+		return inv("Email/get", c.CallID, map[string]any{"list": []any{map[string]any{
+			"id": "m1", "subject": "files",
+			"textBody":   []any{map[string]any{"partId": "1"}},
+			"bodyValues": map[string]any{"1": map[string]any{"value": "hi"}},
+			"attachments": []any{
+				map[string]any{"name": "setup.exe", "type": "application/octet-stream", "size": 5, "riskyType": "program", "blobId": "B1"},
+				map[string]any{"name": "report.pdf", "type": "application/pdf", "size": 9, "riskyType": nil, "blobId": "B2"},
+			},
+		}}})
+	}
+	s := connect(t, f)
+	res, err := s.Call(context.Background(), "read_message", map[string]any{"emailId": "m1"})
+	if err != nil || res.IsError {
+		t.Fatalf("read_message: %v %+v", err, res)
+	}
+	uc, _ := res.Object()["untrusted_content"].(map[string]any)
+	atts, _ := uc["attachments"].([]any)
+	if len(atts) != 2 {
+		t.Fatalf("attachments = %v", atts)
+	}
+	first, second := atts[0].(map[string]any), atts[1].(map[string]any)
+	if first["riskyType"] != "program" {
+		t.Errorf("riskyType = %v, want program", first["riskyType"])
+	}
+	if v, ok := second["riskyType"]; !ok || v != nil {
+		t.Errorf("a safe attachment's riskyType = %v (present=%v), want an explicit null", v, ok)
+	}
+	if _, leaked := first["blobId"]; leaked {
+		t.Error("blobId leaked through pick")
+	}
+}

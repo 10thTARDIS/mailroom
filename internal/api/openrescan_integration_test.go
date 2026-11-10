@@ -12,6 +12,7 @@ package api
 // downloads: the 403 is then attributable to the fresh verdict.
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -97,5 +98,44 @@ func TestDownloadRescansOldMailAndRefusesByTheFreshVerdict(t *testing.T) {
 	// The preview door reads the same fresh verdict.
 	if _, resp := getBody(t, srv, previewURL(a.UserID.String(), oldParts["invoice.pdf"], "invoice.pdf")); resp.StatusCode != http.StatusForbidden {
 		t.Errorf("preview of the flagged part status %d, want 403", resp.StatusCode)
+	}
+}
+
+// hangOnPDF hangs on the PDF part and calls the HTML part infected.
+type hangOnPDF struct{ scriptScanner }
+
+func (h *hangOnPDF) Scan(ctx context.Context, data []byte) (clamd.Verdict, error) {
+	if bytes.HasPrefix(data, []byte("%PDF")) {
+		<-ctx.Done()
+		return clamd.Verdict{}, ctx.Err()
+	}
+	return clamd.Verdict{State: clamd.Flagged, Signature: "Test-Signature"}, nil
+}
+
+// One slow part must not shield the others (security review MEDIUM-1): downloading
+// the part that hangs is served under its stored verdict (fail open), and the
+// other part, found infected, is refused. The control for the 403 is
+// TestDownloadRescansOldMailAndRefusesByTheFreshVerdict (young mail downloads,
+// old mail is refused by the fresh verdict); the probe that restores the abort
+// turns this test red.
+func TestAHungPartDoesNotStopAnInfectedOneBeingRefused(t *testing.T) {
+	h := newComposeHarness(t)
+	a, _ := seedTwo(t, h.super)
+	h.api.openRescan = rescan.NewOpenRescan(h.store, apiBlobs{h.api}, &hangOnPDF{}, nil, nil).WithSyncBudget(600 * time.Millisecond)
+	srv := httptest.NewServer(blobHandler(h, a))
+	defer srv.Close()
+
+	old := seedRawMessage(t, h, a, []byte(rawWithAttachment))
+	_, parts := partBlobIDs(t, h, a, old)
+	seedAttachmentRows(t, h, a.UserID, old, []byte(rawWithAttachment), nil)
+	ageMessage(t, h, a.UserID, old, 400)
+
+	// The requested part hangs: served under its stored clean.
+	if _, resp := getBody(t, srv, downloadURL(a.UserID.String(), parts["invoice.pdf"], "invoice.pdf")); resp.StatusCode != http.StatusOK {
+		t.Errorf("the hung part got status %d, want 200 (fail open under its stored verdict)", resp.StatusCode)
+	}
+	// The other part was refreshed in the same pass and is refused.
+	if _, resp := getBody(t, srv, downloadURL(a.UserID.String(), parts["payload.html"], "payload.html")); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("the infected part got status %d, want 403: the hung part shielded it", resp.StatusCode)
 	}
 }

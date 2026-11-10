@@ -115,6 +115,39 @@ func (tx *UserTx) OpenRescanTarget(ctx context.Context, messageID ulid.ULID, ver
 	return t, true, nil
 }
 
+// OpenRescanStaleParts returns the part paths of one message whose verdict is
+// behind the given signature version (never stamped, or stamped lower), among the
+// attachments that have bytes, when the MESSAGE is in the old band. The open-time
+// re-scan scans exactly these and no others: a part that is already current is
+// not worth a scanner call, and a slow part is then the only thing that costs
+// time, not a reason to skip the rest.
+func (tx *UserTx) OpenRescanStaleParts(ctx context.Context, messageID ulid.ULID, version int) ([]string, error) {
+	rows, err := tx.tx.Query(ctx, `
+		SELECT a.part_path
+		  FROM app.attachments a
+		  JOIN app.messages m ON m.id = a.message_id AND m.user_id = a.user_id
+		 WHERE a.user_id = $1 AND a.message_id = $2
+		   AND a.size_bytes > 0
+		   AND m.received_at <= now() - make_interval(secs => $4)
+		   AND $3 > 0
+		   AND (a.scanned_db_version IS NULL OR a.scanned_db_version < $3)
+		 ORDER BY a.part_path`,
+		tx.userID.String(), messageID.String(), version, OldBandAge().Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("store: open rescan stale parts: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("store: open rescan stale part row: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // OpenRescanEnqueue is the outcome of EnqueueOpenRescan.
 type OpenRescanEnqueue int
 

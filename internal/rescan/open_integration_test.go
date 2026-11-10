@@ -97,7 +97,7 @@ func TestDownloadRescansAStaleOldAttachmentSynchronously(t *testing.T) {
 	f.scan.verdict = clamd.Verdict{State: clamd.Flagged, Signature: "Test-Signature"}
 	o, ev := f.open(f.scan)
 
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 
 	r := f.row(t)
 	if r.status != "flagged" {
@@ -125,7 +125,7 @@ func TestNothingIsScannedForFreshOrNewerMail(t *testing.T) {
 
 	// Newer band (two months old, in a re-scanned tier): the existing tiers own it.
 	f.age(t, 60, 100)
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 	o.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
 	if f.scan.scans != 0 || f.openJobs(t, f.userID) != 0 {
 		t.Errorf("newer-band mail was touched: scans=%d jobs=%d", f.scan.scans, f.openJobs(t, f.userID))
@@ -133,7 +133,7 @@ func TestNothingIsScannedForFreshOrNewerMail(t *testing.T) {
 
 	// Old but fresh: the verdict is at the current version.
 	f.age(t, 400, 28110)
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 	o.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
 	if f.scan.scans != 0 || f.openJobs(t, f.userID) != 0 {
 		t.Errorf("a fresh verdict was re-scanned: scans=%d jobs=%d", f.scan.scans, f.openJobs(t, f.userID))
@@ -141,7 +141,7 @@ func TestNothingIsScannedForFreshOrNewerMail(t *testing.T) {
 
 	// CONTROL: the same calls on a stale old message do act.
 	f.age(t, 400, 100)
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 	if f.scan.scans != 1 {
 		t.Fatalf("CONTROL FAILED: a stale old attachment was not re-scanned (scans=%d, events=%v)", f.scan.scans, ev.n)
 	}
@@ -158,7 +158,7 @@ func TestTimeoutFailsOpenAndQueuesAJob(t *testing.T) {
 	o.WithSyncBudget(50 * time.Millisecond)
 
 	start := time.Now()
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("BeforeServe took %v: the budget did not bound it", d)
 	}
@@ -169,11 +169,111 @@ func TestTimeoutFailsOpenAndQueuesAJob(t *testing.T) {
 	if ev.get(EventTimeout) != 1 || ev.get(EventQueued) != 1 || f.openJobs(t, f.userID) != 1 {
 		t.Errorf("timeout=%d queued=%d jobs=%d, want 1 each", ev.get(EventTimeout), ev.get(EventQueued), f.openJobs(t, f.userID))
 	}
-	// The breaker: the next call does not wait on the hung scanner again.
+	// ONE slow part is not a scanner failure: the breaker stays shut and the next
+	// call tries the scanner again (it would otherwise let a single crafted
+	// attachment switch the synchronous path off for every user).
 	scans := hung.scans
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
-	if hung.scans != scans || ev.get(EventBusy) != 1 {
-		t.Errorf("breaker did not skip the synchronous path: scans %d->%d busy=%d", scans, hung.scans, ev.get(EventBusy))
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
+	if hung.scans != scans+1 || ev.get(EventBusy) != 0 {
+		t.Errorf("one timeout opened the breaker: scans %d->%d busy=%d", scans, hung.scans, ev.get(EventBusy))
+	}
+}
+
+// The breaker opens on THREE scanner failures, and then the synchronous path is
+// skipped (queued instead).
+func TestBreakerOpensAfterThreeScannerFailures(t *testing.T) {
+	f := newFixture(t)
+	f.age(t, 400, 100)
+	f.scan.scanErr = errors.New("connection refused")
+	o, ev := f.open(f.scan)
+
+	for i := 0; i < BreakerThreshold-1; i++ {
+		o.BeforeServe(f.ctx, f.userID, f.msgID, "")
+	}
+	if o.breakerOpen() || ev.get(EventBusy) != 0 {
+		t.Fatal("the breaker opened before the threshold")
+	}
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
+	if !o.breakerOpen() {
+		t.Fatal("three scanner failures did not open the breaker")
+	}
+	scans := f.scan.scans
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
+	if f.scan.scans != scans || ev.get(EventBusy) != 1 {
+		t.Errorf("an open breaker still scanned: scans %d->%d busy=%d", scans, f.scan.scans, ev.get(EventBusy))
+	}
+}
+
+// A hangs, B is FOUND. B must be written flagged (and so refused by the gate),
+// A keeps its stored clean, the hang is one timeout, and the breaker stays shut.
+// Before the fix the first Scan error abandoned the message: B was never
+// refreshed and the breaker opened for every user.
+func TestAHungPartDoesNotShieldAFlaggedOne(t *testing.T) {
+	f := newFixture(t)
+	f.twoParts(t)
+	sc := &bytesScanner{hang: "AAAA", flag: "BBBB"}
+	o, ev := f.open(sc)
+	o.WithSyncBudget(400 * time.Millisecond)
+
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "2") // the person asked for the hung part
+
+	got := f.statuses(t)
+	if got["3"] != "flagged" {
+		t.Errorf("part 3 = %q, want flagged: the hung part shielded it", got["3"])
+	}
+	if got["2"] != "clean" {
+		t.Errorf("part 2 = %q, want its stored clean kept", got["2"])
+	}
+	if ev.get(EventTimeout) != 1 || ev.get(EventSync) != 1 || ev.get(EventQueued) != 1 {
+		t.Errorf("timeout=%d sync=%d queued=%d, want 1 each", ev.get(EventTimeout), ev.get(EventSync), ev.get(EventQueued))
+	}
+	if o.breakerOpen() || len(o.failures) != 0 {
+		t.Error("one slow part counted toward the breaker")
+	}
+}
+
+// MEDIUM-2: no more than GlobalEnqueueCap jobs are created in a window across all
+// users. CONTROL: the same opens are all enqueued when the cap is far above.
+func TestGlobalEnqueueCapAcrossMessages(t *testing.T) {
+	f := newFixture(t)
+	f.age(t, 400, 100)
+	o, ev := f.open(f.scan)
+	// Spend the window with other users' jobs, then a real open must be refused.
+	for i := 0; i < GlobalEnqueueCap; i++ {
+		if _, ok := o.reserveEnqueue(); !ok {
+			t.Fatalf("CONTROL FAILED: reservation %d refused", i+1)
+		}
+	}
+	o.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
+	if ev.get(EventGlobalCap) != 1 || f.openJobs(t, f.userID) != 0 || ev.get(EventQueued) != 0 {
+		t.Errorf("global_cap=%d jobs=%d queued=%d: the cap did not stop the enqueue",
+			ev.get(EventGlobalCap), f.openJobs(t, f.userID), ev.get(EventQueued))
+	}
+	// CONTROL: a fresh instance (empty window) enqueues the same open.
+	o2, ev2 := f.open(f.scan)
+	o2.OnOpen(f.ctx, f.userID, []ulid.ULID{f.msgID})
+	if ev2.get(EventQueued) != 1 || f.openJobs(t, f.userID) != 1 {
+		t.Errorf("CONTROL FAILED: queued=%d jobs=%d", ev2.get(EventQueued), f.openJobs(t, f.userID))
+	}
+}
+
+// LOW-2: a transient unknown over a part with no verdict yet (unscanned) is dropped
+// too, so a hiccup never turns a served file into a blocked one.
+func TestTransientUnknownNeverOverwritesAnUnscannedPart(t *testing.T) {
+	f := newFixture(t)
+	f.age(t, 400, 100)
+	if _, err := f.super.Exec(f.ctx, `UPDATE app.attachments SET scan_status='unscanned' WHERE user_id=$1 AND message_id=$2`,
+		f.userID.String(), f.msgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	f.scan.verdict = clamd.Verdict{State: clamd.Unknown, Reason: "hiccup", Transient: true}
+	o, ev := f.open(f.scan)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
+	if r := f.row(t); r.status != "unscanned" {
+		t.Errorf("scan_status = %q, want unscanned kept (a blocking unknown was written)", r.status)
+	}
+	if ev.get(EventInconclusive) != 1 {
+		t.Errorf("inconclusive = %d, want 1", ev.get(EventInconclusive))
 	}
 }
 
@@ -183,7 +283,7 @@ func TestScannerErrorFailsOpenAndQueuesAJob(t *testing.T) {
 	f.scan.scanErr = errors.New("connection refused")
 	o, ev := f.open(f.scan)
 
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 
 	if r := f.row(t); r.status != "clean" {
 		t.Errorf("scan_status = %q, want clean untouched", r.status)
@@ -201,7 +301,7 @@ func TestAFreshUnknownNeverReplacesAStoredClean(t *testing.T) {
 	f.scan.verdict = clamd.Verdict{State: clamd.Unknown, Reason: "scan failed but the daemon is alive", Transient: true}
 	o, ev := f.open(f.scan)
 
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 
 	if r := f.row(t); r.status != "clean" {
 		t.Fatalf("scan_status = %q: an inconclusive scan downgraded a clean verdict (it would now be blocked)", r.status)
@@ -331,14 +431,14 @@ func TestAnotherUsersOpenReachesNothing(t *testing.T) {
 	o, _ := f.open(f.scan)
 
 	// CONTROL: the owner's call scans.
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 	if f.scan.scans != 1 {
 		t.Fatalf("CONTROL FAILED: the owner's open did not scan")
 	}
 	f.age(t, 400, 100)
 	scans := f.scan.scans
 
-	o.BeforeServe(f.ctx, other, f.msgID)
+	o.BeforeServe(f.ctx, other, f.msgID, "")
 	o.OnOpen(f.ctx, other, []ulid.ULID{f.msgID})
 	forged := store.Job{ID: store.NewULID(), UserID: &other, Kind: store.OpenRescanJobKind,
 		Payload: []byte(`{"message_id":"` + f.msgID.String() + `"}`)}
@@ -418,7 +518,7 @@ func TestAFlaggedPartIsWrittenWhenAnotherPartFailsTransiently(t *testing.T) {
 	}}
 	o, ev := f.open(sc)
 
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 
 	got := f.statuses(t)
 	if got["2"] != "flagged" {
@@ -452,7 +552,7 @@ func TestAPolicyUnknownOverwritesAsDesigned(t *testing.T) {
 	f.scan.verdict = clamd.Verdict{State: clamd.Unknown, Signature: "Heuristics.Encrypted.Zip", Reason: "clamd could not fully examine this"}
 	o, _ := f.open(f.scan)
 
-	o.BeforeServe(f.ctx, f.userID, f.msgID)
+	o.BeforeServe(f.ctx, f.userID, f.msgID, "")
 
 	if r := f.row(t); r.status != "unknown" {
 		t.Errorf("scan_status = %q, want the policy unknown written", r.status)
