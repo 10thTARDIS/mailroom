@@ -37,6 +37,7 @@ export function ViewerTopBar({
   held,
   downloadHref,
   downloadName,
+  downloadRisky = null,
   tabHref,
   guard,
   onForward,
@@ -56,6 +57,8 @@ export function ViewerTopBar({
   held: boolean;
   downloadHref: string | null;
   downloadName: string;
+  /** The part's `riskyType`: a download of a risky part asks first (ADR-056). */
+  downloadRisky?: string | null;
   /** The URL a new tab can actually SHOW this at, or null when there is none. */
   tabHref: string | null;
   /** Checks a download or new-tab URL before navigating to it (#47). */
@@ -89,6 +92,7 @@ export function ViewerTopBar({
             className="button"
             href={downloadHref}
             download={downloadName}
+            risky={downloadRisky}
             ariaLabel={t("attachment.downloadNamed", { name })}
           >
             {t("attachment.download")}

@@ -103,6 +103,21 @@ func WithDecrypter(d Decrypter) Option { return func(a *API) { a.decrypter = d }
 // as everywhere else (ADR-027 §8), does not block.
 func WithOnDemandScanner(s OnDemandScanner) Option { return func(a *API) { a.onDemandScan = s } }
 
+// OpenRescanner re-scans the stale attachments of old mail when it is opened
+// (ADR-056). *rescan.OpenRescan satisfies it. Neither method can fail a request:
+// whatever happens, the caller carries on and the quarantine gate serves or
+// refuses by the verdict that stands.
+type OpenRescanner interface {
+	// BeforeServe runs before a download or preview reads the stored verdict.
+	BeforeServe(ctx context.Context, userID, messageID ulid.ULID, partPath string)
+	// OnOpen runs after a body fetch, for the messages it returned.
+	OnOpen(ctx context.Context, userID ulid.ULID, messageIDs []ulid.ULID)
+}
+
+// WithOpenRescanner wires re-scan-on-open. Nil (the default) means old mail is
+// served under its stored verdict, as before.
+func WithOpenRescanner(r OpenRescanner) Option { return func(a *API) { a.openRescan = r } }
+
 // verdictUnscanned is the on-demand verdict when no scanner is configured.
 const verdictUnscanned = "unscanned"
 

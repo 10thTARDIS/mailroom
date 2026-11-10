@@ -248,6 +248,11 @@ Integrated because it's the connective tissue for identity + crypto + triage:
   refusing a user their own mail is not a control); optional ClamAV, whose
   `flagged` and `unknown` verdicts ARE withheld at the download route until the
   user releases them (ADR-027 §8); sandboxed viewer.
+  **[ADR-056]** This bullet's earlier "dangerous types blocked" is superseded by
+  "neutralised, with a warning": the server marks risky file types (`riskyType`,
+  by filename and by bytes) and the client asks before downloading one, Cancel
+  being the default; nothing is blocked, and preview stays refused. ADR-056 also
+  re-scans attachments on mail older than six months when it is opened.
 - Secrets via Docker secrets / age / Vault-style; nothing plaintext in images or commits.
 - Containers non-root, read-only FS, dropped caps, seccomp, distroless, pinned deps, SBOM, CI vuln scanning.
 - Central AuthZ + RLS backstop; per-user-visible audit log; all admin + agent-key actions logged.

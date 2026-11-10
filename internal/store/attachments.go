@@ -198,6 +198,11 @@ type ScanVerdict struct {
 	// guard reads and which this projection deliberately leaves NULL. See
 	// migration 00044.
 	PartHash []byte
+	// Transient is true for an `unknown` that reflects a failed scan rather than
+	// an answer about the bytes (clamd.Verdict.Transient). The store ignores it;
+	// the open-time re-scan reads it so that such a verdict never replaces a
+	// stored `clean` (ADR-056). Policy unknowns are not transient.
+	Transient bool
 }
 
 // ScanStamp is the scanner state that produced a set of verdicts: when they

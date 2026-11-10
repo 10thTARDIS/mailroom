@@ -278,7 +278,7 @@ func readMessage() tool {
 	return tool{
 		name: "read_message", title: "Read a message", readOnly: true, idempotent: true,
 		description: fmt.Sprintf("Read one message: headers, the text body (HTML converted to text, at most %d KiB, "+
-			"with truncated: true when cut) and the attachments' names, types and sizes. Attachment contents "+
+			"with truncated: true when cut) and the attachments' names, types, sizes and riskyType (why a file is risky to open, or null). Attachment contents "+
 			"are never returned. An encrypted message's body is not decrypted for API keys.", maxBodyBytes>>10) +
 			untrustedNote,
 		input: object([]string{"emailId"}, map[string]any{"emailId": idProp("the message id (from search_mail)")}),
@@ -324,7 +324,7 @@ func readMessage() tool {
 			truncated = truncated || cut
 			atts := []any{}
 			for _, a := range arr(m["attachments"]) {
-				atts = append(atts, pick(obj(a), "name", "type", "size"))
+				atts = append(atts, pick(obj(a), "name", "type", "size", "riskyType"))
 			}
 			return output{
 				data: map[string]any{

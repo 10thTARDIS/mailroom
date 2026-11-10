@@ -1384,6 +1384,10 @@ export interface EmailBodyPart {
   delSp?: boolean;
   disposition: string | null;
   cid: string | null;
+  /** Why the server thinks this file is risky to open (ADR-056): "program",
+   * "script", "installer", "macro_document", "shortcut", "disk_image" or
+   * "disguised"; null for an ordinary file. Absent from older servers. */
+  riskyType?: string | null;
   subParts?: EmailBodyPart[] | null;
 }
 

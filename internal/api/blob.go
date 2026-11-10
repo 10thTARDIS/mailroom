@@ -455,6 +455,12 @@ func (a *API) servePart(w http.ResponseWriter, r *http.Request, userID ulid.ULID
 		a.serveDecryptedPart(w, r, userID, ref, messageID, false)
 		return
 	}
+	// ⚠ RE-SCAN OF OLD MAIL RUNS BEFORE THE GATE, so the gate reads the fresh
+	// verdict (ADR-056). It never fails the request: on a timeout or a scanner
+	// error the gate below simply sees the verdict that was already stored.
+	if a.openRescan != nil {
+		a.openRescan.BeforeServe(r.Context(), userID, messageID, ref.part)
+	}
 	// ⚠ THE GATE RUNS BEFORE THE BYTES ARE READ, not after. Deciding to refuse
 	// only once the plaintext is in hand would still have decrypted and parsed
 	// attacker-controlled content on every blocked request, and would leave the
@@ -610,6 +616,10 @@ func (a *API) PreviewHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Old mail is re-scanned before the gate reads the verdict (ADR-056).
+	if a.openRescan != nil {
+		a.openRescan.BeforeServe(r.Context(), userID, messageID, ref.part)
+	}
 	// The quarantine applies here too. ADR-027 §8 calls the download route the
 	// single enforcement point because it is the one that covers CID rendering,
 	// client-side previews and foreign clients — but this route hands the same
@@ -1140,11 +1150,7 @@ const maxFilenameRunes = 100
 func sanitizeFilename(s string) string {
 	s = strings.TrimSpace(s)
 	var b strings.Builder
-	n := 0
 	for _, c := range s {
-		if n >= maxFilenameRunes {
-			break
-		}
 		switch {
 		case c < 0x20 || c == 0x7f: // control characters, CR, LF, NUL
 			continue
@@ -1167,13 +1173,48 @@ func sanitizeFilename(s string) string {
 		default:
 			b.WriteRune(c)
 		}
-		n++
 	}
 	out := strings.Trim(b.String(), " .")
 	if out == ".." || out == "." {
 		return ""
 	}
-	return out
+	return truncateKeepingExtension(out, maxFilenameRunes)
+}
+
+// maxKeptExtensionRunes is the longest extension (dot included) that survives
+// truncation. Longer than the longest entry of attachrisk's list (".settingcontent-ms" is 18; a test walks the list); short enough that an attacker cannot use
+// "the extension" as a way to skip the length bound.
+const maxKeptExtensionRunes = 24
+
+// truncateKeepingExtension shortens name to at most max runes by cutting the STEM
+// and keeping the final extension.
+//
+// ⚠ CUTTING THE TAIL IS AN EVASION. The risky-type check (attachrisk) reads the
+// name this function returns, but a plain truncation at 100 runes let
+// 96 x "a" + ".exe.pdf" be judged on ".pdf" while the file was saved as
+// 96 x "a" + ".exe". Keeping the last extension means the extension the
+// classifier sees is the extension the saved file has.
+func truncateKeepingExtension(name string, max int) string {
+	r := []rune(name)
+	if len(r) <= max {
+		return name
+	}
+	if i := lastRune(r, '.'); i > 0 {
+		if ext := r[i:]; len(ext) <= maxKeptExtensionRunes && len(ext) < max {
+			stem := r[:max-len(ext)]
+			return strings.TrimRight(string(stem), " .") + string(ext)
+		}
+	}
+	return strings.Trim(string(r[:max]), " .")
+}
+
+func lastRune(r []rune, c rune) int {
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 // contentDisposition renders an RFC 6266 Content-Disposition with an RFC 5987

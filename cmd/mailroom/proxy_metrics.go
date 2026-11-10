@@ -8,6 +8,7 @@ import (
 	"mailroom/internal/api"
 	"mailroom/internal/ingest"
 	"mailroom/internal/metrics"
+	"mailroom/internal/rescan"
 	"mailroom/internal/store"
 )
 
@@ -147,6 +148,22 @@ func onDemandScanObserver(m *metrics.Metrics) func(verdict string) {
 	return func(verdict string) {
 		if m != nil {
 			m.OnDemandScanTotal.WithLabelValues(verdict).Inc()
+		}
+	}
+}
+
+// openRescanObserver is the rescan.NewOpenRescan sink (ADR-056): it counts each
+// open-time re-scan event by its closed label. A nil m counts nothing. Every label
+// is created at zero at boot, for the reason proxyObserver gives.
+func openRescanObserver(m *metrics.Metrics) func(event string) {
+	if m != nil {
+		for _, e := range rescan.OpenEvents() {
+			m.OpenRescanTotal.WithLabelValues(e)
+		}
+	}
+	return func(event string) {
+		if m != nil {
+			m.OpenRescanTotal.WithLabelValues(event).Inc()
 		}
 	}
 }

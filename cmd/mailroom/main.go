@@ -1065,6 +1065,13 @@ func buildAppHandler(ctx context.Context, st *store.Store, cfg *config.Config, o
 	}
 	if scanner != nil {
 		opts = append(opts, api.WithOnDemandScanner(scanner))
+		// Old mail is re-scanned when it is opened (ADR-056): synchronously on a
+		// download or preview, queued on a body fetch. Needs the composer for the
+		// same reason the re-scan job does (the one key path to the mail blobs).
+		if composer != nil {
+			opts = append(opts, api.WithOpenRescanner(
+				rescan.NewOpenRescan(st, writebackBlobs{composer}, scanner, logger, openRescanObserver(m))))
+		}
 	}
 	// Own-key management over JMAP (#796): the crypto process's key verbs, and
 	// the WKD domain UserKey/get reports and UserKey/set publishes for. A nil
@@ -2437,6 +2444,9 @@ func startDispatcher(ctx context.Context, st *store.Store, blobs blob.BlobStore,
 	// writebackBlobs, whose Raw method this reuses verbatim).
 	if scanner != nil && composer != nil {
 		d.Register(rescan.JobKind, rescan.New(st, writebackBlobs{composer}, scanner, 0, logger, scannerVersionSink(m)).Handle)
+		// The job a body fetch of old mail enqueues (ADR-056): one message, bounded.
+		d.Register(store.OpenRescanJobKind,
+			rescan.NewOpenRescan(st, writebackBlobs{composer}, scanner, logger, openRescanObserver(m)).Handle)
 	}
 	d.Register(compose.SubmitJobKind, worker.Handle)
 	d.Register(purge.JobKind, purgeWorker.Handle)

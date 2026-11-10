@@ -213,6 +213,7 @@ func Verdict(ap mime.AttachmentPart, v clamd.Verdict) store.ScanVerdict {
 		Status:    string(v.State),
 		Signature: v.Signature,
 		PartHash:  PartHash(ap),
+		Transient: v.State == clamd.Unknown && v.Transient,
 	}
 }
 

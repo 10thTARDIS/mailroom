@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"mailroom/internal/attachrisk"
 	"mailroom/internal/ical"
 	"mailroom/internal/mime"
 	"mailroom/internal/ml"
@@ -108,6 +109,9 @@ var defaultBodyProperties = []string{
 	"partId", "blobId", "size", "name", "type", "charset",
 	"format", "delSp",
 	"disposition", "cid", "language", "location",
+	// riskyType (ADR-056): in the default set so a client that names no
+	// bodyProperties still gets the warning signal.
+	"riskyType",
 }
 
 // bodyArgs are the Email/get arguments that shape the body properties
@@ -527,6 +531,26 @@ func bodyPartObject(n *bodyNode, all map[*mime.Structure]*bodyNode, want map[str
 	if isMultipart(st.ContentType) {
 		full["size"] = 0
 	}
+	// riskyType (ADR-056): why the client should ask before this part is saved, or
+	// null. Decided by the filename AND the bytes already in hand, so it costs no
+	// extra read. A multipart container and a nameless text body are never risky:
+	// their "bytes" are the message's own text, and a `#!` in a plain-text body is
+	// not a script.
+	full["riskyType"] = nil
+	if !isMultipart(st.ContentType) && (st.Filename != "" || !strings.HasPrefix(st.ContentType, "text/")) {
+		// ⚠ BOTH NAMES, because either can be the one that matters. The download
+		// route (downloadName) saves the file as sanitizeFilename of the {name}
+		// the client put in the URL, else sanitizeFilename of THIS part's filename,
+		// so the sanitised name is what lands on disk (NULs dropped, length
+		// bounded, extension kept): "invoice.pdf\x00.exe" is saved as
+		// "invoice.pdf.exe". The raw name is what a client that ignores the server
+		// would show. Risky if EITHER is; the reason comes from the sanitised name
+		// when it is risky, otherwise from the raw one. (A client that picks its
+		// own URL {name} chooses its own file name; that is its own input.)
+		if r := classifyAttachment(st.Filename, sanitizeFilename(st.Filename), st.ContentType, st.Data); r.Risky {
+			full["riskyType"] = r.Reason
+		}
+	}
 
 	out := map[string]any{}
 	for k, v := range full {
@@ -667,4 +691,14 @@ func addressList(in []mime.Address) []map[string]any {
 		out = append(out, map[string]any{"name": nilIfEmpty(a.Name), "email": a.Address})
 	}
 	return out
+}
+
+// classifyAttachment is the either-name rule: risky if the sanitised name OR the
+// raw name is. The reason comes from the sanitised name when it is risky (it is
+// what is saved), otherwise from the raw one.
+func classifyAttachment(raw, sanitised, contentType string, data []byte) attachrisk.Result {
+	if r := attachrisk.Classify(sanitised, contentType, data); r.Risky {
+		return r
+	}
+	return attachrisk.Classify(raw, contentType, data)
 }

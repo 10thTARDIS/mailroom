@@ -77,7 +77,7 @@ func TestJobPayloadKeysCoversEveryLiveKind(t *testing.T) {
 	// changelog, outofoffice and oauthmail. They are literals here for the same reason the map is —
 	// importing those packages from the store would invert the dependency
 	// direction.
-	live := []string{"submit", "snooze_wake", "purge_trash", "ml_train", "drawer_sweep", "setup_import", "change_log_compact", "out_of_office_sync", "oauth_reauth_notify", ProxyPrefetchJobKind}
+	live := []string{"submit", "snooze_wake", "purge_trash", "ml_train", "drawer_sweep", "setup_import", "change_log_compact", "out_of_office_sync", "oauth_reauth_notify", ProxyPrefetchJobKind, OpenRescanJobKind}
 	for _, k := range live {
 		if _, ok := jobPayloadKeys[k]; !ok {
 			t.Errorf("job kind %q is enqueued by the codebase but jobPayloadKeys does not "+
@@ -88,5 +88,15 @@ func TestJobPayloadKeysCoversEveryLiveKind(t *testing.T) {
 		t.Errorf("jobPayloadKeys describes %d kinds but the codebase enqueues %d. "+
 			"A stale entry here is a claim about a mechanism that no longer exists.",
 			len(jobPayloadKeys), len(live))
+	}
+}
+
+// The open-time re-scan job carries a message id and nothing else (ADR-056).
+func TestOpenRescanJobPayloadIsReferencesOnly(t *testing.T) {
+	if bad, known := PayloadKeysOutsideAllowlist(OpenRescanJobKind, []string{"message_id"}); !known || len(bad) != 0 {
+		t.Errorf("message_id rejected: bad=%v known=%v", bad, known)
+	}
+	if bad, _ := PayloadKeysOutsideAllowlist(OpenRescanJobKind, []string{"message_id", "filename"}); len(bad) != 1 || bad[0] != "filename" {
+		t.Errorf("a content-bearing key was allowed: %v", bad)
 	}
 }
