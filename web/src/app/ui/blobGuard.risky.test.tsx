@@ -132,10 +132,11 @@ describe("a risky download asks first (ADR-056)", () => {
   });
 
   it("CONTROL: a PDF and an image (no riskyType) do not ask", async () => {
-    for (const [type, name] of [
+    const cases: [string, string][] = [
       ["application/pdf", "report.pdf"],
       ["image/png", "photo.png"],
-    ]) {
+    ];
+    for (const [type, name] of cases) {
       flushSync(() => {
         root.render(<AttachmentList messageId="M1" threadId="T1" attachments={[part("2", type, name)]} scan={null} />);
       });
