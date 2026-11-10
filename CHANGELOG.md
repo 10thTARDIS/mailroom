@@ -9,6 +9,15 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.103.0-beta.1] — 2026-11-10
+
+**The first beta of v1.103, which hardens how Mailroom handles incoming mail.** Attachments on
+old mail are checked again against today's virus database when you open them, and programs,
+scripts and other risky files now ask before they download. Images missing from some
+newsletters now show when you allow remote content, moving many messages at once is faster,
+and names you save for rules, API keys and AI tools can no longer hide control or
+text-direction characters.
+
 ### Safer attachments: old ones are checked again when you open them, and risky files ask first
 
 - **Old attachments are checked again when you open them.** Mailroom stops re-checking
