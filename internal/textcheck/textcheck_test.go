@@ -11,11 +11,11 @@ func TestCheckNameRefusesEachClass(t *testing.T) {
 	for _, c := range []struct{ name, in string }{
 		{"C0 NUL", "a\x00b"}, {"C0 newline", "a\nb"}, {"C0 tab", "a\tb"}, {"C0 ESC", "\x1b[31mred"}, {"DEL", "a\x7fb"},
 		{"C1 NEL", "a\u0085b"}, {"C1 CSI", "a\u009bb"},
-		{"bidi LRE", "a‪b"}, {"bidi RLO", "a‮b"}, {"bidi PDF", "a‬b"}, {"bidi LRM mark", "a‎b"},
-		{"isolate LRI", "a⁦b"}, {"isolate FSI", "a⁨b"}, {"isolate PDI", "a⁩b"}, {"ALM", "a؜b"},
-		{"other Cf zero width space", "a​b"}, {"other Cf word joiner", "a⁠b"}, {"other Cf BOM", "\ufeffab"},
-		{"other Cf soft hyphen", "a­b"},
-		{"line separator", "a b"}, {"paragraph separator", "a b"},
+		{"bidi LRE", "a\u202ab"}, {"bidi RLO", "a\u202eb"}, {"bidi PDF", "a\u202cb"}, {"bidi LRM mark", "a\u200eb"},
+		{"isolate LRI", "a\u2066b"}, {"isolate FSI", "a\u2068b"}, {"isolate PDI", "a\u2069b"}, {"ALM", "a\u061cb"},
+		{"other Cf zero width space", "a\u200bb"}, {"other Cf word joiner", "a\u2060b"}, {"other Cf BOM", "\ufeffab"},
+		{"other Cf soft hyphen", "a\u00adb"},
+		{"line separator", "a\u2028b"}, {"paragraph separator", "a\u2029b"},
 		{"invalid UTF-8", "a\xffb"},
 	} {
 		if err := CheckName(c.in); err == nil {
@@ -39,8 +39,8 @@ func TestCheckNameAcceptsInternationalNames(t *testing.T) {
 }
 
 func TestCheckNameMessageDoesNotEchoTheCharacter(t *testing.T) {
-	err := CheckName("a‮b")
-	if err == nil || strings.ContainsRune(err.Error(), '‮') || !strings.Contains(err.Error(), "U+202E") {
+	err := CheckName("a\u202eb")
+	if err == nil || strings.ContainsRune(err.Error(), '\u202e') || !strings.Contains(err.Error(), "U+202E") {
 		t.Fatalf("message %v", err)
 	}
 }

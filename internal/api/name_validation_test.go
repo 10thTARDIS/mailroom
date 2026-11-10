@@ -19,8 +19,8 @@ import (
 // names is in the integration suite, where a rule and a key are really saved.
 
 var unsafeNames = map[string]string{
-	"C0 newline": "a\nb", "C0 ESC": "\x1b[2Jx", "C1 NEL": "a\u0085b", "bidi override": "a‮b",
-	"bidi isolate": "a⁦b", "zero width": "a​b", "line separator": "a b", "trailing paragraph separator": "ab ",
+	"C0 newline": "a\nb", "C0 ESC": "\x1b[2Jx", "C1 NEL": "a\u0085b", "bidi override": "a\u202eb",
+	"bidi isolate": "a\u2066b", "zero width": "a\u200bb", "line separator": "a\u2028b", "trailing paragraph separator": "ab\u2029",
 }
 
 func TestRuleSetRefusesUnsafeNames(t *testing.T) {

@@ -25,7 +25,7 @@ import (
 // Default_Ignorable_Code_Point on top, because it only replaces and so can be
 // stricter than a refusal that stops a real name being saved.
 func IsUnsafeRune(r rune) bool {
-	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == ' ' || r == ' '
+	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
 }
 
 // CheckName returns nil for a name made only of ordinary characters (any script,
