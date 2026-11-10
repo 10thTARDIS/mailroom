@@ -77,7 +77,7 @@ func TestJobPayloadKeysCoversEveryLiveKind(t *testing.T) {
 	// changelog, outofoffice and oauthmail. They are literals here for the same reason the map is —
 	// importing those packages from the store would invert the dependency
 	// direction.
-	live := []string{"submit", "snooze_wake", "purge_trash", "ml_train", "drawer_sweep", "setup_import", "change_log_compact", "out_of_office_sync", "oauth_reauth_notify", ProxyPrefetchJobKind}
+	live := []string{"submit", "snooze_wake", "purge_trash", "ml_train", "drawer_sweep", "setup_import", "change_log_compact", "out_of_office_sync", "oauth_reauth_notify", ProxyPrefetchJobKind, OpenRescanJobKind}
 	for _, k := range live {
 		if _, ok := jobPayloadKeys[k]; !ok {
 			t.Errorf("job kind %q is enqueued by the codebase but jobPayloadKeys does not "+
