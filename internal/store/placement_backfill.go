@@ -100,6 +100,13 @@ const (
 	backfillActionMove = "placement.backfill.move"
 	backfillActionUndo = "placement.backfill.undo"
 	backfillActor      = "admin:placement-backfill"
+
+	// The Activity view's summary rows (ADR-053 amendment): one audit row per
+	// batch and direction per run, carrying the number of messages it covers, so
+	// Activity reads O(batches) rows instead of grouping one row per message. The
+	// actions reuse the journal's vocabulary; the object type is its own, so the
+	// journal readers (undo, the batch report, learned placement) never see them.
+	backfillSummaryObjectType = "PlacementBackfillSummary"
 )
 
 // ErrLearnedPlacementOff: the user has switched learned placement off, and the
@@ -583,8 +590,8 @@ type PlacementBackfillApplied struct {
 // TRANSACTION PER MESSAGE: a failure leaves every earlier move committed and
 // journalled (so --undo can reverse it) and no move half-made. It refuses
 // outright when learned placement is switched off.
-func (s *Store) ApplyPlacementBackfill(ctx context.Context, userID ulid.ULID, moves []PlacementBackfillMove) (PlacementBackfillApplied, error) {
-	out := PlacementBackfillApplied{BatchID: NewULID(), Skipped: map[placement.Reason]int{}, PerKey: map[placement.Key]int{}}
+func (s *Store) ApplyPlacementBackfill(ctx context.Context, userID ulid.ULID, moves []PlacementBackfillMove) (out PlacementBackfillApplied, err error) {
+	out = PlacementBackfillApplied{BatchID: NewULID(), Skipped: map[placement.Reason]int{}, PerKey: map[placement.Key]int{}}
 	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
 		on, err := tx.learnedPlacementEnabled(ctx)
 		if err == nil && !on {
@@ -594,6 +601,17 @@ func (s *Store) ApplyPlacementBackfill(ctx context.Context, userID ulid.ULID, mo
 	}); err != nil {
 		return out, err
 	}
+	// The Activity summary is written however the loop ends, so a batch that
+	// stopped part-way still reads as the moves that were made.
+	defer func() {
+		if out.Moved > 0 {
+			if serr := s.UserTx(ctx, userID, func(tx *UserTx) error {
+				return tx.writeBackfillSummary(ctx, out.BatchID, backfillActionMove, out.Moved, nil)
+			}); serr != nil && err == nil {
+				err = fmt.Errorf("store: placement backfill: write the Activity summary: %w", serr)
+			}
+		}
+	}()
 	for _, mv := range moves {
 		var reason placement.Reason
 		if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
@@ -771,17 +789,121 @@ func sameRemoved(a, b []RemovedAreaLabel) bool {
 }
 
 func (tx *UserTx) writeBackfillAudit(ctx context.Context, batchID ulid.ULID, action string, detail any) error {
+	return tx.writeBackfillAuditAs(ctx, batchID, action, backfillObjectType, detail, nil)
+}
+
+// writeBackfillAuditAs is the one writer of the backfill's audit rows: the
+// journal's per-message rows and the Activity summaries. at, when set, is the
+// row's created_at (a summary written for old history keeps the time its
+// batch's last row had); nil is now().
+func (tx *UserTx) writeBackfillAuditAs(ctx context.Context, batchID ulid.ULID, action, objectType string, detail any, at *time.Time) error {
 	raw, err := json.Marshal(detail)
 	if err != nil {
 		return fmt.Errorf("store: placement backfill (journal): %w", err)
 	}
 	if _, err := tx.tx.Exec(ctx, `
-		INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		tx.userID.String(), backfillActor, action, backfillObjectType, batchID.String(), raw); err != nil {
+		INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()))`,
+		tx.userID.String(), backfillActor, action, objectType, batchID.String(), raw, at); err != nil {
 		return fmt.Errorf("store: placement backfill (journal): %w", err)
 	}
 	return nil
+}
+
+// writeBackfillSummary appends the one Activity summary row for count messages
+// of a batch in one direction (action is backfillActionMove or backfillActionUndo).
+func (tx *UserTx) writeBackfillSummary(ctx context.Context, batchID ulid.ULID, action string, count int, at *time.Time) error {
+	return tx.writeBackfillAuditAs(ctx, batchID, action, backfillSummaryObjectType,
+		map[string]any{"v": 1, "count": count}, at)
+}
+
+// BackfillSummaryReport is what the summary backfill found and (with apply)
+// wrote for one user, per direction. Batches and Rows count what was MISSING a
+// summary; Summarised counts the per-message rows already covered.
+type BackfillSummaryReport struct {
+	Move, Undo BackfillSummaryDirection
+}
+
+// BackfillSummaryDirection is one direction's counts.
+type BackfillSummaryDirection struct {
+	Batches    int // batches (of this direction) with per-message rows lacking a summary
+	Rows       int // the per-message rows those summaries will cover
+	Summarised int // per-message rows already covered by a summary
+}
+
+// SummarisePlacementBackfills finds, per batch and direction, the per-message
+// journal rows no summary row covers yet (rows minus the sum of the summaries'
+// counts) and, with apply, writes one summary row for each shortfall in the same
+// transaction as the read. The summary's time is the newest row's, so the
+// Activity entry is the one the grouping produced. Idempotent: a second run
+// finds nothing. It is report-only unless apply is set.
+func (s *Store) SummarisePlacementBackfills(ctx context.Context, userID ulid.ULID, apply bool) (BackfillSummaryReport, error) {
+	var rep BackfillSummaryReport
+	err := s.UserTx(ctx, userID, func(tx *UserTx) error {
+		rep = BackfillSummaryReport{}
+		rows, err := tx.tx.Query(ctx, `
+			WITH j AS (
+			  SELECT object_id, action, max(created_at) AS at, count(*) AS n
+			    FROM app.audit_log
+			   WHERE user_id = $1 AND object_type = $2 AND action IN ($4, $5)
+			   GROUP BY object_id, action),
+			 s AS (
+			  SELECT object_id, action, COALESCE(sum((detail->>'count')::bigint), 0) AS covered
+			    FROM app.audit_log
+			   WHERE user_id = $1 AND object_type = $3 AND action IN ($4, $5)
+			   GROUP BY object_id, action)
+			SELECT j.object_id, j.action, j.at, j.n, COALESCE(s.covered, 0)
+			  FROM j LEFT JOIN s ON s.object_id = j.object_id AND s.action = j.action
+			 ORDER BY j.object_id, j.action`,
+			tx.userID.String(), backfillObjectType, backfillSummaryObjectType, backfillActionMove, backfillActionUndo)
+		if err != nil {
+			return fmt.Errorf("store: placement backfill summaries (read): %w", err)
+		}
+		type gap struct {
+			batch, action string
+			at            time.Time
+			missing       int
+		}
+		var gaps []gap
+		for rows.Next() {
+			var batch, action string
+			var at time.Time
+			var n, covered int64
+			if err := rows.Scan(&batch, &action, &at, &n, &covered); err != nil {
+				rows.Close()
+				return fmt.Errorf("store: placement backfill summaries (scan): %w", err)
+			}
+			d := &rep.Move
+			if action == backfillActionUndo {
+				d = &rep.Undo
+			}
+			d.Summarised += int(min(covered, n))
+			if n > covered {
+				d.Batches++
+				d.Rows += int(n - covered)
+				gaps = append(gaps, gap{batch, action, at, int(n - covered)})
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("store: placement backfill summaries (read): %w", err)
+		}
+		if !apply {
+			return nil
+		}
+		for _, g := range gaps {
+			b, err := ulid.Parse(g.batch)
+			if err != nil {
+				return fmt.Errorf("store: placement backfill summaries: batch id %q: %w", g.batch, err)
+			}
+			at := g.at
+			if err := tx.writeBackfillSummary(ctx, b, g.action, g.missing, &at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return rep, err
 }
 
 // backfillJournalRow is one journal row as read back.
@@ -874,8 +996,8 @@ var ErrNoSuchBackfillBatch = errors.New("store: no placement backfill batch with
 // counts for the gate nor blocks its key), and an undo row is appended to the
 // journal. A message the user (or a rule) has filed since is SKIPPED and
 // counted: undo never overrules a later decision.
-func (s *Store) UndoPlacementBackfill(ctx context.Context, userID, batchID ulid.ULID) (PlacementBackfillUndo, error) {
-	out := PlacementBackfillUndo{Outcomes: map[string]int{}}
+func (s *Store) UndoPlacementBackfill(ctx context.Context, userID, batchID ulid.ULID) (out PlacementBackfillUndo, err error) {
+	out = PlacementBackfillUndo{Outcomes: map[string]int{}}
 	var entries []backfillJournal
 	undone := map[string]bool{}
 	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
@@ -899,6 +1021,16 @@ func (s *Store) UndoPlacementBackfill(ctx context.Context, userID, batchID ulid.
 		return out, ErrNoSuchBackfillBatch
 	}
 	out.Journal = len(entries)
+	// One Activity summary for the undo rows this run wrote, however it ends.
+	defer func() {
+		if n := out.Outcomes[BackfillUndone]; n > 0 {
+			if serr := s.UserTx(ctx, userID, func(tx *UserTx) error {
+				return tx.writeBackfillSummary(ctx, batchID, backfillActionUndo, n, nil)
+			}); serr != nil && err == nil {
+				err = fmt.Errorf("store: undo placement backfill: write the Activity summary: %w", serr)
+			}
+		}
+	}()
 	for _, e := range entries {
 		if undone[e.Message] {
 			out.Outcomes[BackfillAlreadyUndone]++

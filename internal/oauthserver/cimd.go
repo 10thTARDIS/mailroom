@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"mailroom/internal/egress"
+	"mailroom/internal/textcheck"
 )
 
 // Client ID Metadata Documents (ADR-050 section 4). A client_id that is an
@@ -160,6 +161,9 @@ func parseCIMD(clientID string, body []byte) (cimdDocument, error) {
 	}
 	if raw.ClientID != clientID {
 		return cimdDocument{}, errors.New("the client metadata names a different client_id")
+	}
+	if err := textcheck.CheckName(raw.Name); err != nil {
+		return cimdDocument{}, errors.New("the client metadata's client_name " + err.Error())
 	}
 	name := cleanName(raw.Name)
 	if name == "" {

@@ -50,7 +50,8 @@ func seedActivityRows(t *testing.T, super *pgxpool.Pool, u apiFixture, tag strin
 	for _, a := range []struct{ action, typ, obj string }{
 		{"api_key.create", "ApiKey", ids.keyID},
 		{store.PurgeAction, "Email", ids.purged},
-		{"placement.backfill.move", "PlacementBackfill", ids.batch},
+		// The placement entry reads the batch's SUMMARY row (ADR-053 amendment).
+		{"placement.backfill.move", "PlacementBackfillSummary", ids.batch},
 		{store.RuleApplyAction, store.RuleApplyObjectType, ids.rule},
 	} {
 		exec(`INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail) VALUES ($1,'user',$2,$3,$4,'{"changed":4}')`,

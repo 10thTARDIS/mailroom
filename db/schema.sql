@@ -3279,7 +3279,7 @@ ALTER FUNCTION app.oauth_client_register(text, text[], int) OWNER TO mailroom_ow
 -- cannot both succeed. `replay` is true when the code was ALREADY used (the
 -- caller revokes the family it produced, OAuth 2.1 4.1.3); an expired code is
 -- returned unmarked for the caller to refuse. user_ok is false for a user who
--- can no longer sign in.
+-- can no longer sign in, and the code is then left UNUSED (migration 00097).
 CREATE OR REPLACE FUNCTION app.oauth_code_consume(p_hash bytea)
 RETURNS TABLE (id app.ulid, user_id app.ulid, api_key_id app.ulid, client_id text, redirect_uri text,
                code_challenge text, resource text, scopes text[], expires_at timestamptz,
@@ -3295,10 +3295,11 @@ BEGIN
     RETURN;
   END IF;
   v_replay := r.used_at IS NOT NULL;
-  IF NOT v_replay AND r.expires_at > now() THEN
+  SELECT (u.disabled_at IS NULL AND u.deleted_at IS NULL) INTO v_ok FROM app.users u WHERE u.id = r.user_id;
+  -- A refusal for a disabled user must NOT use the code up (migration 00097).
+  IF COALESCE(v_ok, false) AND NOT v_replay AND r.expires_at > now() THEN
     UPDATE app.oauth_codes c SET used_at = now() WHERE c.id = r.id;
   END IF;
-  SELECT (u.disabled_at IS NULL AND u.deleted_at IS NULL) INTO v_ok FROM app.users u WHERE u.id = r.user_id;
   RETURN QUERY SELECT r.id, r.user_id, r.api_key_id, r.client_id, r.redirect_uri, r.code_challenge,
                       r.resource, r.scopes, r.expires_at, v_replay, COALESCE(v_ok, false);
 END
