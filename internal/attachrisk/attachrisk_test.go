@@ -58,7 +58,7 @@ func TestDoubleExtensionIsDisguised(t *testing.T) {
 }
 
 func TestEvasionsOfTheExtension(t *testing.T) {
-	for _, name := range []string{"a.exe.", "a.exe ", "a.ex\u200be", "a.exe\u202e", "a.exe\x00.pdf", "C:\\Users\\x\\a.exe"} {
+	for _, name := range []string{"a.exe.", "a.exe ", "a.ex\u200be", "a.exe\u202e", "a.ex\x00e", "C:\\Users\\x\\a.exe"} {
 		if got := ClassifyName(name, ""); !got.Risky {
 			t.Errorf("%q hid its extension: %+v", name, got)
 		}
@@ -116,5 +116,57 @@ func TestEveryReasonHasAnExtensionOrIsDisguised(t *testing.T) {
 		if !seen[r] {
 			t.Errorf("reason %s is declared but no extension produces it", r)
 		}
+	}
+}
+
+// Security review LOW-3: extensions and declared types the first list missed.
+func TestClassifyNewExtensionsAndTypes(t *testing.T) {
+	ext := map[string]string{
+		"a.xlsb": MacroDocument, "d.vhd": DiskImage, "d.vhdx": DiskImage, "a.pif": Program,
+		"a.msc": Program, "h.chm": Program, "a.appx": Installer, "a.msix": Installer,
+		"a.appxbundle": Installer, "a.msixbundle": Installer, "a.sct": Script, "a.ws": Script,
+		"a.vb": Script, "a.ps1xml": Script, "a.psm1": Script, "a.application": Installer,
+		"a.appref-ms": Installer, "a.library-ms": Shortcut, "a.search-ms": Shortcut,
+		"a.settingcontent-ms": Shortcut, "a.command": Script, "a.scpt": Script, "a.inf": Script,
+		"a.reg": Script, "a.cpl": Program, "a.gadget": Program, "a.hta": Script,
+	}
+	for name, want := range ext {
+		if got := ClassifyName(name, "application/octet-stream"); !got.Risky || got.Reason != want {
+			t.Errorf("%s: got %+v, want risky %s", name, got, want)
+		}
+	}
+	types := []string{
+		"application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+		"application/vnd.ms-excel.template.macroEnabled.12",
+		"application/vnd.ms-excel.addin.macroEnabled.12",
+		"application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
+		"application/vnd.ms-powerpoint.template.macroEnabled.12",
+		"application/vnd.ms-powerpoint.addin.macroEnabled.12",
+	}
+	for _, ty := range types {
+		if got := ClassifyName("plain.bin", ty); !got.Risky || got.Reason != MacroDocument {
+			t.Errorf("type %s: got %+v, want risky macro_document", ty, got)
+		}
+	}
+	// Control: the same name and an ordinary type are not risky.
+	if got := ClassifyName("plain.bin", "application/vnd.ms-excel"); got.Risky {
+		t.Errorf("control: %+v", got)
+	}
+}
+
+// Security review HIGH-1(c)/(d): a control rune is skipped, never a stopping
+// point, and extension matching folds case the way Windows does.
+func TestExtensionsSkipControlRunesAndFoldCase(t *testing.T) {
+	for _, name := range []string{"invoice.pdf\x00.exe", "a.e\x01xe", "a.ex\x7fe", "setup.ſcr", "setup.ıso"} {
+		if got := ClassifyName(name, ""); !got.Risky {
+			t.Errorf("%q: not risky: %+v", name, got)
+		}
+	}
+	if got := ClassifyName("invoice.pdf\x00.exe", ""); got.Reason != Disguised {
+		t.Errorf("NUL double extension: %+v, want disguised", got)
+	}
+	// Control: the long s only matters because it folds to s.
+	if got := ClassifyName("setup.ſcx", ""); got.Risky {
+		t.Errorf("control: %+v", got)
 	}
 }

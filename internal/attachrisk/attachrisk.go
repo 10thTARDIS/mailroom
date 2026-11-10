@@ -60,22 +60,26 @@ func Reasons() []string {
 
 var extReason = map[string]string{
 	"exe": Program, "com": Program, "scr": Program, "dll": Program, "cpl": Program,
-	"jar": Program, "app": Program, "apk": Program,
+	"jar": Program, "app": Program, "apk": Program, "pif": Program, "msc": Program,
+	"chm": Program, "gadget": Program,
 
 	"bat": Script, "cmd": Script, "ps1": Script, "psm1": Script, "vbs": Script, "vbe": Script,
 	"js": Script, "jse": Script, "wsf": Script, "wsh": Script, "hta": Script, "sh": Script,
-	"reg": Script,
+	"reg": Script, "sct": Script, "ws": Script, "vb": Script, "ps1xml": Script,
+	"command": Script, "scpt": Script, "inf": Script,
 
 	"msi": Installer, "msp": Installer, "dmg": Installer, "pkg": Installer, "deb": Installer,
-	"rpm": Installer,
+	"rpm": Installer, "appx": Installer, "msix": Installer, "appxbundle": Installer,
+	"msixbundle": Installer, "application": Installer, "appref-ms": Installer,
 
 	"docm": MacroDocument, "dotm": MacroDocument, "xlsm": MacroDocument, "xltm": MacroDocument,
 	"xlam": MacroDocument, "pptm": MacroDocument, "potm": MacroDocument, "ppam": MacroDocument,
-	"ppsm": MacroDocument, "sldm": MacroDocument,
+	"ppsm": MacroDocument, "sldm": MacroDocument, "xlsb": MacroDocument,
 
-	"lnk": Shortcut, "url": Shortcut,
+	"lnk": Shortcut, "url": Shortcut, "library-ms": Shortcut, "search-ms": Shortcut,
+	"settingcontent-ms": Shortcut,
 
-	"iso": DiskImage, "img": DiskImage,
+	"iso": DiskImage, "img": DiskImage, "vhd": DiskImage, "vhdx": DiskImage,
 }
 
 // documentExts are the extensions a double-extension trick borrows to look
@@ -107,6 +111,13 @@ var typeReason = map[string]string{
 	"application/vnd.ms-word.document.macroenabled.12":           MacroDocument,
 	"application/vnd.ms-excel.sheet.macroenabled.12":             MacroDocument,
 	"application/vnd.ms-powerpoint.presentation.macroenabled.12": MacroDocument,
+	"application/vnd.ms-excel.sheet.binary.macroenabled.12":      MacroDocument,
+	"application/vnd.ms-excel.template.macroenabled.12":          MacroDocument,
+	"application/vnd.ms-excel.addin.macroenabled.12":             MacroDocument,
+	"application/vnd.ms-word.template.macroenabled.12":           MacroDocument,
+	"application/vnd.ms-powerpoint.slideshow.macroenabled.12":    MacroDocument,
+	"application/vnd.ms-powerpoint.template.macroenabled.12":     MacroDocument,
+	"application/vnd.ms-powerpoint.addin.macroenabled.12":        MacroDocument,
 }
 
 // Result is the verdict on one attachment.
@@ -161,22 +172,29 @@ func mediaType(declared string) string {
 // before it ("" when absent).
 //
 // ⚠ THE NAME IS CLEANED FIRST, and each step is an evasion that works on a real
-// operating system: Windows ignores trailing dots and spaces ("a.exe." runs as
-// a.exe), a NUL ends a name in some APIs, and a format character (a bidi
+// operating system: Windows ignores trailing dots and spaces ("a.exe."
+// runs as a.exe), a control character (NUL included) is dropped by the saved name, and a format character (a bidi
 // override, a zero-width space) can sit between the dot and the extension
 // without being drawn. None of them may hide the extension from this check.
 func extensions(filename string) (last, prev string) {
 	var b strings.Builder
 	for _, r := range filename {
-		if r == 0 {
-			break
+		// ⚠ A control rune (NUL included) is SKIPPED, never a place to stop. The
+		// name the server sends is sanitizeFilename's, which drops them, so
+		// "invoice.pdf\x00.exe" is saved as "invoice.pdf.exe"; stopping at the
+		// NUL classified it as .pdf. Skipping reads the name the way the saved
+		// file will be read.
+		if r < 0x20 || r == 0x7f {
+			continue
 		}
 		if unicode.Is(unicode.Cf, r) {
 			continue
 		}
 		b.WriteRune(r)
 	}
-	name := strings.ToLower(strings.TrimRight(b.String(), ". \t"))
+	// Upper then lower: a simple lower-casing leaves U+017F (long s) as itself,
+	// and upper-casing folds it to S, so ".ſcr" is matched as ".scr".
+	name := strings.ToLower(strings.ToUpper(strings.TrimRight(b.String(), ". \t")))
 	// Only the final path element: a client may send a path.
 	if i := strings.LastIndexAny(name, `/\`); i >= 0 {
 		name = name[i+1:]

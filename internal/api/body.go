@@ -538,7 +538,10 @@ func bodyPartObject(n *bodyNode, all map[*mime.Structure]*bodyNode, want map[str
 	// not a script.
 	full["riskyType"] = nil
 	if !isMultipart(st.ContentType) && (st.Filename != "" || !strings.HasPrefix(st.ContentType, "text/")) {
-		if r := attachrisk.Classify(st.Filename, st.ContentType, st.Data); r.Risky {
+		// ⚠ THE NAME THE SERVER SENDS, NOT THE RAW ONE. The download route saves the
+		// file under sanitizeFilename's name (NULs dropped, length bounded); judging
+		// the raw header let "invoice.pdf\x00.exe" be .pdf here and .exe on disk.
+		if r := attachrisk.Classify(sanitizeFilename(st.Filename), st.ContentType, st.Data); r.Risky {
 			full["riskyType"] = r.Reason
 		}
 	}
