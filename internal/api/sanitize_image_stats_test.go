@@ -176,8 +176,16 @@ var silentFormCases = []struct {
 	want       SilentImageForms
 }{
 	{
-		in:   `<table><tr><td background="https://x.example/bg.png">t</td></tr></table>`,
+		// #26: a remote background= on a cell is parked now, not silent. It
+		// still counts as silent where it is dropped: on an element that paints
+		// no background.
+		in:   `<div background="https://x.example/bg.png">t</div>`,
 		want: SilentImageForms{BackgroundAttr: 1},
+	},
+	{
+		in:         `<table><tr><td background="https://x.example/bg.png">t</td></tr></table>`,
+		remoteWant: silentTestPtr(1),
+		want:       SilentImageForms{},
 	},
 	{
 		in:   `<table><tr><td background="cid:x">t</td></tr></table>`,

@@ -9,6 +9,17 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Fixes: images in newsletters
+
+- Images that were missing from some newsletters now show when you allow remote content
+  for the sender: pictures set as the background of a table or table cell, images whose
+  address is written without `http:` or `https:` (starting with `//`), and images the
+  sender's server labels with the wrong type (for example `image/jpg`, or no type at all).
+- Pictures inside a `<picture>` element show using their ordinary fallback image.
+- Nothing changes about what is protected: remote images still load only through the image
+  proxy when it is on, only for senders you allowed, tracking pixels are still never
+  loaded, and SVG files and anything that is not really a picture are still refused.
+
 ## [1.102.0] — 2026-11-09
 
 **v1.102 makes Mailroom a good citizen for other mail apps and AI tools, and gives you

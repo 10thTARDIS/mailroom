@@ -190,15 +190,17 @@ export function hasBlockedRemoteContent(html: string): boolean {
  * therefore occur in exactly one place — an attribute NAME the server itself
  * wrote — and nowhere a message author could put it.
  *
- * It restores images ONLY. CSS `url()`, `@import`, `<link>`, `background=`,
- * `poster=` and the media elements are removed by the server and are NOT
+ * It restores images ONLY: `<img>` and a table-cell `background=` attribute (#26,
+ * parked by the server under its own name and restored as an ATTRIBUTE, never as
+ * CSS). CSS `url()`, `@import`, `<link>`, `poster=` and the media elements are removed by the server and are NOT
  * restorable: their only use in a mail body is tracking, and none of them is
  * worth a channel.
  */
 export function restoreRemoteContent(html: string): string {
   return html
     .replaceAll('data-mailroom-remote-src="', 'src="')
-    .replaceAll('data-mailroom-remote-srcset="', 'srcset="');
+    .replaceAll('data-mailroom-remote-srcset="', 'srcset="')
+    .replaceAll('data-mailroom-remote-background="', 'background="');
 }
 
 /** The names the server parks a TRACKING PIXEL's URL under (#55 increment 2).
