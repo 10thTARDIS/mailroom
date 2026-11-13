@@ -13,6 +13,22 @@
 # linter, and #447's own acceptance list says so: "a linter cannot observe what is
 # announced; this can."
 #
+# AND THE v1.103 HARDENING, END TO END (ADR-056). Two more things are proven
+# here in real Chromium against the real server, because jsdom and a fake scanner
+# cannot prove them:
+#   * THE RISKY-FILE QUESTION. Downloading a program, or a file whose name hides
+#     what it is, asks first in an alertdialog with Cancel focused; Cancel and
+#     Escape download NOTHING, "Download anyway" does. The same click on an
+#     ordinary PDF downloads with no question, and that download IS observed,
+#     which is what shows the observer could have seen the others.
+#   * THE RE-CHECK ON OPEN, against the shipped clamd image and clamd.conf. A
+#     message older than six months whose stored verdict is `clean` at a
+#     signature version behind the daemon's has its attachments re-scanned
+#     before the download is served: the EICAR string is refused and its verdict
+#     becomes `flagged`; a harmless file is served and its version is brought up
+#     to date. Three controls say WHY: the same string on mail from last week,
+#     and the same string on old mail whose verdict is current, are both served.
+#
 # WHAT THIS PROVES, end to end, against the thing we SHIP:
 #   * the real image, serving the real built client, over real HTTP;
 #   * a real Dovecot mailbox with thirteen messages, delivered over IMAP, whose
@@ -144,6 +160,17 @@
 #                                 suggestions) is off the screen, cut off,
 #                                 not scrollable to its last item, or covered
 #                                 (#880; axe cannot see this class of defect)
+#    34  RISKY                  — the risky-file question (ADR-056): a risky
+#                                 file downloaded without the alertdialog, Cancel
+#                                 or Escape downloaded anyway, "Download anyway"
+#                                 downloaded nothing, the control PDF asked or
+#                                 was not observed, or the dialog is not named,
+#                                 focused or fitted as the model says
+#    35  RESCAN                 — the re-check on open (ADR-056), against the
+#                                 REAL clamd: the stale EICAR was served, the
+#                                 harmless file refused, a control refused, or
+#                                 the verdicts the run left in the database are
+#                                 not the ones the re-scan must write
 #    33  COMPOSER               — the compose editor in a real browser (ADR-051):
 #                                 a CSP violation while loading a draft or pasting
 #                                 HTML, a pasted handler that ran, dangerous
@@ -199,6 +226,17 @@ APP="mailroom-a11y-e2e-app-$UNIQ"
 CR="mailroom-a11y-e2e-crypto-$UNIQ"
 PGPVOL="mailroom-a11y-e2e-pgproot-$UNIQ"
 SOCKVOL="mailroom-a11y-e2e-sock-$UNIQ"
+# A REAL clamd (ADR-056's hardening lane): the SAME pinned image and the SAME
+# clamd.conf the shipped deploy/compose.yml runs, so "the old attachment is
+# re-checked when opened" is proven against the daemon that ships and not
+# against a stand-in that answers whatever the test wants. Its socket is a
+# named volume the app mounts read-only, exactly as in the compose file. The
+# image carries a signature database baked at build time and this container
+# runs no freshclam, so the database version is FIXED for the whole run: the
+# lane can seed "one lower than the daemon reports" and know it stays true.
+CLAMAV_IMAGE="${CLAMAV_IMAGE:-clamav/clamav:1.5.4@sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d}"
+CL="mailroom-a11y-e2e-clamd-$UNIQ"
+CLAMVOL="mailroom-a11y-e2e-clamsock-$UNIQ"
 
 TESTUSER="reader@example.com"
 TESTPASS="reader-mailbox-password"
@@ -215,8 +253,8 @@ WORK_HOST="$(cd "$WORK" && { pwd -W 2>/dev/null || pwd; })"
 
 cleanup() {
   echo "--- cleaning up"
-  docker rm -fv "$APP" "$CR" "$DV" "$PG" >/dev/null 2>&1 || true
-  docker volume rm -f "$VOL" "$PGPVOL" "$SOCKVOL" >/dev/null 2>&1 || true
+  docker rm -fv "$APP" "$CR" "$CL" "$DV" "$PG" >/dev/null 2>&1 || true
+  docker volume rm -f "$VOL" "$PGPVOL" "$SOCKVOL" "$CLAMVOL" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # Only an image THIS run built (uniquely tagged); a MAILROOM_IMAGE override is the caller's.
   if [ -z "${MAILROOM_IMAGE:-}" ]; then docker rmi "$IMAGE" >/dev/null 2>&1 || true; fi
@@ -305,6 +343,17 @@ docker network create "$NET" >/dev/null
 docker volume create "$VOL" >/dev/null
 docker run --rm -v "$VOL:/k" "$PG_IMAGE" sh -c \
   'openssl rand -hex 32 | tr -d "\r\n" > /k/master && chmod 644 /k/master' >/dev/null
+
+echo "--- clamd (the shipped image and clamd.conf; loads while the rest starts)"
+# Created, given its config, THEN started, as the app is below: clamd reads
+# clamd.conf once at start. No network at all (the compose file's
+# network_mode: none): it is reached over the socket volume and nothing else.
+docker volume create "$CLAMVOL" >/dev/null
+CLID=$(docker create --name "$CL" --network none \
+  -e CLAMAV_NO_FRESHCLAMD=true -e CLAMAV_NO_MILTERD=true \
+  -v "$CLAMVOL:/run/clamav" "$CLAMAV_IMAGE")
+docker cp "$REPO_HOST/deploy/clamd.conf" "$CLID:/etc/clamav/clamd.conf" >/dev/null
+docker start "$CLID" >/dev/null
 
 echo "--- postgres"
 docker run -d --name "$PG" --network "$NET" --network-alias pg \
@@ -874,6 +923,92 @@ docker cp "$WORK_HOST/newsletter/newsletter.eml" "$DV:/tmp/newsletter.eml" >/dev
 docker exec "$DV" sh -c "doveadm save -u '$TESTUSER' -m Archive < /tmp/newsletter.eml"
 echo "delivered the wide marketing newsletter into $TESTUSER Archive"
 
+# --- THE HARDENING FIXTURES (ADR-056), filed in ARCHIVE -----------------------
+# Five messages from ONE sender nothing else uses (files@docs.example.com), so
+# no existing `from:` count, sender card or thread in this lane changes. Archive
+# for the held message's reason: off the desk, so no count above moves.
+#
+# 1. "Files to review": three attachments, on which the RISKY-FILE QUESTION is
+#    proven. setup.exe is a real PE header (MZ, e_lfanew -> "PE\0\0") under an
+#    executable name; invoice.pdf.exe is harmless bytes under a name built to read
+#    as a PDF; statement.pdf is a real, tiny, valid PDF and is the CONTROL: the
+#    one that must download with no question, which is what shows this lane can
+#    SEE a download at all.
+# 2. Four messages carrying either the EICAR test string or a harmless text file,
+#    on which the RE-CHECK ON OPEN is proven. They arrive like any mail and are
+#    scanned at ingest by the REAL clamd (asserted below, per message); the
+#    fixture stage then rewrites WHAT IS STORED to the shape an old verdict has
+#    (see "THE RE-CHECK FIXTURE" below). The EICAR string is carried split so
+#    that no file in this repository is itself a detection.
+mkdir -p "$WORK/hard"
+EICAR_A='X5O!P%@AP[4\PZX54(P^)7CC)7}$'
+EICAR_B='EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'
+
+hard_head() { # $1 subject, $2 message-id local part, $3 boundary
+  printf 'From: Files Desk <files@docs.example.com>\n'
+  printf 'To: Reader <%s>\n' "$TESTUSER"
+  printf 'Subject: %s\n' "$1"
+  printf 'Message-ID: <%s@example.test>\n' "$2"
+  printf 'Date: Tue, 08 Sep 2026 10:00:00 +0000\n'
+  printf 'MIME-Version: 1.0\n'
+  printf 'Content-Type: multipart/mixed; boundary="%s"\n\n' "$3"
+  printf -- '--%s\nContent-Type: text/plain; charset=utf-8\n\nThe file is attached.\n\n' "$3"
+}
+hard_b64_part() { # $1 boundary, $2 type, $3 filename, $4 base64 (one line)
+  printf -- '--%s\nContent-Type: %s; name="%s"\n' "$1" "$2" "$3"
+  printf 'Content-Disposition: attachment; filename="%s"\nContent-Transfer-Encoding: base64\n\n' "$3"
+  printf '%s\n' "$4" | fold -w 76
+  printf '\n'
+}
+hard_text_part() { # $1 boundary, $2 filename, $3 content
+  printf -- '--%s\nContent-Type: text/plain; charset=utf-8; name="%s"\n' "$1" "$2"
+  printf 'Content-Disposition: attachment; filename="%s"\n\n%s\n\n' "$2" "$3"
+}
+
+PE_B64='TVoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAFBFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+PDF_B64='JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NyA+PgpzdHJlYW0KQlQgL0YxIDE4IFRmIDIwIDUwIFRkIChTeW50aGV0aWMgaW52b2ljZSkgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAzMzggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MDgKJSVFT0YK'
+PLACEHOLDER_B64='U3ludGhldGljIHBsYWNlaG9sZGVyLCBub3QgYSBwcm9ncmFtLgo='
+{
+  hard_head 'Files to review' hard-risky hardb
+  hard_b64_part hardb application/octet-stream setup.exe "$PE_B64"
+  hard_b64_part hardb application/octet-stream invoice.pdf.exe "$PLACEHOLDER_B64"
+  hard_b64_part hardb application/pdf statement.pdf "$PDF_B64"
+  printf -- '--hardb--\n'
+} > "$WORK/hard/risky.eml"
+
+# The four re-check messages. Four, because each one answers a different
+# question about WHY a download is refused or served:
+#   old, stale verdict       the case under test: refused, because the open-time
+#                            re-scan found the string the old verdict missed
+#   old, harmless            the same band, stale verdict, a file that is fine:
+#                            served, and its verdict is remade
+#   recent, current verdict  the same string, OUTSIDE the over-six-months band:
+#                            served. It shows the refusal above came from the
+#                            re-scan on open and not from something else
+#   old, current verdict     the same string, in the band, but NOT behind the
+#                            database: served. It shows staleness is what asks
+#                            for the re-scan, not age alone
+EICAR_TEXT="$(printf '%s%s' "$EICAR_A" "$EICAR_B")"
+for spec in \
+  "rescan-old-stale|Rescan fixture: old eicar, stale verdict|eicar" \
+  "rescan-old-current|Rescan fixture: old eicar, current verdict|eicar" \
+  "rescan-recent-current|Rescan fixture: recent eicar, current verdict|eicar" \
+  "rescan-old-harmless|Rescan fixture: old harmless, stale verdict|plain"; do
+  id="${spec%%|*}"; rest="${spec#*|}"; subj="${rest%%|*}"; kind="${rest##*|}"
+  {
+    hard_head "$subj" "$id" hardb
+    if [ "$kind" = "eicar" ]; then
+      hard_text_part hardb sample-file.txt "$EICAR_TEXT"
+    else
+      hard_text_part hardb figures.txt 'Quarterly figures: nothing unusual to report.'
+    fi
+    printf -- '--hardb--\n'
+  } > "$WORK/hard/$id.eml"
+done
+docker cp "$WORK_HOST/hard" "$DV:/tmp/hard" >/dev/null
+docker exec "$DV" sh -c "for f in /tmp/hard/*.eml; do doveadm save -u '$TESTUSER' -m Archive < \"\$f\" || exit 1; done"
+echo "delivered the five hardening messages into $TESTUSER Archive"
+
 echo "--- accounts file (the app connects to dovecot over implicit TLS, verifying the cert)"
 cat > "$WORK/accounts.json" <<EOF
 {"accounts":[{"name":"dovecot","imap_host":"dovecot","imap_port":993,
@@ -893,9 +1028,29 @@ echo "--- mailroom (dev-auth, syncing the dovecot account)"
 # SEARCH IS ON, as it is in production: the sender card's "Move all from…" counts
 # through a `from:` search (#708), and with MAILROOM_SEARCH_DISABLED=1 it can only
 # fail, so its confirm step could never be reached here.
+# ⚠ CLAMD IS WAITED FOR HERE AND NOT BEFORE THE APP IS BUILT. Once a scanner
+# socket is configured, ingest is FAIL-CLOSED (ADR-027 §4c): a daemon that does
+# not answer pauses sync, so an app started against a daemon still loading its
+# signatures would sit on an empty mailbox. `clamdscan --ping` speaks the
+# protocol (the compose healthcheck's own command) rather than checking that a
+# process exists. The signature load is the slow part (about a minute on a
+# loaded host).
+echo "--- waiting for clamd to load its signatures"
+wait_for "clamd" 420 "$CL" docker exec "$CL" clamdscan --ping 1
+CLAM_VERSION="$(docker exec "$CL" clamdscan --version 2>/dev/null | head -1)"
+echo "clamd answers: $CLAM_VERSION"
+case "$CLAM_VERSION" in
+  ClamAV\ *) : ;;
+  *) echo "FATAL: clamd answered no ClamAV version line: '$CLAM_VERSION'" >&2; exit 5 ;;
+esac
+docker exec "$CL" sh -c 'clamconf 2>/dev/null | grep -qi "^AlertEncrypted = \"yes\""' || {
+  echo "FATAL: clamd is not running the shipped clamd.conf (AlertEncrypted is not on)" >&2; exit 5; }
+
 APPID=$(docker create --name "$APP" --network "$NET" --network-alias mailroom \
   -v "$VOL:/k:ro" \
   -v "$SOCKVOL:/run/mailroom-crypto" \
+  -v "$CLAMVOL:/run/clamav:ro" \
+  -e MAILROOM_CLAMD_SOCKET=/run/clamav/clamd.sock \
   -e MAILROOM_DATABASE_URL="postgres://mailroom_app:app@pg:5432/mailroom?sslmode=disable" \
   -e MAILROOM_MASTER_KEY_FILE=/k/master \
   -e MAILROOM_PGP_SOCKET=/run/mailroom-crypto/crypto.sock \
@@ -1143,6 +1298,86 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await sleep(2000);
   }
 
+  // ---- the hardening messages (ADR-056), in Archive -------------------------
+  // Waited for like the held message, and read WITH THEIR ATTACHMENTS so the
+  // browser stage gets each blob's download path from the server's own session
+  // template. Nothing here asks for body values: that is what "opens" a message
+  // for the re-scan (internal/api/email.go), and the re-check fixtures must reach
+  // the browser stage unopened or an open-time JOB could refuse them before the
+  // download this lane is about to make.
+  const HARD = [
+    "Files to review",
+    "Rescan fixture: old eicar, stale verdict",
+    "Rescan fixture: old eicar, current verdict",
+    "Rescan fixture: recent eicar, current verdict",
+    "Rescan fixture: old harmless, stale verdict",
+  ];
+  const hard = new Map();
+  for (const t0 = Date.now(); hard.size < HARD.length; ) {
+    const [hq] = await jmap([["Email/query", { accountId, filter: {}, limit: 80 }, "hq"]]);
+    const [hg] = await jmap([
+      ["Email/get", { accountId, ids: hq[1].ids || [], properties: ["subject", "attachments"] }, "hg"],
+    ]);
+    for (const m of hg[1].list || []) if (HARD.includes(m.subject)) hard.set(m.subject, m);
+    if (hard.size >= HARD.length) break;
+    if (Date.now() - t0 > 120000) {
+      console.log(
+        "NOFIXTURE the hardening messages never synced from Archive (have " +
+          [...hard.keys()].join(" | ") + ")",
+      );
+      process.exit(5);
+    }
+    await sleep(2000);
+  }
+  const downloadPath = (at) =>
+    sess.downloadUrl
+      .replace("{accountId}", encodeURIComponent(accountId))
+      .replace("{blobId}", encodeURIComponent(at.blobId))
+      .replace("{name}", encodeURIComponent(at.name))
+      .replace("{type}", encodeURIComponent(at.type || ""))
+      .replace(/^https?:\/\/[^/]+/, "");
+  const attOf = (subject) => {
+    const m = hard.get(subject);
+    return {
+      id: m.id,
+      subject,
+      attachments: (m.attachments || []).map((a) => ({
+        name: a.name,
+        type: a.type,
+        riskyType: a.riskyType || null,
+        path: downloadPath(a),
+      })),
+    };
+  };
+  const risky = attOf("Files to review");
+  // ⚠ THE SERVER'S OWN CLASSIFICATION IS A PRECONDITION, not an assumption: the
+  // browser stage asserts what the CLIENT does with `riskyType`, so a message the
+  // server did not classify would make "the dialog appeared" untestable and
+  // "the control downloads with no dialog" true for the wrong reason.
+  const wantRisk = { "setup.exe": "program", "invoice.pdf.exe": "disguised", "statement.pdf": null };
+  for (const [name, want] of Object.entries(wantRisk)) {
+    const a = risky.attachments.find((x) => x.name === name);
+    if (!a || a.riskyType !== want) {
+      console.log(
+        "NOFIXTURE the server classified " + name + " as " + JSON.stringify(a && a.riskyType) +
+          ", want " + JSON.stringify(want) + " (attachments=" + JSON.stringify(risky.attachments) + ")",
+      );
+      process.exit(5);
+    }
+  }
+  const rescan = {
+    oldStale: attOf("Rescan fixture: old eicar, stale verdict"),
+    oldCurrent: attOf("Rescan fixture: old eicar, current verdict"),
+    recentCurrent: attOf("Rescan fixture: recent eicar, current verdict"),
+    oldHarmless: attOf("Rescan fixture: old harmless, stale verdict"),
+  };
+  for (const [k, v] of Object.entries(rescan)) {
+    if (v.attachments.length !== 1 || !v.attachments[0].path) {
+      console.log("NOFIXTURE rescan message " + k + " has " + v.attachments.length + " attachment(s), want 1");
+      process.exit(5);
+    }
+  }
+
   // ---- the attachment ----------------------------------------------------
   const attach = need("Notes from the meeting");
   if (attach.hasAttachment !== true) {
@@ -1381,6 +1616,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     invite: { id: invite.id, subject: invite.subject, title: "Accessibility review" },
     folded: { openId: fold2.id, foldedId: fold1.id, subject: fold2.subject },
     newsletter: { id: newsletter.id, subject: newsletter.subject },
+    risky,
+    rescan,
     drawerArea: { name: drawers[0].areaName, count: drawers[0].drawer },
     messages: mail.map((m) => ({
       id: m.id,
@@ -1456,6 +1693,102 @@ done
 [ "$FU_ROW" = "backdated" ] || { echo "A11Y E2E FAILED: the follow-up sent message never synced" >&2; exit 5; }
 echo "backdated the follow-up sent message ten days"
 
+# ---------------------------------------------------------------------------
+# THE RE-CHECK FIXTURE (ADR-056): what an OLD verdict looks like, stored.
+# ---------------------------------------------------------------------------
+#
+# What is being proven: opening mail older than six months re-scans the
+# attachments whose verdict is behind the scanner's signature database, BEFORE
+# the download is served, so a file the old database called clean and today's
+# database detects is refused, and is refused because of THAT.
+#
+# The shape is read from how the store records a verdict (app.attachments:
+# scan_status, scanned_at, scanned_db_version, attempted_*), and the part this
+# lane cannot do honestly is AGE: a verdict made eight months ago cannot be
+# produced by waiting. So the stored state is rewritten here, as the database
+# owner, in exactly the way the follow-up message was backdated above.
+#
+# ⚠ THE STARTING POINT IS MEASURED, NOT ASSUMED. Each message was scanned at
+# ingest by the REAL clamd. Before anything is rewritten this asserts that the
+# three EICAR messages arrived `flagged` and the harmless one `clean`, and it
+# reads the daemon's database version OUT OF THE HARMLESS ROW (what ingest
+# stamped from clamd's own VERSION answer). That makes two things true at once:
+# the scanner really is wired in and detecting, and "one lower than the running
+# clamd reports" is a number read from the run, not typed in. The database is
+# baked into the image and no freshclam runs, so it cannot move underneath the
+# run.
+pgq() { docker exec "$PG" psql -U postgres -d mailroom -qtA -F '|' -v ON_ERROR_STOP=1 -c "$1"; }
+RESCAN_ROWS=""
+_rs_i=0
+while [ "$_rs_i" -lt 45 ]; do
+  RESCAN_ROWS="$(pgq "SELECT m.subject, a.scan_status, coalesce(a.scanned_db_version::text, 'null')
+    FROM app.attachments a JOIN app.messages m ON m.id = a.message_id
+   WHERE m.subject LIKE 'Rescan fixture:%' ORDER BY m.subject")"
+  [ "$(printf '%s\n' "$RESCAN_ROWS" | grep -c .)" = "4" ] &&
+    ! printf '%s\n' "$RESCAN_ROWS" | grep -q '|unscanned|' && break
+  _rs_i=$((_rs_i + 1)); sleep 2
+done
+echo "ingest-time verdicts, from the real clamd:"
+printf '%s\n' "$RESCAN_ROWS" | sed 's/^/  /'
+rescan_fail() { echo "A11Y E2E FAILED: $1" >&2; docker logs "$APP" 2>&1 | grep -iE "scan|clamd" | tail -10 >&2 || true; exit 5; }
+printf '%s\n' "$RESCAN_ROWS" | grep -q '^Rescan fixture: old harmless, stale verdict|clean|[0-9]' ||
+  rescan_fail "the harmless attachment was not scanned clean at ingest (is the scanner wired in?)"
+for _n in 'old eicar, stale verdict' 'old eicar, current verdict' 'recent eicar, current verdict'; do
+  printf '%s\n' "$RESCAN_ROWS" | grep -q "^Rescan fixture: $_n|flagged|[0-9]" ||
+    rescan_fail "the EICAR attachment of '$_n' was not flagged at ingest: the real clamd did not detect the test string"
+done
+RESCAN_V="$(printf '%s\n' "$RESCAN_ROWS" | sed -n 's/^Rescan fixture: old harmless, stale verdict|clean|\([0-9][0-9]*\)$/\1/p')"
+case "$RESCAN_V" in ''|*[!0-9]*) rescan_fail "could not read the daemon's database version from the ingest stamp: '$RESCAN_V'" ;; esac
+[ "$RESCAN_V" -gt 1 ] || rescan_fail "the database version read is $RESCAN_V; one lower would not be a real version"
+RESCAN_OLD=$((RESCAN_V - 1))
+echo "the running clamd's signature database is version $RESCAN_V; stale verdicts are stamped $RESCAN_OLD"
+
+# The rewrite, in one transaction so a half-applied fixture cannot exist.
+#   * both "old" messages: received 300 days ago (past the 180-day band edge;
+#     sent_at moved with it)
+#   * old+stale ones: `clean`, stamped one version BEHIND, scanned 300 days ago
+#     (what a verdict made back then looks like, EICAR included: the old
+#     database did not know the string)
+#   * old+current: `clean`, stamped AT the current version
+#   * recent: received 5 days ago (inside the weekly tier, outside the band),
+#     `clean` at the current version, scanned just now, so nothing in the
+#     background job's schedule is due for it either
+# attempted_* moves with scanned_* because that is how a stamped pass records
+# itself (store.writeVerdicts, comment 4).
+REWROTE="$(docker exec -i "$PG" psql -U postgres -d mailroom -qtA -v ON_ERROR_STOP=1 <<SQLEOF
+BEGIN;
+UPDATE app.messages SET received_at = now() - interval '300 days', sent_at = now() - interval '300 days'
+ WHERE subject IN ('Rescan fixture: old eicar, stale verdict', 'Rescan fixture: old eicar, current verdict',
+                   'Rescan fixture: old harmless, stale verdict');
+UPDATE app.messages SET received_at = now() - interval '5 days', sent_at = now() - interval '5 days'
+ WHERE subject = 'Rescan fixture: recent eicar, current verdict';
+UPDATE app.attachments a
+   SET scan_status = 'clean', scanned_db_version = $RESCAN_OLD, attempted_db_version = $RESCAN_OLD,
+       scanned_at = now() - interval '300 days', attempted_at = now() - interval '300 days'
+  FROM app.messages m
+ WHERE m.id = a.message_id
+   AND m.subject IN ('Rescan fixture: old eicar, stale verdict', 'Rescan fixture: old harmless, stale verdict');
+UPDATE app.attachments a
+   SET scan_status = 'clean', scanned_db_version = $RESCAN_V, attempted_db_version = $RESCAN_V,
+       scanned_at = now() - interval '300 days', attempted_at = now() - interval '300 days'
+  FROM app.messages m
+ WHERE m.id = a.message_id AND m.subject = 'Rescan fixture: old eicar, current verdict';
+UPDATE app.attachments a
+   SET scan_status = 'clean', scanned_db_version = $RESCAN_V, attempted_db_version = $RESCAN_V,
+       scanned_at = now(), attempted_at = now()
+  FROM app.messages m
+ WHERE m.id = a.message_id AND m.subject = 'Rescan fixture: recent eicar, current verdict';
+COMMIT;
+SELECT 'ok';
+SQLEOF
+)"
+REWROTE="$(printf '%s\n' "$REWROTE" | tail -1)"
+[ "$REWROTE" = "ok" ] || rescan_fail "the re-check fixture could not be written"
+echo "stored state before the browser stage (every one is 'clean', which is the claim under test):"
+pgq "SELECT m.subject, a.scan_status, a.scanned_db_version, (now() - m.received_at)::interval(0)
+       FROM app.attachments a JOIN app.messages m ON m.id = a.message_id
+      WHERE m.subject LIKE 'Rescan fixture:%' ORDER BY m.subject" | sed 's/^/  /'
+
 echo
 echo "=== axe + the accessibility tree, in the pinned Chromium ===================="
 # docker cp the script and the linter IN rather than bind-mounting a host path (see
@@ -1522,6 +1855,23 @@ if [ "$CHK_RC" != "0" ] || ! grep -q '^CLEAN a11y ' "$WORK/check.out"; then
   fi
   exit "$CHK_RC"
 fi
+
+# THE STORED HALF OF THE RE-CHECK ON OPEN. The browser stage asserted what the
+# API served and refused; only the database can say what the open-time re-scan
+# WROTE, so it is read here, after the run, and compared with the exact numbers
+# seeded above. A re-scan that refused the download but wrote nothing, or wrote
+# the wrong version, would be a refusal that repeats the scan on every open.
+echo "=== re-check on open: what the run left stored ==="
+STORED="$(pgq "SELECT m.subject, a.scan_status, a.scanned_db_version
+                 FROM app.attachments a JOIN app.messages m ON m.id = a.message_id
+                WHERE m.subject LIKE 'Rescan fixture:%' ORDER BY m.subject")"
+printf '%s\n' "$STORED" | sed 's/^/  /'
+stored_is() { printf '%s\n' "$STORED" | grep -qx "$1"; }
+stored_is "Rescan fixture: old eicar, stale verdict|flagged|$RESCAN_V" || {
+  echo "A11Y E2E FAILED (exit 35): the stale EICAR verdict was not rewritten to flagged at version $RESCAN_V" >&2; exit 35; }
+stored_is "Rescan fixture: old harmless, stale verdict|clean|$RESCAN_V" || {
+  echo "A11Y E2E FAILED (exit 35): the harmless file's verdict was not remade at version $RESCAN_V (it was seeded at $RESCAN_OLD)" >&2; exit 35; }
+echo "RESCAN-STORED ok: stale EICAR -> flagged@$RESCAN_V, stale harmless -> clean@$RESCAN_V"
 
 echo "=== THE CLIENT IS OPERABLE BY THE ACCESSIBILITY TREE ==="
 grep '^CLEAN a11y ' "$WORK/check.out"
