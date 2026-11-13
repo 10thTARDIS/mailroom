@@ -21,6 +21,11 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 - The automated browser checks now cover this release's attachment and image work end to
   end: the risky-file question in a real browser, old attachments re-checked against a real
   virus scanner, and newsletter images loaded through the real image proxy.
+- The automated browser checks now also cover the prompts that appear when a correspondent's
+  encryption key changes, in the reading pane and in the composer: the gentler wording when their
+  previous key vouches for the new one, the ordinary prompt, the warning for a stolen previous key,
+  and the notes for a key you trusted whose voucher was later revoked. Each is checked in light,
+  dark and system dark.
 
 ## [1.103.0-beta.1] — 2026-11-10
 
