@@ -40,8 +40,16 @@ import (
 //
 // The wording is the user's, not the schema's: it ends up in the submission's
 // stored error and therefore in front of whoever tries to send.
+//
+// ⚠ IT STATES THE CONSEQUENCE AS WELL AS THE CAUSE (ADR-028 A1). A send that was
+// scheduled while the account was live and dispatched while it was shadowed is
+// failed for good and is never re-sent when the mode lifts, so the text says that
+// in plain words rather than leaving the user to wonder whether it is still
+// coming.
 var errIngestOnlyCannotSend = errors.New(
-	"this account is in ingest-only mode: Mailroom is observing the mailbox and will not send from it")
+	"this account is in ingest-only mode: Mailroom is observing the mailbox and will not send from it. "+
+		"This message was not sent, and it will not be sent automatically if ingest-only mode is turned off: "+
+		"open it from Drafts and send it again if you still want it")
 
 // AwaitingReconnectReason is what a held submission's stored response says
 // while its account needs the user to sign in again (#52, ADR-046 §11): its
