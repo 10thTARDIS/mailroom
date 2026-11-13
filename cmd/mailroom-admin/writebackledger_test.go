@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -134,5 +135,38 @@ func TestLedgerApplySummaryNamesEveryOutcome(t *testing.T) {
 	})
 	if !strings.Contains(clean, "skipped-stale           0") || strings.Contains(clean, "--discard") {
 		t.Errorf("a replay that skipped nothing must still print the zeros and no discard hint:\n%s", clean)
+	}
+}
+
+// TestLedgerDiscardSummaryCountsPerSourceAndAccount: --discard --apply says which
+// account it acted on and how many rows of each source it moved, and an empty
+// ledger says so instead of printing a table of nothing.
+//
+// NEGATIVE CONTROL: drop the per-source loop and the source lines vanish; drop the
+// early return and the empty case prints an empty table.
+func TestLedgerDiscardSummaryCountsPerSourceAndAccount(t *testing.T) {
+	acct := store.Account{Name: "primary"}
+	out := captureStdout(t, func() {
+		printWritebackLedgerDiscarded(acct, []store.SuppressedIntentRow{
+			{Op: "move", Source: "user", Count: 3},
+			{Op: "+kw", Source: "user", Count: 2},
+			{Op: "+kw", Source: "rule", Count: 40},
+			{Op: "append", Source: "", Count: 1},
+		})
+	})
+	for _, want := range []string{
+		"(primary): 46 intent(s) moved to 'discarded'",
+		fmt.Sprintf("%-10s %8d", "rule", 40),
+		fmt.Sprintf("%-10s %8d", "unknown", 1),
+		fmt.Sprintf("%-10s %8d", "user", 5),
+		fmt.Sprintf("%-10s %8d  for account", "total", 46),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("discard summary does not contain %q:\n%s", want, out)
+		}
+	}
+	empty := captureStdout(t, func() { printWritebackLedgerDiscarded(acct, nil) })
+	if !strings.Contains(empty, "0 intent(s)") || !strings.Contains(empty, "ledger was empty") || strings.Contains(empty, "SOURCE") {
+		t.Errorf("an empty discard must say so and print no table:\n%s", empty)
 	}
 }

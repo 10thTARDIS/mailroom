@@ -258,6 +258,17 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 	// 'suppressed', so Revive (the purge worker's re-enqueue) cannot resurrect
 	// the ledger either.
 	//
+	// ⚠ A 'discarded' ROW NEVER SWALLOWS A LATER REQUEST (ADR-028 A3). Discarding
+	// is the operator's decision about the rows that existed THEN; the same
+	// deterministic key arriving afterwards is a new request, and answering it with
+	// DO NOTHING would drop it silently - the purge sweep re-enqueues the same key
+	// every pass, so one discarded row would stop that message ever being expunged.
+	// So the third arm re-dates and re-decides it in any case, to whichever state
+	// this enqueue is born in (suppressed while shadowed, pending while live).
+	//
+	// That is the one place 'discarded' differs from 'suppressed' here, and it does
+	// not widen what replay can write: the new row is born under the same
+	// pending-versus-suppressed decision as any other.
 	// ⚠ `source = EXCLUDED.source` ON THE UPDATE ARM, deliberately. Both arms
 	// re-date the row and reset its state — they describe a request made NOW,
 	// not the one it collapsed into — so the antecedent has to move with it.
@@ -290,6 +301,7 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 		       source      = EXCLUDED.source
 		 WHERE ($8::boolean AND w.state IN ('applied', 'dead'))
 		    OR (w.state = 'suppressed' AND EXCLUDED.state = 'pending')
+		    OR w.state = 'discarded'
 		RETURNING id`,
 		id.String(), tx.userID.String(), messageID, in.AccountID.String(),
 		string(in.Op), payload, in.IdempotencyKey, in.Revive, tx.writebackDisabled,
@@ -595,6 +607,55 @@ func (tx *UserTx) ReplaySuppressedIntents(ctx context.Context, accountID ulid.UL
 		return ReplayResult{}, fmt.Errorf("writeback: replay suppressed intents: %w", err)
 	}
 	return res, nil
+}
+
+// DiscardSuppressedIntents moves an account's whole suppressed ledger to the
+// terminal 'discarded' state and returns what it moved, per (op, source). It
+// exists solely behind `mailroom-admin writeback-ledger --discard --apply`
+// (ADR-028 amendment A3).
+//
+// ⚠ IT WRITES NOTHING TO ANY MAILBOX AND NEEDS NO LIFTED MODE. 'discarded' is
+// terminal and never claimed, exactly like 'suppressed': the only difference is
+// that the operator has decided the row will not be replayed, so it stops being
+// counted as ledger. That is why the caller does not check the shadow state
+// first, unlike replay.
+//
+// The result is a slice of buckets rather than a total for the reason the report
+// is: "discarded 40" cannot say whether those were 40 user moves or 40 rule
+// keywords, and that is the question asked before running it.
+//
+// Only 'suppressed' rows move. A pending, inflight, applied or dead row is not
+// the ledger and is left exactly as it is; in particular a row a replay already
+// moved to 'pending' is no longer discardable, which is right (it is on its way).
+func (tx *UserTx) DiscardSuppressedIntents(ctx context.Context, accountID ulid.ULID) ([]SuppressedIntentRow, error) {
+	rows, err := tx.tx.Query(ctx, `
+		WITH moved AS (
+			UPDATE app.writeback_intents
+			   SET state = 'discarded', claimed_at = NULL
+			 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'
+			RETURNING op, source
+		)
+		SELECT op, COALESCE(source, ''), count(*)
+		  FROM moved
+		 GROUP BY op, source
+		 ORDER BY op, source`,
+		tx.userID.String(), accountID.String())
+	if err != nil {
+		return nil, fmt.Errorf("writeback: discard suppressed intents: %w", err)
+	}
+	defer rows.Close()
+	var out []SuppressedIntentRow
+	for rows.Next() {
+		var r SuppressedIntentRow
+		if err := rows.Scan(&r.Op, &r.Source, &r.Count); err != nil {
+			return nil, fmt.Errorf("writeback: scan discarded intent bucket: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("writeback: discard suppressed intents: %w", err)
+	}
+	return out, nil
 }
 
 // MarkIntentApplied transitions a claimed intent 'inflight' -> 'applied' and

@@ -34,6 +34,10 @@ import (
 // expunge) with a total alongside, and states the account it counted for so a
 // "0" cannot be misread as "0 across the instance".
 //
+// --discard (ADR-028 amendment A3) is the end of the lifecycle: report-first, and
+// with --apply it moves the account's suppressed ledger to the terminal
+// 'discarded' state and prints the counts per source.
+//
 // --apply REPLAYS A SUBSET, NEVER THE WHOLE LEDGER: stale intents and superseded
 // draft appends are skipped and stay in the ledger (amendments A2 and A4).
 //
@@ -60,7 +64,8 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 	var (
 		userIDStr    = fs.String("user-id", "", "operator user id (ULID)")
 		accountIDStr = fs.String("account-id", "", "account id (ULID; see list-accounts)")
-		apply        = fs.Bool("apply", false, "replay the suppressed ledger back to pending (default: report only)")
+		apply        = fs.Bool("apply", false, "replay the suppressed ledger back to pending (default: report only). With --discard, discards instead")
+		discard      = fs.Bool("discard", false, "decide NOT to replay: report what would be discarded (default), or with --apply move the ledger to the terminal 'discarded' state")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -111,6 +116,32 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 	instanceDisabled := d.store.WritebackDisabled()
 	printWritebackLedgerReport(acct, byOp, buckets, total, instanceDisabled)
 
+	// --discard is the other end of the lifecycle (ADR-028 amendment A3). It is
+	// report-first like --apply, and it is checked BEFORE the replay path so that
+	// `--discard --apply` can never fall through into a replay.
+	//
+	// It deliberately does NOT refuse a still-shadowed account, unlike replay:
+	// discarding writes nothing to any mailbox and nothing becomes drainable, so
+	// "I will never replay these" is a legitimate decision to make while shadowed.
+	if *discard {
+		if !*apply {
+			fmt.Printf("\nREPORT ONLY - nothing was changed. --discard --apply would move all %d suppressed intent(s) "+
+				"for account %s (%s) to the terminal 'discarded' state. They are then no longer counted as the "+
+				"ledger and can never be replayed; the mail itself is not touched.\n", total, acct.ID, acct.Name)
+			return nil
+		}
+		var rows []store.SuppressedIntentRow
+		if err := d.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+			var e error
+			rows, e = tx.DiscardSuppressedIntents(ctx, accountID)
+			return e
+		}); err != nil {
+			return fmt.Errorf("writeback-ledger: discard: %w", err)
+		}
+		printWritebackLedgerDiscarded(acct, rows)
+		return nil
+	}
+
 	if !*apply {
 		fmt.Println("\nREPORT ONLY — nothing was changed. Re-run with --apply to replay this ledger.")
 		return nil
@@ -155,6 +186,42 @@ func printWritebackLedgerApplied(acct store.Account, res store.ReplayResult) {
 	if res.SkippedStale+res.SkippedSuperseded > 0 {
 		fmt.Println("The skipped rows are still `suppressed`: running the report again lists them, and --discard removes them.")
 	}
+}
+
+// printWritebackLedgerDiscarded states what --discard --apply moved, per source
+// and in total, for the named account, so the output answers "how many of the
+// user's own moves did I just throw away" without arithmetic. A source with no
+// rows is not listed; an empty ledger says so explicitly rather than printing an
+// empty table.
+func printWritebackLedgerDiscarded(acct store.Account, rows []store.SuppressedIntentRow) {
+	bySource := map[string]int64{}
+	var total int64
+	for _, r := range rows {
+		src := r.Source
+		if src == "" {
+			src = "unknown"
+		}
+		bySource[src] += r.Count
+		total += r.Count
+	}
+	fmt.Printf("\nDISCARDED for account %s (%s): %d intent(s) moved to 'discarded'. They will not be replayed.\n",
+		acct.ID, acct.Name, total)
+	if total == 0 {
+		fmt.Println("The ledger was empty; nothing was changed.")
+		return
+	}
+	fmt.Printf("%-10s %8s\n", "SOURCE", "COUNT")
+	fmt.Println(strings.Repeat("-", 19))
+	names := make([]string, 0, len(bySource))
+	for src := range bySource {
+		names = append(names, src)
+	}
+	sort.Strings(names)
+	for _, src := range names {
+		fmt.Printf("%-10s %8d\n", src, bySource[src])
+	}
+	fmt.Println(strings.Repeat("-", 19))
+	fmt.Printf("%-10s %8d  for account %s (%s)\n", "total", total, acct.ID, acct.Name)
 }
 
 // writebackShadowReason names which half of ADR-028 §2's writeback switch is

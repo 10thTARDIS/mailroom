@@ -236,8 +236,10 @@ CREATE TYPE app.job_state        AS ENUM ('pending', 'running', 'done',
 -- what an intent becomes on an ingest-only account, forming a countable ledger
 -- of every change Mailroom would have made to a mailbox it must not touch.
 -- Lifting the mode does NOT drain it; replay is an explicit --apply command.
+-- 'discarded' (ADR-028 A3, migration 00099) is the operator's decision never to
+-- replay a ledger row: TERMINAL, never claimed, and not a failure ('dead' is).
 CREATE TYPE app.intent_state     AS ENUM ('pending', 'inflight', 'applied',
-                                          'dead', 'suppressed');
+                                          'dead', 'suppressed', 'discarded');
 CREATE TYPE app.key_kind         AS ENUM ('pgp', 'smime');
 CREATE TYPE app.dsn_action       AS ENUM ('failed', 'delayed', 'delivered',
                                           'relayed', 'expanded');
