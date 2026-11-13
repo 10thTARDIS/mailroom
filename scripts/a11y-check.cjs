@@ -204,6 +204,17 @@
 //                                 than its room, has a last item that cannot
 //                                 be reached, or is covered; or an in-run
 //                                 negative control stayed green (#880)
+//    34  RISKY <what>           — the risky-file question (ADR-056): not announced
+//                                 as an alertdialog naming the file, focus not
+//                                 on Cancel, Cancel or Escape downloaded, Download
+//                                 anyway did not, a risky name or a disguised
+//                                 name downloaded without asking, or the CONTROL
+//                                 (an ordinary PDF must download with no
+//                                 question and be seen to) failed
+//    35  RESCAN <what>          — the re-check on open (ADR-056), real clamd: the
+//                                 stale EICAR was served, the harmless file was
+//                                 not, a control was refused, or the opened
+//                                 message does not hold the file back
 //    33  OAUTH <what>           — mail-provider sign-in (#52): the Connect
 //                                 buttons not a named group of buttons named
 //                                 by their words, the interstitial not a named
@@ -272,6 +283,8 @@ const tally = {
   contacts: 0,
   apiKeys: 0,
   oauth: 0,
+  risky: 0,
+  rescan: 0,
 };
 let axeVersion = "?";
 
@@ -1431,6 +1444,26 @@ const SURFACES = [
       const r = await heldChipCheck(page);
       if (!r.ok) throw new Fail(7, "NONAME held-inline chip: " + r.why);
       tally.heldChip += 1;
+    },
+  },
+  {
+    // THE RISKY-FILE QUESTION, OPEN (ADR-056). An alertdialog that appears only
+    // when a program-named attachment is clicked, so no other surface draws it;
+    // linted on every theme like the rest, at AA by axe and at AAA by the
+    // allowlisted contrast pass. What it DOES (Cancel, Escape, Download anyway)
+    // is riskyDownloadStep's business, not this lint's.
+    name: "risky-download-question",
+    async open(page) {
+      await openTheRiskyMessage(page);
+      await askAbout(page, "setup.exe");
+      const st = await riskyDialogState(page);
+      if (st.role !== "alertdialog" || !st.inside || st.text !== "Cancel") {
+        throw new Fail(34, "RISKY the open question is " + JSON.stringify({ role: st.role, inside: st.inside, focus: st.text }));
+      }
+    },
+    async after(page) {
+      await page.keyboard.press("Escape");
+      await dialogGone(page, "the question closed after the lint");
     },
   },
   {
@@ -7503,6 +7536,343 @@ async function phoneMenusSurfaces(page) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// The v1.103 hardening, in a real browser against the real server (ADR-056)
+// ---------------------------------------------------------------------------
+//
+// Two things jsdom and a fake scanner cannot prove, proven here:
+//
+//   1. THE RISKY-FILE QUESTION. A download of a program (setup.exe) or of a name
+//      built to hide one (invoice.pdf.exe) asks first, in an alertdialog whose
+//      focus starts on Cancel. Cancel and Escape download NOTHING; "Download
+//      anyway" does. The same click on an ordinary PDF downloads with no
+//      question at all.
+//
+//      ⚠ "NOTHING WAS DOWNLOADED" IS AN ABSENCE, and an absence proves nothing
+//      about an observer that cannot see. So the observer (the browser's own
+//      Browser.downloadWillBegin events, enabled for this run) is shown to work
+//      by the CONTROL: the PDF's download is observed, by the same observer, in
+//      the same page, a few seconds before the Cancel assertions are trusted.
+//      "Download anyway" is a second positive.
+//
+//   2. THE RE-CHECK ON OPEN, against the shipped clamd (scripts/a11y-e2e.sh seeds
+//      it). Four messages, one stored verdict shape (`clean`), four outcomes, in
+//      an order that matters: a flag PROPAGATES to every copy of the same bytes
+//      (store.writeVerdicts), so the three controls are fetched BEFORE the
+//      message under test.
+//
+// The downloads are fetched with the page's own session, through the real
+// /jmap/download route. Nothing here opens these messages in the reading pane
+// first: that fetch would enqueue an open-time re-scan JOB (OnOpen), and a
+// refusal produced by the job instead of the synchronous check would look the
+// same from here. The UI is used AFTER, to see what the product shows for the
+// verdict the re-scan wrote.
+
+const DL_DIR = "/tmp/e2e-dl";
+
+/**
+ * The browser's downloads, as the BROWSER reports them. `begun` is every
+ * download that started, with the name it would have saved under.
+ */
+async function downloadObserver(browser) {
+  fs.mkdirSync(DL_DIR, { recursive: true });
+  const session = await browser.target().createCDPSession();
+  const begun = [];
+  session.on("Browser.downloadWillBegin", (e) => begun.push({ guid: e.guid, name: e.suggestedFilename, url: e.url, state: "begun" }));
+  session.on("Browser.downloadProgress", (e) => {
+    const d = begun.find((x) => x.guid === e.guid);
+    if (d) d.state = e.state;
+  });
+  await session.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: DL_DIR, eventsEnabled: true });
+  return { begun, session };
+}
+
+/** The attachment link in the open reading pane for `name`, as a handle. */
+async function attachmentLink(page, name) {
+  const handle = await page.evaluateHandle((want) => {
+    const li = [...document.querySelectorAll("ul.attachments > li")].find((l) => {
+      const n = l.querySelector(".attachment-name");
+      return n && n.textContent === want;
+    });
+    return li ? li.querySelector("a.attachment-download") || li.querySelector("a.attachment") : null;
+  }, name);
+  const el = handle.asElement();
+  if (!el) {
+    const ctx = await page.evaluate(() => ({
+      url: location.hash,
+      subject: (document.querySelector("h1.thread-subject") || {}).textContent || null,
+      names: [...document.querySelectorAll("ul.attachments .attachment-name")].map((n) => n.textContent),
+    }));
+    throw new Fail(34, "RISKY no attachment link named " + name + " in the open message: " + JSON.stringify(ctx));
+  }
+  return el;
+}
+
+/** The reading pane is still on the risky message. */
+const riskyMessageOpen = (page) =>
+  page.evaluate((s) => {
+    const h = document.querySelector("h1.thread-subject");
+    return !!h && h.textContent.indexOf(s) >= 0;
+  }, FIX.risky.subject);
+
+async function openTheRiskyMessage(page) {
+  await load(page, "#/all?m=" + FIX.risky.id);
+  await waitForSelectorD(page, "aside.thread-pane", { timeout: 30000 });
+  await until("the open message is the risky fixture", 30000, () =>
+    page.evaluate((s) => {
+      const h = document.querySelector("h1.thread-subject");
+      return !!h && h.textContent.indexOf(s) >= 0;
+    }, FIX.risky.subject),
+  );
+  await waitForSelectorD(page, "ul.attachments", { timeout: 30000 });
+  await until("all three attachments are listed", 30000, () =>
+    page.evaluate(() => document.querySelectorAll("ul.attachments > li .attachment-name").length >= 3),
+  );
+}
+
+const dialogOpen = (page) => page.evaluate(() => !!document.querySelector('[role="alertdialog"]'));
+const dialogGone = (page, label) =>
+  until(label, 10000, async () => !(await dialogOpen(page)), 34);
+
+/** What the open dialog is, from the accessibility tree and the focus. */
+async function riskyDialogState(page) {
+  const snap = await axSnapshot(page, '[role="alertdialog"]');
+  const focus = await page.evaluate(() => {
+    const d = document.querySelector('[role="alertdialog"]');
+    const a = document.activeElement;
+    return {
+      inside: !!d && !!a && d.contains(a),
+      text: a ? (a.textContent || "").trim() : "",
+      body: d ? (d.querySelector("#risky-download-body") || {}).textContent || "" : "",
+      buttons: d ? [...d.querySelectorAll("button")].map((b) => (b.textContent || "").trim()) : [],
+    };
+  });
+  return { role: snap && snap.role, name: snap && snap.name, ...focus };
+}
+
+/** Clicks the link for `name` and waits for the question. */
+async function askAbout(page, name) {
+  const link = await attachmentLink(page, name);
+  await link.click();
+  await until("the question about " + name + " is on screen", 15000, () => dialogOpen(page), 34);
+  await sleep(150);
+}
+
+/** Waits `ms` and returns how many downloads the browser started in that time. */
+async function downloadsDuring(obs, ms) {
+  const before = obs.begun.length;
+  await sleep(ms);
+  return obs.begun.length - before;
+}
+
+async function riskyDownloadStep(page, browser) {
+  const obs = await downloadObserver(browser);
+  await openTheRiskyMessage(page);
+
+  // ---- 0. the control FIRST: an ordinary PDF downloads with no question -------
+  // The download is observed by the same observer used for every absence below.
+  {
+    const link = await attachmentLink(page, "statement.pdf");
+    const before = obs.begun.length;
+    await link.click();
+    let asked = false;
+    const t0 = Date.now();
+    while (obs.begun.length === before && Date.now() - t0 < 20000) {
+      if (await dialogOpen(page)) asked = true;
+      await sleep(100);
+    }
+    if (asked || (await dialogOpen(page))) {
+      throw new Fail(34, "RISKY the ordinary PDF (statement.pdf) asked a risky-file question");
+    }
+    const got = obs.begun.slice(before);
+    if (got.length !== 1 || got[0].name !== "statement.pdf") {
+      throw new Fail(
+        34,
+        "RISKY CONTROL: statement.pdf's download was not observed (saw " + JSON.stringify(got) +
+          "), so nothing below that says `nothing was downloaded` can be trusted",
+      );
+    }
+    console.log("risky control: statement.pdf downloaded with no question, observed as " + JSON.stringify(got[0].name));
+  }
+
+  // ---- 1. setup.exe: asks, Cancel is focused ------------------------------------
+  await askAbout(page, "setup.exe");
+  const st = await riskyDialogState(page);
+  if (st.role !== "alertdialog" || st.name !== "Download setup.exe?") {
+    throw new Fail(34, "RISKY the question is announced as " + st.role + ' "' + st.name + '", want alertdialog "Download setup.exe?"');
+  }
+  if (!st.inside || st.text !== "Cancel") {
+    throw new Fail(34, "RISKY focus is not on Cancel when the question opens (inside=" + st.inside + ' on "' + st.text + '")');
+  }
+  if (st.buttons.join("|") !== "Cancel|Download anyway") {
+    throw new Fail(34, "RISKY the question's buttons are " + JSON.stringify(st.buttons));
+  }
+  const programSentence = st.body;
+  if (!programSentence.trim()) throw new Fail(34, "RISKY the question gives no reason");
+  // Nothing was fetched or saved merely by asking.
+  let n = await downloadsDuring(obs, 1500);
+  if (n !== 0) throw new Fail(34, "RISKY asking about setup.exe started " + n + " download(s)");
+
+  // ---- 2. Cancel downloads nothing, and puts focus back -----------------------
+  await page.click('[role="alertdialog"] button.button:not(.button-danger)');
+  await dialogGone(page, "Cancel closed the question");
+  n = await downloadsDuring(obs, 2000);
+  if (n !== 0) throw new Fail(34, "RISKY Cancel still downloaded setup.exe (" + n + " download(s))");
+  const back = await page.evaluate(() => {
+    const a = document.activeElement;
+    const li = a && a.closest("li");
+    const nm = li && li.querySelector(".attachment-name");
+    return nm ? nm.textContent : null;
+  });
+  if (back !== "setup.exe") {
+    throw new Fail(34, "RISKY after Cancel focus is not back on the setup.exe link (on " + JSON.stringify(back) + ")");
+  }
+
+  // ---- 3. Escape downloads nothing either -------------------------------------
+  await askAbout(page, "setup.exe");
+  await page.keyboard.press("Escape");
+  await dialogGone(page, "Escape closed the question");
+  n = await downloadsDuring(obs, 2000);
+  if (n !== 0) throw new Fail(34, "RISKY Escape still downloaded setup.exe (" + n + " download(s))");
+  // ⚠ ONE LAYER FOR ONE PRESS. The shell's own Escape closes the open message; a
+  // question that cancels and lets the keystroke through takes the message the
+  // person was reading with it. (This lane found exactly that.)
+  if (!(await riskyMessageOpen(page))) {
+    throw new Fail(34, "RISKY Escape on the question also closed the open message (url " + (await page.evaluate(() => location.hash)) + ")");
+  }
+
+  // ---- 4. invoice.pdf.exe asks too, with its own sentence ---------------------
+  await askAbout(page, "invoice.pdf.exe");
+  const st2 = await riskyDialogState(page);
+  if (st2.name !== "Download invoice.pdf.exe?" || st2.text !== "Cancel") {
+    throw new Fail(34, "RISKY invoice.pdf.exe's question is " + JSON.stringify({ name: st2.name, focus: st2.text }));
+  }
+  if (!st2.body.trim() || st2.body === programSentence) {
+    throw new Fail(34, "RISKY invoice.pdf.exe (disguised) got the same sentence as a program: " + JSON.stringify(st2.body));
+  }
+  await page.click('[role="alertdialog"] button.button:not(.button-danger)');
+  await dialogGone(page, "Cancel closed the invoice.pdf.exe question");
+  n = await downloadsDuring(obs, 2000);
+  if (n !== 0) throw new Fail(34, "RISKY Cancel on invoice.pdf.exe still downloaded it (" + n + ")");
+
+  // ---- 5. "Download anyway" downloads ------------------------------------------
+  await askAbout(page, "setup.exe");
+  const before = obs.begun.length;
+  await page.click('[role="alertdialog"] button.button-danger');
+  await dialogGone(page, "Download anyway closed the question");
+  await until("Download anyway started a download of setup.exe", 20000, () => obs.begun.length > before, 34);
+  const got = obs.begun.slice(before);
+  if (got.length !== 1 || got[0].name !== "setup.exe") {
+    throw new Fail(34, "RISKY Download anyway produced " + JSON.stringify(got) + ", want exactly setup.exe");
+  }
+  console.log("risky: setup.exe asked (Cancel focused), Cancel and Escape downloaded nothing, Download anyway downloaded it; invoice.pdf.exe asked");
+
+  await obs.session.send("Browser.setDownloadBehavior", { behavior: "default" }).catch(() => {});
+  await obs.session.detach().catch(() => {});
+  tally.risky += 1;
+}
+
+/** The open question, for the lane's screenshots: light and dark, desktop and phone. */
+async function riskyScreenshots(page) {
+  if (!SHOTS) return;
+  const sizes = [
+    ["desktop", { width: 1680, height: 1100, deviceScaleFactor: 1, isMobile: false, hasTouch: false }],
+    ["phone", { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true }],
+  ];
+  for (const theme of [THEMES[0], THEMES[1]]) {
+    await chooseTheme(page, theme);
+    for (const [label, vp] of sizes) {
+      await page.setViewport(vp);
+      await openTheRiskyMessage(page);
+      await askAbout(page, "setup.exe");
+      await sleep(400);
+      const file = "risky-dialog-" + theme.name + "-" + label;
+      await page.screenshot({ path: "/tmp/shots/" + file + ".png" });
+      console.log("shot " + file);
+      await page.keyboard.press("Escape");
+      await dialogGone(page, "the question closed after the screenshot");
+    }
+  }
+  await page.setViewport({ width: 1680, height: 1100, deviceScaleFactor: 1, isMobile: false, hasTouch: false });
+  await chooseTheme(page, THEMES[0]);
+}
+
+// ---- the re-check on open ---------------------------------------------------
+
+const EICAR_HEAD = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD";
+
+async function fetchPart(page, path) {
+  return page.evaluate(async (p) => {
+    const r = await fetch(p, { credentials: "include" });
+    const text = await r.text();
+    return {
+      status: r.status,
+      scan: r.headers.get("x-mailroom-attachment-scan"),
+      length: text.length,
+      head: text.slice(0, 60),
+    };
+  }, path);
+}
+
+async function rescanOnOpenStep(page) {
+  const R = FIX.rescan;
+  const show = (r) => JSON.stringify({ status: r.status, scan: r.scan, head: r.head.slice(0, 24) });
+  const bad = (what) => {
+    throw new Fail(35, "RESCAN " + what);
+  };
+  // A page on the app's origin carries the session.
+  await load(page, "#/all");
+  await waitForSelectorD(page, "ul.messages", { timeout: 30000 });
+
+  // CONTROL A: the SAME string on mail from last week (outside the over-six-months
+  // band), stored `clean` at the current version. Served. If this were refused, the
+  // refusal below could be something that has nothing to do with the re-scan.
+  const a = await fetchPart(page, R.recentCurrent.attachments[0].path);
+  if (a.status !== 200 || a.head.indexOf(EICAR_HEAD) !== 0) {
+    bad("control A (EICAR on recent mail, verdict current) was not served as its own bytes: " + show(a));
+  }
+  // CONTROL B: the SAME string, in the old band, stored `clean` at the CURRENT
+  // version. Served: being old does not ask for a re-scan, being BEHIND does.
+  const b = await fetchPart(page, R.oldCurrent.attachments[0].path);
+  if (b.status !== 200 || b.head.indexOf(EICAR_HEAD) !== 0) {
+    bad("control B (EICAR on old mail, verdict current) was not served as its own bytes: " + show(b));
+  }
+  console.log("rescan controls: the string is served on recent mail (A) and on old mail with a current verdict (B)");
+
+  // THE HARMLESS FILE: old, stale, fine. Served, and (checked from the database
+  // after the run) its stored version is brought up to date.
+  const h = await fetchPart(page, R.oldHarmless.attachments[0].path);
+  if (h.status !== 200 || h.head.indexOf("Quarterly figures") !== 0) {
+    bad("the harmless old attachment was not served: " + show(h));
+  }
+
+  // THE CASE UNDER TEST: old, stale `clean`, and the bytes are the EICAR string.
+  const e = await fetchPart(page, R.oldStale.attachments[0].path);
+  if (e.status !== 403 || e.scan !== "flagged") {
+    bad(
+      "the old EICAR attachment under a stale `clean` verdict was NOT refused as flagged: " + show(e) +
+        " — the open-time re-scan did not run before the quarantine gate read the stored verdict",
+    );
+  }
+  if (e.head.indexOf("X5O!") === 0) bad("the refusal still carried the bytes");
+  // The refusal is stored: a second request is refused from the verdict, with no
+  // new scan.
+  const e2 = await fetchPart(page, R.oldStale.attachments[0].path);
+  if (e2.status !== 403 || e2.scan !== "flagged") bad("the second request was not refused: " + show(e2));
+  console.log("rescan: old EICAR refused 403 (flagged), twice; harmless old file served 200");
+
+  // WHAT THE PRODUCT SHOWS for the verdict the re-scan wrote: the message, opened
+  // now, holds the file back (the withheld chip) instead of offering a download.
+  await load(page, "#/all?m=" + R.oldStale.id);
+  await waitForSelectorD(page, "aside.thread-pane", { timeout: 30000 });
+  await waitForSelectorD(page, ".attachment-withheld", { timeout: 30000 });
+  const chip = await axSnapshot(page, ".attachment-withheld");
+  if (!chip || chip.role !== "group" || chip.name !== "sample-file.txt — withheld") {
+    bad("the opened message does not hold the file back as a withheld chip: " + JSON.stringify(chip && { role: chip.role, name: chip.name }));
+  }
+  tally.rescan += 1;
+}
+
 async function main() {
   console.log(
     "fixture accountId=" +
@@ -7624,6 +7994,12 @@ async function main() {
     // (#759), and the folded pane is now linted on purpose by foldedSurfaces.
     await outOfOfficeSurfaces(page, cdp);
     await foldedSurfaces(page, cdp);
+    // The v1.103 hardening (ADR-056): the risky-file question, then the re-check
+    // on open against the real clamd. Both before anything else that could open
+    // the re-check messages (nothing else does).
+    await riskyDownloadStep(page, browser);
+    await riskyScreenshots(page);
+    await rescanOnOpenStep(page);
     await inviteSurfaces(page, cdp);
     await followUpSurfaces(page, cdp);
     // Keys before the phone-width pass, which measures the keys page and the
@@ -7738,6 +8114,10 @@ async function main() {
         (tally.oauth ? "ok" : "NOT-RUN") +
         " composer_editor=" +
         (tally.composerEditor ? "ok" : "NOT-RUN") +
+        " risky_question=" +
+        (tally.risky ? "ok" : "NOT-RUN") +
+        " rescan_on_open=" +
+        (tally.rescan ? "ok" : "NOT-RUN") +
         " composer_quote=" +
         (tally.quote >= 3 ? "ok" : "NOT-RUN") +
         " axe_version=" +
