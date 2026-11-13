@@ -2006,6 +2006,28 @@ kc_node import
 kc_deliver vera.eml rhea.eml wren.eml pia.eml cora.eml wren-revoke.eml
 kc_node decide
 kc_deliver pia-revoke.eml cora-revoke.eml
+
+# WHAT AUTHENTICATED MAIL WOULD HAVE LEFT BEHIND, for the composer. Encrypting is
+# only ever to an ELIGIBLE key (ADR-038): imported, WKD, or Autocrypt from mail that
+# was authenticated for its From domain, and an imported key outranks the rest, so
+# a user who imported the old key is never asked about a new Autocrypt one at all.
+# The prompt the composer shows is for the user whose old key came in on
+# authenticated mail and whose new key does too, so that is the state written: for
+# vera and rhea both keys are authenticated Autocrypt keys, the new one the more
+# recently fetched; for wren (whose old key is revoked and so cannot be encrypted
+# to) the new one is. It is written here, as the database owner, because an
+# authenticated Autocrypt header needs a TRUSTED Authentication-Results identity,
+# and configuring one would change learned placement for every message in this
+# lane (internal/ingest: autocryptAuthenticated). The reader's side needs none of
+# this and is untouched by it. The lookup below measures the result.
+kc_fp() { awk -v n="$1" -v w="$2" '$1==n && $2==w {print $3}' "$KCDIR/fingerprints.txt"; }
+KC_SQL="$(pgq "
+  UPDATE app.contact_keys SET source = 'autocrypt', authenticated = true, fetched_at = now() - interval '30 days'
+   WHERE fingerprint IN ('$(kc_fp vera old)', '$(kc_fp rhea old)');
+  UPDATE app.contact_keys SET source = 'autocrypt', authenticated = true, fetched_at = now()
+   WHERE fingerprint IN ('$(kc_fp vera new)', '$(kc_fp rhea new)', '$(kc_fp wren new)');
+  SELECT 'ok'" | tail -1)"
+[ "$KC_SQL" = "ok" ] || { echo "A11Y E2E FAILED: could not write the authenticated-key state" >&2; exit 5; }
 kc_node assert
 [ -s "$WORK/keychange.json" ] || { echo "A11Y E2E FAILED: the rotated-key fixture wrote no manifest" >&2; exit 5; }
 
