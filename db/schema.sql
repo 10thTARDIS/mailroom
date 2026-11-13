@@ -1590,6 +1590,11 @@ CREATE INDEX writeback_pending ON app.writeback_intents (account_id, created_at)
   WHERE state IN ('pending', 'inflight');
 CREATE INDEX writeback_dead ON app.writeback_intents (user_id, created_at)
   WHERE state = 'dead';
+-- The ingest-only ledger (ADR-028 A6, migration 00098): SuppressedIntentCount
+-- runs on every Account/getHealth poll and the writeback-ledger report reads
+-- the same rows. Leads with user_id; the predicate must match the queries'.
+CREATE INDEX writeback_suppressed ON app.writeback_intents (user_id, account_id)
+  WHERE state = 'suppressed';
 
 -- One durable job table for every timer in the product (spec §16):
 -- snooze wake-ups, delayed submission (Undo Send / send-later), trash purge,
