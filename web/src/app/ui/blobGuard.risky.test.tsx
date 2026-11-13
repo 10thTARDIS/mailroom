@@ -114,6 +114,28 @@ describe("a risky download asks first (ADR-056)", () => {
     expect(clicked).toEqual([]);
   });
 
+  it("Escape cancels the question WITHOUT also reaching the shell, which would close the open message", async () => {
+    // The shell's Escape is a window-level listener; React's root sits inside
+    // window, so an unstopped keystroke arrives there after the dialog has acted.
+    const reachedShell = vi.fn();
+    window.addEventListener("keydown", reachedShell);
+    try {
+      userClick(render(part("2", "application/octet-stream", "setup.exe", "program")));
+      await settle();
+      dialog()!.parentElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await settle();
+      expect(dialog()).toBeNull();
+      expect(reachedShell).not.toHaveBeenCalled();
+
+      // CONTROL: the listener does see an Escape that nothing stops, so
+      // "not called" above is not a listener that could never fire.
+      host.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(reachedShell).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", reachedShell);
+    }
+  });
+
   it("downloads on Download anyway", async () => {
     userClick(render(part("2", "application/octet-stream", "setup.exe", "program")));
     await settle();

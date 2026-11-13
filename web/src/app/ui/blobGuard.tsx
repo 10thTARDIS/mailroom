@@ -206,7 +206,21 @@ export function RiskyDownloadDialog({ guard }: { guard: BlobGuard }): JSX.Elemen
   const { name, reason } = guard.pending;
   const title = t("attachment.risky.title", { name: stripBidiControls(name) });
   return (
-    <div className="modal-backdrop" onKeyDown={(e) => e.key === "Escape" && guard.cancelRisky()}>
+    <div
+      className="modal-backdrop"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        // ⚠ STOPPED HERE, NOT LEFT TO BUBBLE. The shell owns one window-level
+        // Escape chain (ui/Shell.tsx) that peels a ROUTE, i.e. closes the open
+        // message. A question that cancelled itself and let the keystroke
+        // through would close the message the person was reading behind it:
+        // two layers for one press (the bug PaneToolbar's menu and routing.ts's
+        // consumeEscape exist because of). Found by the accessibility lane,
+        // which pressed Escape on this dialog in a real browser.
+        e.stopPropagation();
+        guard.cancelRisky();
+      }}
+    >
       <div
         className="sheet"
         role="alertdialog"
