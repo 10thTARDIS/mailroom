@@ -891,8 +891,9 @@ see, and expects it to reach the server), and the opposite of ingest-only mode,
 which exists because the user does not want it to. A characterization test pins
 the behaviour so a change to it is a visible decision. **The operator may want
 to revisit this**: a long pause on a large mailbox fires its whole backlog in one
-drain, and the only defence today is that the pending count is visible in
-`Account/getHealth`.
+drain, and the only visibility today is the `mailroom_action_queue_depth` metric; the
+account health panel does not show the pending count. Showing it there would be
+the cheap mitigation if the decision is revisited.
 
 ## References
 
