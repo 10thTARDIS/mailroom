@@ -777,6 +777,17 @@ for a reviving caller, and as it treats `suppressed` for the upgrade arm. Withou
 that the purge sweep's deterministic key would be eaten by a row that no longer
 means anything, and its message would never be expunged.
 
+*The audit of every `state` predicate over `app.writeback_intents`*, which §4's
+migration note requires for a new value: the queue-depth count, the pending
+count, the claim, the suppression sweep, the draft-append cancel and the purge
+withdrawal all name their states and correctly exclude `discarded`; the blob
+reclaim guard (`hashesWithLiveWriteback`) lists `pending`, `inflight` and
+`suppressed`, so a discarded APPEND's bytes become reclaimable, which is right
+because it will never be replayed. One predicate treats it conservatively rather
+than correctly: the duplicate-collapse blocker is `state <> 'applied'`, so a
+message with a discarded intent is not collapsed, exactly as one with a
+`suppressed` or `dead` intent is not. That is left alone.
+
 `--discard` and `--apply` without `--discard` are different commands over the
 same rows and are never combined: replay moves rows to `pending`, discard moves
 them to `discarded`.
