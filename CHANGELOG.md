@@ -9,6 +9,19 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Fixes
+
+- **Escape closes only the question you are answering.** Pressing Escape on the risky-file
+  question, the confirmation for releasing a withheld attachment, the snippet picker or the
+  send-later chooser in the composer, or the add-account wizard used to close the message or
+  the draft behind it as well. It now closes just that question.
+
+### Under the hood
+
+- The automated browser checks now cover this release's attachment and image work end to
+  end: the risky-file question in a real browser, old attachments re-checked against a real
+  virus scanner, and newsletter images loaded through the real image proxy.
+
 ## [1.103.0-beta.1] — 2026-11-10
 
 **The first beta of v1.103, which hardens how Mailroom handles incoming mail.** Attachments on

@@ -289,7 +289,11 @@ export function AddAccountWizard({
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === "Escape") close();
+    if (e.key !== "Escape") return;
+    // Stopped, not left to bubble: the shell's window-level Escape would
+    // otherwise also peel a layer of the route behind the wizard.
+    e.stopPropagation();
+    close();
   };
 
   return (

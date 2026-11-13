@@ -1937,7 +1937,13 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
       </form>
 
       {snippetPicker ? (
-        <div className="modal-backdrop" onKeyDown={(e) => e.key === "Escape" && setSnippetPicker(null)}>
+        <div className="modal-backdrop" onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          // Stopped, not left to bubble: the shell's window-level Escape would
+          // otherwise also peel a layer (close the message or the composer).
+          e.stopPropagation();
+          setSnippetPicker(null);
+        }}>
           <SnippetPicker
             kind={snippetPicker}
             snippets={snippets}
@@ -1982,7 +1988,13 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
       ) : null}
 
       {sendLaterOpen ? (
-        <div className="modal-backdrop" onKeyDown={(e) => e.key === "Escape" && setSendLaterOpen(false)}>
+        <div className="modal-backdrop" onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          // Stopped, not left to bubble: the shell's window-level Escape would
+          // otherwise also peel a layer (close the message or the composer).
+          e.stopPropagation();
+          setSendLaterOpen(false);
+        }}>
           <SendLaterMenu
             maxDelayedSendSeconds={maxDelayedSendSeconds}
             onClose={() => setSendLaterOpen(false)}

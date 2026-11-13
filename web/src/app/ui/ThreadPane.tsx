@@ -672,7 +672,13 @@ function ReleaseConfirmDialog({
     cancelRef.current?.focus();
   }, []);
   return (
-    <div className="modal-backdrop" onKeyDown={(e) => e.key === "Escape" && onCancel()}>
+    <div className="modal-backdrop" onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          // Stopped, not left to bubble: the shell's window-level Escape would
+          // otherwise also peel a layer (close the message or the composer).
+          e.stopPropagation();
+          onCancel();
+        }}>
       <div
         className="sheet"
         role="alertdialog"

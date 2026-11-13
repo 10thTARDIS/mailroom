@@ -56,3 +56,14 @@ declare module "*.json?raw" {
   const text: string;
   export default text;
 }
+
+// And for EVERY component's source at once (#23): ui/modalEscape.source.test.ts
+// scans each .tsx with a modal backdrop and asserts its Escape handler stops the
+// keystroke, so a modal added later is checked without being listed. Vite's own
+// glob, resolved by vitest through the same transform; no @types/node.
+interface ImportMeta {
+  glob(
+    patterns: string | string[],
+    options: { query: "?raw"; import: "default"; eager: true },
+  ): Record<string, string>;
+}
