@@ -384,6 +384,16 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 // order EnqueueIntent was called. COLLATE "C" because app.ulid is text and the
 // ULID alphabet only sorts by time under byte order.
 //
+// ⚠ THE SELECTION IS A MATERIALIZED CTE, NOT `id IN (SELECT ... LIMIT)` (ADR-028
+// amendment A9). With the subselect inline, a claim of 10 against 30 pending rows
+// MEASURED as 19 rows claimed: all moved to inflight, all with attempts
+// incremented, and the LIMIT not honoured. The mechanism is INFERRED, not traced:
+// Postgres is free to run a locking subselect more than once under an IN, and the
+// fix (MATERIALIZED forces a single evaluation) removes the symptom. Nothing in
+// production noticed because a queue rarely exceeds the batch size; a replayed
+// ledger is the queue that does. TestClaimOrderFollowsCreatedAtNotInsertionOrder
+// asserts the bound.
+//
 // ⚠ AND THE ORDER BY HAS TO BE ON THE OUTSIDE. The inner one only chooses
 // WHICH rows the LIMIT claims; an UPDATE ... RETURNING hands its rows back in
 // whatever order it happened to update them, which is not the subquery's.
@@ -393,18 +403,20 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 // governed application order at all.
 func (tx *UserTx) ClaimPendingIntents(ctx context.Context, accountID ulid.ULID, limit int) ([]Intent, error) {
 	rows, err := tx.tx.Query(ctx, `
-		WITH claimed AS (
+		WITH picked AS MATERIALIZED (
+			SELECT id FROM app.writeback_intents
+			 WHERE user_id = $1 AND account_id = $2
+			   AND (state = 'pending'
+			        OR (state = 'inflight' AND claimed_at IS NOT NULL
+			            AND claimed_at < now() - interval '15 minutes'))
+			 ORDER BY created_at, id COLLATE "C"
+			   FOR UPDATE SKIP LOCKED
+			 LIMIT $3
+		), claimed AS (
 			UPDATE app.writeback_intents w
 			   SET state = 'inflight', attempts = attempts + 1, claimed_at = now()
-			 WHERE w.id IN (
-				SELECT id FROM app.writeback_intents
-				 WHERE user_id = $1 AND account_id = $2
-				   AND (state = 'pending'
-				        OR (state = 'inflight' AND claimed_at IS NOT NULL
-				            AND claimed_at < now() - interval '15 minutes'))
-				 ORDER BY created_at, id COLLATE "C"
-				   FOR UPDATE SKIP LOCKED
-				 LIMIT $3)
+			  FROM picked p
+			 WHERE w.id = p.id AND w.user_id = $1
 			RETURNING w.id, w.message_id, w.account_id, w.op, w.payload,
 			          w.idempotency_key, w.state, w.attempts,
 			          COALESCE(w.last_error, '') AS last_error,
