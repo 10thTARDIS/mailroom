@@ -9,6 +9,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.103.0-beta.2] — 2026-11-13
+
+**The second beta of v1.103 fixes Escape in confirmation questions.** Pressing Escape on the
+risky-file question, or on four other small dialogs, used to close the message or draft behind
+it as well; now it closes just the question. The automated browser checks found it while
+proving this release's attachment and image work end to end.
+
 ### Fixes
 
 - **Escape closes only the question you are answering.** Pressing Escape on the risky-file
