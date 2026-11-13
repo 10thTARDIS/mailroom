@@ -258,6 +258,27 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 	// 'suppressed', so Revive (the purge worker's re-enqueue) cannot resurrect
 	// the ledger either.
 	//
+	// ⚠ THE ACCOUNT READ IS A LOCKING READ (`FOR KEY SHARE`), AND THAT CLOSES THE
+	// RACE ADR-028 §4 USED TO DESCRIBE AS TRACKED (amendment A8). Without it this
+	// statement decided pending-versus-suppressed from its own snapshot and only
+	// afterwards took KEY SHARE on the account row through the foreign key. That
+	// lock conflicts with UpdateAccount's FOR UPDATE, so an enqueue that began
+	// before the mode was switched on would block mid-statement, be invisible to
+	// the SuppressAccountIntents in the switching transaction (the row does not
+	// exist yet), and land 'pending' on an account that is by then shadowed.
+	//
+	// With the lock taken by the read itself, in READ COMMITTED a row that was
+	// concurrently updated is re-read at its NEW version once the lock is granted.
+	// So either order is correct: an enqueue that gets the lock first commits
+	// before UpdateAccount can run, and the SuppressAccountIntents that follows it
+	// sees the row; one that waits reads the new flag and is born suppressed.
+	//
+	// KEY SHARE is the mode the foreign key already takes, and it conflicts only
+	// with FOR UPDATE, so enqueuers do not block each other and an enqueue waits
+	// only while an Account/set is in flight. The drain-side self-heal stays: it
+	// also covers booting with the instance flag over rows already pending, which
+	// no enqueue-side lock can.
+	//
 	// ⚠ A 'discarded' ROW NEVER SWALLOWS A LATER REQUEST (ADR-028 A3). Discarding
 	// is the operator's decision about the rows that existed THEN; the same
 	// deterministic key arriving afterwards is a new request, and answering it with
@@ -281,7 +302,8 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 		WITH wb AS (
 			SELECT COALESCE((SELECT a.writeback_enabled AND NOT `+gmailWritebackHeldSQL+`
 			                   FROM app.accounts a
-			                  WHERE a.id = $4 AND a.user_id = $2), false)
+			                  WHERE a.id = $4 AND a.user_id = $2
+			                    FOR KEY SHARE OF a), false)
 			       AND NOT $9::boolean AS live
 		)
 		INSERT INTO app.writeback_intents AS w
