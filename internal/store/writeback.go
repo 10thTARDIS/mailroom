@@ -810,6 +810,13 @@ type SuppressedIntentRow struct {
 	// "unknown" by the report rather than folded into any named source.
 	Source string
 	Count  int64
+	// Stale is how many of Count are STALE (ledgerStaleSQL): the message gained a
+	// live copy in this account after the intent was created. --apply skips them.
+	Stale int64
+	// Superseded is how many of Count are SUPERSEDED (ledgerSupersededSQL): a
+	// later APPEND of the same message into the same mailbox exists. --apply
+	// skips them.
+	Superseded int64
 }
 
 // SuppressedIntentsByOpAndSource breaks an account's shadow ledger down by BOTH
@@ -829,11 +836,13 @@ type SuppressedIntentRow struct {
 // is the failure the op-only version already guards against by name.
 func (tx *UserTx) SuppressedIntentsByOpAndSource(ctx context.Context, accountID ulid.ULID) ([]SuppressedIntentRow, error) {
 	rows, err := tx.tx.Query(ctx, `
-		SELECT op, COALESCE(source, ''), count(*)
-		  FROM app.writeback_intents
-		 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'
-		 GROUP BY op, source
-		 ORDER BY op, source`,
+		SELECT w.op, COALESCE(w.source, ''), count(*),
+		       count(*) FILTER (WHERE `+ledgerStaleSQL+`),
+		       count(*) FILTER (WHERE `+ledgerSupersededSQL+`)
+		  FROM app.writeback_intents w
+		 WHERE w.user_id = $1 AND w.account_id = $2 AND w.state = 'suppressed'
+		 GROUP BY w.op, w.source
+		 ORDER BY w.op, w.source`,
 		tx.userID.String(), accountID.String())
 	if err != nil {
 		return nil, fmt.Errorf("writeback: suppressed intents by op and source: %w", err)
@@ -842,7 +851,7 @@ func (tx *UserTx) SuppressedIntentsByOpAndSource(ctx context.Context, accountID 
 	var out []SuppressedIntentRow
 	for rows.Next() {
 		var r SuppressedIntentRow
-		if err := rows.Scan(&r.Op, &r.Source, &r.Count); err != nil {
+		if err := rows.Scan(&r.Op, &r.Source, &r.Count, &r.Stale, &r.Superseded); err != nil {
 			return nil, fmt.Errorf("writeback: scan suppressed intent bucket: %w", err)
 		}
 		out = append(out, r)

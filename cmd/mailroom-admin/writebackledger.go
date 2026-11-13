@@ -243,9 +243,10 @@ func printWritebackLedgerBySource(buckets []store.SuppressedIntentRow) {
 	if len(buckets) == 0 {
 		return
 	}
-	fmt.Printf("\n%-10s %-10s %8s\n", "OP", "SOURCE", "COUNT")
-	fmt.Println(strings.Repeat("-", 30))
-	var unknownSource int64
+	const width = 62
+	fmt.Printf("\n%-10s %-10s %8s %8s %11s\n", "OP", "SOURCE", "COUNT", "STALE", "SUPERSEDED")
+	fmt.Println(strings.Repeat("-", width))
+	var unknownSource, stale, superseded int64
 	for _, b := range buckets {
 		src := b.Source
 		if src == "" {
@@ -255,11 +256,31 @@ func printWritebackLedgerBySource(buckets []store.SuppressedIntentRow) {
 			src = "unknown"
 			unknownSource += b.Count
 		}
-		fmt.Printf("%-10s %-10s %8d\n", b.Op, src, b.Count)
+		stale += b.Stale
+		superseded += b.Superseded
+		fmt.Printf("%-10s %-10s %8d %8d %11d\n", b.Op, src, b.Count, b.Stale, b.Superseded)
 	}
-	fmt.Println(strings.Repeat("-", 30))
+	fmt.Println(strings.Repeat("-", width))
 	if unknownSource > 0 {
 		fmt.Printf("%d intent(s) predate the source column (migration 00057) and cannot be\n"+
 			"attributed. They are NOT counted as user actions.\n", unknownSource)
 	}
+	printWritebackLedgerFindings(stale, superseded)
+}
+
+// printWritebackLedgerFindings explains the two judgements the table's last
+// columns make (ADR-028 amendments A2 and A4). Both counts are always printed,
+// including as 0, because an absent line cannot be told from a check that did
+// not run (CLAUDE.md: "a bounded or empty result must report its bound").
+//
+// The definitions are printed rather than left to the ADR, because the number is
+// read by someone deciding whether to replay, at a prompt, with the ADR closed.
+func printWritebackLedgerFindings(stale, superseded int64) {
+	fmt.Printf("\nSTALE      %6d  intent(s) whose message gained a live copy in this account AFTER the\n"+
+		"                  intent was created (another client filed, copied or moved it, or the folder\n"+
+		"                  was recreated). Replay applies an intent to wherever the copy is NOW, so a\n"+
+		"                  stale move can undo filing done since. Judged for move, +flag, -flag, +kw\n"+
+		"                  and -kw only. It does not see a copy that merely changed flags.\n", stale)
+	fmt.Printf("SUPERSEDED %6d  append(s) with a LATER append of the same message into the same\n"+
+		"                  mailbox: they would file a version of the draft the user has since replaced.\n", superseded)
 }

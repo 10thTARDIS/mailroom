@@ -67,3 +67,45 @@ func TestWritebackShadowReasonNamesBothSwitches(t *testing.T) {
 		})
 	}
 }
+
+// TestLedgerReportPrintsStaleAndSupersededPerBucket: the stale and superseded
+// counts appear beside every (op, source) bucket, including as zero, and the
+// legend that says what they mean is always printed.
+//
+// ⚠ ZERO IS PRINTED, NOT OMITTED. A report that only mentions "stale" when it is
+// non-zero cannot be told apart from a build that never looked; the legend line
+// carrying a 0 is the proof that the check ran (CLAUDE.md: "a bounded or empty
+// result must report its bound").
+//
+// NEGATIVE CONTROL: stop printing the two columns or the legend and the
+// assertions below fail.
+func TestLedgerReportPrintsStaleAndSupersededPerBucket(t *testing.T) {
+	out := captureStdout(t, func() {
+		printWritebackLedgerBySource([]store.SuppressedIntentRow{
+			{Op: "move", Source: "user", Count: 5, Stale: 2},
+			{Op: "append", Source: "draft", Count: 3, Superseded: 1},
+			{Op: "+kw", Source: "", Count: 7},
+		})
+	})
+	for _, want := range []string{
+		"STALE", "SUPERSEDED",
+		"move       user              5        2           0",
+		"append     draft             3        0           1",
+		"+kw        unknown           7        0           0",
+		"STALE           2  intent(s)",
+		"SUPERSEDED      1  append(s)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report does not contain %q:\n%s", want, out)
+		}
+	}
+	// Zero findings still print the legend, with the zeros.
+	none := captureStdout(t, func() {
+		printWritebackLedgerBySource([]store.SuppressedIntentRow{{Op: "move", Source: "user", Count: 1}})
+	})
+	for _, want := range []string{"STALE           0  intent(s)", "SUPERSEDED      0  append(s)"} {
+		if !strings.Contains(none, want) {
+			t.Errorf("a clean ledger must still say it checked; missing %q:\n%s", want, none)
+		}
+	}
+}
