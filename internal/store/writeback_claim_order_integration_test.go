@@ -36,8 +36,20 @@ import (
 //   - the order they come back in (the outer ORDER BY): created_at.
 //
 // PROBES (run, red, reverted): remove the OUTER `ORDER BY created_at, id` and the
-// order assertion fails; remove the INNER one and the membership assertion fails.
+// order assertion fails; remove the INNER one and the membership assertion fails
+// (in the "index scans disabled" case only: see the comment on the test).
 func TestClaimOrderFollowsCreatedAtNotInsertionOrder(t *testing.T) {
+	// ⚠ TWO PLANS, BECAUSE ONE OF THEM HIDES THE INNER ORDER BY. With the planner
+	// free, writeback_pending (account_id, created_at) serves the selection in
+	// created_at order whether or not the query asks for it, so deleting the inner
+	// ORDER BY left this test green. (Measured: that probe passed.) Disabling index
+	// scans forces the heap order the clause exists to override.
+	t.Run("planner free", func(t *testing.T) { claimOrderCase(t, false) })
+	t.Run("index scans disabled", func(t *testing.T) { claimOrderCase(t, true) })
+}
+
+func claimOrderCase(t *testing.T, noIndex bool) {
+	t.Helper()
 	f := newLedgerFx(t)
 	ctx := context.Background()
 	base := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
@@ -67,6 +79,12 @@ func TestClaimOrderFollowsCreatedAtNotInsertionOrder(t *testing.T) {
 
 	var got []ulid.ULID
 	if err := f.h.appStore().UserTx(ctx, f.uid, func(tx *UserTx) error {
+		if noIndex {
+			if _, err := tx.tx.Exec(ctx, `SET LOCAL enable_indexscan = off;
+				SET LOCAL enable_bitmapscan = off; SET LOCAL enable_indexonlyscan = off`); err != nil {
+				return err
+			}
+		}
 		ins, err := tx.ClaimPendingIntents(ctx, f.acct, 10)
 		for _, in := range ins {
 			got = append(got, in.ID)
