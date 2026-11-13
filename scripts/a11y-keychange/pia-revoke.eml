@@ -1,0 +1,21 @@
+From: Pia Previous <pia@example.org>
+To: Reader <reader@example.com>
+Subject: A note about my old key (pia)
+Message-ID: <kc-pia-revoke@example.test>
+Date: Wed, 21 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=pia@example.org; keydata=
+ mDMEam3DoBYJKwYBBAHaRw8BAQdAQF+vWO7+bjz37gsbKSl/nchsLvmGustO0JLnmtLBNSOI
+ jAQgFgoANBYhBDfsGI4aBJ10SFssFHoigvepCMXKBQJq0KQgFh0DU3ludGhldGljIHJldm9j
+ YXRpb24ACgkQeiKC96kIxcoIvAEA3Zzhkrcxta3GEQy/TAQf33Bkq1lIjJ5Bg6w8+sC4UnwB
+ APWLlhrKWSl4QI4N/ZlKbXZif7Z40Otrk1E402kFp94OtB5QaWEgUHJldmlvdXMgPHBpYUBl
+ eGFtcGxlLm9yZz6IkwQTFgoAOxYhBDfsGI4aBJ10SFssFHoigvepCMXKBQJqbcOgAhsDBQsJ
+ CAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEHoigvepCMXKEokA/1mudfZCP7GSMYfHxs9C
+ Og1VmKUNFTFsnr1vo0Y6CJuqAP0d+A3A6MRULs86GbhjIpwH3Jv91DEyJlgQBo74VxK3D7g4
+ BGptw6ASCisGAQQBl1UBBQEBB0AgMtXJjNKTjkSwX9drBN7eFyB5jOv6XBiVHEyIbFaDNgMB
+ CAeIeAQYFgoAIBYhBDfsGI4aBJ10SFssFHoigvepCMXKBQJqbcOgAhsMAAoJEHoigvepCMXK
+ 25QBAKNG5c8+6rceWST4rjOkxCMzgolCbvg36NuG3Kxm843AAQDzIzIdjiUxGfAVjl5lZLN6
+ Lr/+xjcQYGXBhAhKmQ1QAw==
+Content-Type: text/plain; charset=utf-8
+
+My old key is no longer in use.

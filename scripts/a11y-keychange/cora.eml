@@ -1,0 +1,34 @@
+From: Cora Compromised <cora@example.org>
+To: Reader <reader@example.com>
+Subject: Signed note from Cora Compromised
+Message-ID: <kc-cora@example.test>
+Date: Tue, 20 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=cora@example.org; keydata=
+ mDMEapfzoBYJKwYBBAHaRw8BAQdAtW7NigIk/96u2C5ML2FLhVkvXK5KX+67bo6RLPF6NJO0
+ I0NvcmEgQ29tcHJvbWlzZWQgPGNvcmFAZXhhbXBsZS5vcmc+iJMEExYKADsWIQTslBj8GCSn
+ wpRkGL4vzoIEO7k9gwUCapfzoAIbAwULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRAv
+ zoIEO7k9g8l5APsHazdOVNQrrOGLTado5kOpnHVA/JlD2dNEKgn1cbk+hgD+LtbuSrwdzxFW
+ 76YaVnavSN9KSRq2S39PcD9u+uXz1weIdQQQFgoAHRYhBAlxH9XK5dVlkhj3VdaqWmYFEt64
+ BQJqmUUgAAoJENaqWmYFEt64k9sA/3AZTplbwAX8Ls8Nqcy6lhC7iTfK84dL9mj9J2we2bdK
+ APwOCzSIMskGmFsdzxfR5R8u70uMER90OuvT1JhtRL9BCLg4BGqX86ASCisGAQQBl1UBBQEB
+ B0BoKA9J7L4N5PrhOPt1JmhdEcAYa0I7FdMSMrXoUFGNZAMBCAeIeAQYFgoAIBYhBOyUGPwY
+ JKfClGQYvi/OggQ7uT2DBQJql/OgAhsMAAoJEC/OggQ7uT2DFuEA/0TFpveiGyq+WHMElF2P
+ sV/ejLUTYWTIryI/2f/deE43AQCSibvrEpDcHNz3JJypGVNSuqocMAXGM5/HMLYz6tq6CA==
+Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="kcb"
+
+--kcb
+Content-Type: text/plain; charset=utf-8
+
+Synthetic note from Cora Compromised, signed with a key made for this test.
+--kcb
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYKAB0WIQTslBj8GCSnwpRkGL4vzoIEO7k9gwUCatc7oAAKCRAvzoIEO7k9
+g13KAP99HVZGQi/b1KrcmAoyP/gu/rJK+HF2sT/Yxa58X2zHYQEA/1qYDEIdQoRu
+efAH7qQVFqczzcQRwaJMaraoecw/fw0=
+=+pm4
+-----END PGP SIGNATURE-----
+--kcb--

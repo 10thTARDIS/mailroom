@@ -1,0 +1,34 @@
+From: Pia Previous <pia@example.org>
+To: Reader <reader@example.com>
+Subject: Signed note from Pia Previous
+Message-ID: <kc-pia@example.test>
+Date: Tue, 20 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=pia@example.org; keydata=
+ mDMEapfzoBYJKwYBBAHaRw8BAQdA3hiDidKK73pfPoxSNMYBa8nfUHc2zfVBFIEhfHkpBLS0
+ HlBpYSBQcmV2aW91cyA8cGlhQGV4YW1wbGUub3JnPoiTBBMWCgA7FiEExy0aunqNkMvURhBt
+ YanhpQKLqCEFAmqX86ACGwMFCwkIBwICIgIGFQoJCAsCBBYCAwECHgcCF4AACgkQYanhpQKL
+ qCErkAEA+MplcqlN1fCTl2P9xTimFEjBWGxs3UfCPLWxVt91HEgA/3iqTeH/C+UIKUE7C2xC
+ 4HUnE0xPHqZxSy+MUUDhdxsCiHUEEBYKAB0WIQQ37BiOGgSddEhbLBR6IoL3qQjFygUCaplF
+ IAAKCRB6IoL3qQjFymt2AP97G75mq2/zbgzGy0BZBxgZoz2kvYx0d5HGyYlXp2u1nwEA+yO6
+ uxLYm92jxzoTBsAOeRMeaRvKgMMBN+eYW+D/CQW4OARql/OgEgorBgEEAZdVAQUBAQdA1aVa
+ fsZP0HOmBHUJyw2FO+N2KyypASueP6AYKHXdPzYDAQgHiHgEGBYKACAWIQTHLRq6eo2Qy9RG
+ EG1hqeGlAouoIQUCapfzoAIbDAAKCRBhqeGlAouoIdYXAQCThkvVIWlorioXbxBcd4RZCADW
+ SMogQ9RTJdv8kPfAKwEA1F6yw7M/RPSd6eHFerke9kw+fc6+ifDURX5VfZkVYQs=
+Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="kcb"
+
+--kcb
+Content-Type: text/plain; charset=utf-8
+
+Synthetic note from Pia Previous, signed with a key made for this test.
+--kcb
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYKAB0WIQTHLRq6eo2Qy9RGEG1hqeGlAouoIQUCatc7oAAKCRBhqeGlAouo
+IVB4AQDtjYXe9BBePvrpUwvjo+PhI2nC8RHJpvokgj06rcaIBwEAh/zkaNgy64EI
+k0jSXN+7C+/Oz2PCZ31gHUXFxGMWIgA=
+=Bx3A
+-----END PGP SIGNATURE-----
+--kcb--

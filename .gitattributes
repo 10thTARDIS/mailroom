@@ -9,3 +9,6 @@
 # iCalendar samples (#725) keep their CRLF line endings: RFC 5545 content lines
 # end in CRLF on the wire, and a fixture normalised to LF would stop testing that.
 internal/ical/testdata/*.ics -text
+# The rotated-key mail (#150) is signed over its CRLF bytes (RFC 3156), and a PGP/MIME
+# fixture normalised to LF would stop being the thing a mail server delivers.
+scripts/a11y-keychange/*.eml -text

@@ -1,0 +1,21 @@
+From: Wren Compromised <wren@example.org>
+To: Reader <reader@example.com>
+Subject: A note about my old key (wren)
+Message-ID: <kc-wren-revoke@example.test>
+Date: Wed, 21 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=wren@example.org; keydata=
+ mDMEam3DoBYJKwYBBAHaRw8BAQdAoFaKzzROwJ03nxzp8T8DUzMSp7JKl8dP8SFH+MGhktCI
+ jAQgFgoANBYhBP2hUPAxKtCUjSaTquwGOOGw7C52BQJq0KQgFh0CU3ludGhldGljIHJldm9j
+ YXRpb24ACgkQ7AY44bDsLnYH6wD/fR6MaLTJDGI4hxV7jrYnnPxfPbVgE4o1ispQW7rXVJUA
+ /2pF86hvsjZrkhyJ5zLwDQ85z9/0tuLoMt1uCpxjt2UItCNXcmVuIENvbXByb21pc2VkIDx3
+ cmVuQGV4YW1wbGUub3JnPoiTBBMWCgA7FiEE/aFQ8DEq0JSNJpOq7AY44bDsLnYFAmptw6AC
+ GwMFCwkIBwICIgIGFQoJCAsCBBYCAwECHgcCF4AACgkQ7AY44bDsLnYBswEA8bpbPwf0sqbI
+ oKaBazWfxrWuGb7yDVDibTgyV3GYUmMA/j5XBJLqUJ//QTqWLA+KDq4o/4G3+4ZPZpr5hBsh
+ 18MGuDgEam3DoBIKKwYBBAGXVQEFAQEHQOcmfF/KOOWD9eSuCqj7z6gL9Nr/q4EnxcTGu9BI
+ 4vUsAwEIB4h4BBgWCgAgFiEE/aFQ8DEq0JSNJpOq7AY44bDsLnYFAmptw6ACGwwACgkQ7AY4
+ 4bDsLnZQyAEAnGRTDKbtsr7PviUELFL9kKgacKNy8kqqb+LyBU8enI4A/RB5U/Q+G2gNjo49
+ 8f5V2MjcW5H6zGYWTdapfvNybJEA
+Content-Type: text/plain; charset=utf-8
+
+My old key is no longer in use.

@@ -1,0 +1,34 @@
+From: Vera Vouched <vera@example.org>
+To: Reader <reader@example.com>
+Subject: Signed note from Vera Vouched
+Message-ID: <kc-vera@example.test>
+Date: Tue, 20 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=vera@example.org; keydata=
+ mDMEapfzoBYJKwYBBAHaRw8BAQdAHWOXj3uWXTaWFTVIYSqOj+CNwGBcSag2HGrKJ2y5q/W0
+ H1ZlcmEgVm91Y2hlZCA8dmVyYUBleGFtcGxlLm9yZz6IkwQTFgoAOxYhBAjJOWiu2QOZVoVZ
+ 08lXsWLgSdolBQJql/OgAhsDBQsJCAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEMlXsWLg
+ SdoljNgA/Rd1yrZ/50oO4pmM/7vR8vxSl8shQjIYrSeoNp7hlIY/AQDBDcHVqSp2zq0cEdXB
+ ecyHxIxSL7EoBdCke4mRxqxLD4h1BBAWCgAdFiEE+leX6SSjPkqMEOM1tlrv3F/+TbkFAmqZ
+ RSAACgkQtlrv3F/+TbkKCQD9G1FuXacZUt3yo3zj1n4VblPvIyHgimsnxwI9J1Ba25MA/04U
+ /Pd+RLSr5vPhncWapvqMJd2Da4k/soDOQdN0+u4BuDgEapfzoBIKKwYBBAGXVQEFAQEHQL0j
+ jTjYgQ0qf5ZDnpqU3GKMyo/MFqBGqvj6y8jLXlMEAwEIB4h4BBgWCgAgFiEECMk5aK7ZA5lW
+ hVnTyVexYuBJ2iUFAmqX86ACGwwACgkQyVexYuBJ2iVGcgD+NjSVyDpJFmSA+zUKqp8FLaBq
+ PEaRubf4t5otZlvabb0A/ia1ZttDC9s2upr2o92Nxi+7pYACSrmVFEu+Tv60qwUF
+Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="kcb"
+
+--kcb
+Content-Type: text/plain; charset=utf-8
+
+Synthetic note from Vera Vouched, signed with a key made for this test.
+--kcb
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYKAB0WIQQIyTlortkDmVaFWdPJV7Fi4EnaJQUCatc7oAAKCRDJV7Fi4Ena
+JQiQAQCZq1LjtNjUPwzyXvTaT4vBw8sPreUfO1igd3LJoWIz5wD+O6nuVrpwP+Hi
+54yPMi9VEawhZ4eZ/fHBSAiR4OoUUQc=
+=fE8j
+-----END PGP SIGNATURE-----
+--kcb--

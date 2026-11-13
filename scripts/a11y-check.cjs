@@ -228,6 +228,15 @@
 //                                 sign-in result not shown, shown twice, or
 //                                 left in the URL; or one of the two in-run
 //                                 controls staying green
+//    36  KEYCHANGE <what>       — the key-change prompts (#150, ADR-054), in the reader
+//                                 and the composer, for a vouched, an ordinary, a
+//                                 compromised-previous-key and the two rule 8
+//                                 (revoked previous key) states: wording that is not
+//                                 exactly what the components render, the group
+//                                 not named "Signature", the buttons not named or not
+//                                 in reading order under Tab, a control under 24 px, a
+//                                 fixture that did not produce the state it is for, or
+//                                 an in-run negative control staying green
 
 "use strict";
 
@@ -285,6 +294,7 @@ const tally = {
   oauth: 0,
   risky: 0,
   rescan: 0,
+  keyChange: 0,
 };
 let axeVersion = "?";
 
@@ -7873,6 +7883,378 @@ async function rescanOnOpenStep(page) {
   tally.rescan += 1;
 }
 
+// ---------------------------------------------------------------------------
+// THE KEY-CHANGE PROMPTS, IN A REAL BROWSER (#150, ADR-054) — exit 36
+// ---------------------------------------------------------------------------
+//
+// Five correspondents whose key was rotated (the fixture is made by GnuPG and
+// described in scripts/a11y-e2e.sh and scripts/a11y-keychange-gen.sh), each shown
+// in the reader's signature line and in the composer's Encrypt switch:
+//
+//   vera   a new key the old one vouches for     the gentle wording, Trust the
+//                                                default button
+//   rhea   a new key nobody vouches for          the ordinary wording
+//   wren   as vera, the old key revoked as       the ordinary wording plus the
+//          compromised                           stolen-key warning
+//   pia    the user trusted the vouched key,     a verified signature plus "that
+//          and the old key was revoked since     previous key has since been revoked"
+//   cora   as pia, revoked as compromised        the same, "as compromised"
+//
+// FOR EACH, IN THE THREE THEMES, the wording is asserted BEFORE axe runs: the exact
+// sentences the components render (kcWording), the computed role and name of the
+// group that holds them and of its buttons (from the accessibility tree), the
+// order Tab walks the controls in, and a 24 px floor on their size. Axe on a
+// prompt that is not on the page passes perfectly; that is the #131 shape, so the
+// assertion that it is there comes first and names what it found when it is not.
+//
+// FOUR IN-RUN NEGATIVE CONTROLS, each the real fault the check is for:
+//   * the prompt's sentences removed          -> the wording check goes red
+//   * the group's accessible name removed     -> the tree check goes red
+//   * a nameless button added to the prompt   -> axe's button-name goes red here
+//   * the sentence's colour made pale         -> axe's color-contrast goes red here
+// plus the same wording control on the composer's switch.
+
+const KC = JSON.parse(fs.readFileSync("/tmp/keychange.json", "utf8"));
+
+const KC_ADDRESS = (n) => n + "@example.org";
+const KC_GENTLE_WHY =
+  "Their previous key, the one you had, vouches for it. Trust the new key, or keep the old one. Nothing changes until you choose.";
+const KC_ORDINARY_WHY = (a) =>
+  "This can mean " + a + " changed keys, or that someone else is pretending to be them. Check with them another way before you trust it.";
+const KC_STOLEN = (a) =>
+  "The key you had for " + a + " was reported stolen or compromised, so a new key from them cannot be checked against it. Confirm the fingerprint another way.";
+const KC_PIN = (name, compromised) =>
+  "You trusted this key because " + name + "'s previous key vouched for it. That previous key has since " +
+  (compromised ? "been revoked as compromised" : "been revoked") + ". Check this key with them another way.";
+
+/** What each correspondent must show, in the reader and in the composer. */
+const KC_WORDS = {
+  vera: {
+    reader: { heading: "Signed with a new key for vera@example.org.", why: KC_GENTLE_WHY, stolen: null, primary: true },
+    composer: {
+      note: "Can't encrypt: the key for vera@example.org has changed since you last wrote to them, and has to be confirmed first.",
+      heading: "vera@example.org has a new key.", why: KC_GENTLE_WHY, stolen: null, primary: true,
+    },
+  },
+  rhea: {
+    reader: { heading: "Signed with a NEW key, different from the one you had for rhea@example.org.", why: KC_ORDINARY_WHY("rhea@example.org"), stolen: null, primary: false },
+    composer: {
+      note: "Can't encrypt: the key for rhea@example.org has changed since you last wrote to them, and has to be confirmed first.",
+      heading: "The key for rhea@example.org is different from the one you last wrote to.", why: KC_ORDINARY_WHY("rhea@example.org"), stolen: null, primary: false,
+    },
+  },
+  wren: {
+    reader: { heading: "Signed with a NEW key, different from the one you had for wren@example.org.", why: KC_ORDINARY_WHY("wren@example.org"), stolen: KC_STOLEN("wren@example.org"), primary: false },
+    composer: {
+      note: "Can't encrypt: the key for wren@example.org has changed since you last wrote to them, and has to be confirmed first.",
+      heading: "The key for wren@example.org is different from the one you last wrote to.", why: KC_ORDINARY_WHY("wren@example.org"), stolen: KC_STOLEN("wren@example.org"), primary: false,
+    },
+  },
+  pia: { reader: { pin: (n) => KC_PIN(n, false) }, composer: { pin: (n) => KC_PIN(n, false) } },
+  cora: { reader: { pin: (n) => KC_PIN(n, true) }, composer: { pin: (n) => KC_PIN(n, true) } },
+};
+const KC_CHANGED = ["vera", "rhea", "wren"];
+const KC_PINNED = ["pia", "cora"];
+const KC_NAMES = ["vera", "rhea", "wren", "pia", "cora"];
+const KC_FLOOR = 24;
+
+const kcFail = (what) => {
+  throw new Fail(36, "KEYCHANGE " + what);
+};
+
+/** The facts the wording is judged from, read in the page. `scope` is the element
+ *  that holds the surface (the reading pane, or the composer). */
+async function kcFacts(page, scope) {
+  return page.evaluate((scope) => {
+    const root = document.querySelector(scope);
+    if (!root) return null;
+    const text = (el) => (el ? (el.textContent || "").replace(/\s+/g, " ").trim() : null);
+    const kc = root.querySelectorAll(".key-change");
+    const k = kc[0] || null;
+    const controls = k ? [...k.querySelectorAll("button, summary")] : [];
+    return {
+      prompts: kc.length,
+      heading: text(k && k.querySelector(".key-change-heading")),
+      stolen: text(k && k.querySelector(".key-change-compromised")),
+      groupLabel: k ? k.getAttribute("aria-label") : null,
+      groupRole: k ? k.getAttribute("role") : null,
+      primary: k ? [...k.querySelectorAll("button.button-primary")].map(text) : [],
+      defaultAction: k ? [...k.querySelectorAll("[data-default-action]")].map((b) => b.getAttribute("data-default-action")) : [],
+      buttons: k ? [...k.querySelectorAll("button")].map(text) : [],
+      summary: text(k && k.querySelector("summary")),
+      pins: [...root.querySelectorAll(".pin-voucher-warning")].map(text),
+      verified: text(root.querySelector(".signature-line-verified > p[role=status]")),
+      notes: [...root.querySelectorAll(".compose-encrypt-note")].map(text),
+      encryptBox: !!root.querySelector(".compose-encrypt input[type=checkbox]"),
+      encryptLabel: text(root.querySelector(".compose-encrypt label")),
+      sizes: controls.map((c) => {
+        const r = c.getBoundingClientRect();
+        return { text: text(c), w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
+      }),
+    };
+  }, scope);
+}
+
+/** The wording problems of one correspondent on one surface; [] when it is exactly
+ *  what the components must say. */
+function kcWording(name, surface, f) {
+  const bad = [];
+  if (!f) return ["the " + surface + " is not on the page"];
+  const W = KC_WORDS[name][surface];
+  const addr = KC_ADDRESS(name);
+  if (KC_PINNED.includes(name)) {
+    if (f.prompts !== 0) bad.push("a key-changed prompt is shown for a key the user already trusts");
+    if (f.pins.length !== 1) bad.push("want one pin-voucher warning, saw " + f.pins.length);
+    else {
+      // The composer names the recipient as the composer labels them, the reader by
+      // the address; either is the product's own choice, the sentence is not.
+      const names = [addr, KC.messages[name].display];
+      if (!names.some((n) => f.pins[0] === W.pin(n))) bad.push("pin warning is " + JSON.stringify(f.pins[0]) + ", want " + JSON.stringify(W.pin(addr)));
+    }
+    if (surface === "reader" && !f.verified) bad.push("the verified signature sentence is missing");
+    if (surface === "composer" && !f.encryptBox) bad.push("the Encrypt switch is not offered");
+    return bad;
+  }
+  if (f.prompts !== 1) bad.push("want one key-changed prompt, saw " + f.prompts);
+  if (f.pins.length) bad.push("a pin-voucher warning is shown on a key that has not been trusted");
+  const want = W.heading + " " + W.why;
+  if (f.heading !== want) bad.push("heading is " + JSON.stringify(f.heading) + ", want " + JSON.stringify(want));
+  if (W.stolen === null ? f.stolen !== null : f.stolen !== W.stolen) {
+    bad.push("stolen-key warning is " + JSON.stringify(f.stolen) + ", want " + JSON.stringify(W.stolen));
+  }
+  if (W.primary ? f.primary.join("|") !== "Trust this key from now on" || f.defaultAction.join("|") !== "trust" : f.primary.length || f.defaultAction.length) {
+    bad.push("default button is " + JSON.stringify(f.primary) + "/" + JSON.stringify(f.defaultAction) + ", want " + (W.primary ? "Trust" : "none"));
+  }
+  if (f.buttons.slice(0, 2).join("|") !== "Trust this key from now on|Keep the old key") bad.push("buttons are " + JSON.stringify(f.buttons));
+  if (f.summary !== "Compare the keys") bad.push("disclosure is " + JSON.stringify(f.summary));
+  if (surface === "composer") {
+    if (!f.notes.includes(W.note)) bad.push("the encrypt note is " + JSON.stringify(f.notes) + ", want " + JSON.stringify(W.note));
+    if (f.encryptBox) bad.push("the Encrypt switch is offered although the key has not been decided");
+  }
+  return bad;
+}
+
+/** The group, its buttons and its sentences, as the accessibility tree has them. */
+async function kcTreeProblems(page, scope) {
+  const snap = await axSnapshot(page, scope + " .key-change");
+  if (!snap) return ["no .key-change in " + scope];
+  const bad = [];
+  if (snap.role !== "group" || snap.name !== "Signature") bad.push("the prompt is " + snap.role + " " + JSON.stringify(snap.name) + ", want group \"Signature\"");
+  const roles = [];
+  const walk = (n) => {
+    if (!n) return;
+    roles.push([n.role, n.name]);
+    for (const c of n.children || []) walk(c);
+  };
+  walk(snap);
+  const names = roles.filter((r) => r[0] === "button").map((r) => r[1]);
+  if (names.slice(0, 2).join("|") !== "Trust this key from now on|Keep the old key") bad.push("button names in the tree are " + JSON.stringify(names));
+  if (!roles.some((r) => r[0] === "StaticText" && /key/.test(r[1] || ""))) bad.push("no sentence in the tree");
+  return bad;
+}
+
+/** Tab through the prompt from its first button; the controls must come in the
+ *  order they read. Returns the order seen. */
+async function kcTabOrder(page, scope) {
+  await page.evaluate((scope) => {
+    const b = document.querySelector(scope + " .key-change button");
+    if (b) b.focus();
+  }, scope);
+  const seen = [];
+  for (let i = 0; i < 3; i++) {
+    seen.push(await page.evaluate(() => {
+      const a = document.activeElement;
+      return a ? a.tagName + ":" + (a.textContent || "").replace(/\s+/g, " ").trim() : "none";
+    }));
+    await page.keyboard.press("Tab");
+  }
+  return seen;
+}
+const KC_TAB_WANT = ["BUTTON:Trust this key from now on", "BUTTON:Keep the old key", "SUMMARY:Compare the keys"];
+
+async function kcOpenReader(page, name) {
+  const m = KC.messages[name];
+  await load(page, "#/all?m=" + m.id);
+  await waitForSelectorD(page, "aside.thread-pane", { timeout: 30000 });
+  await until("the open message is " + m.subject, 30000, () =>
+    page.evaluate((s) => {
+      const h = document.querySelector("h1.thread-subject");
+      return !!h && h.textContent.indexOf(s) >= 0;
+    }, m.subject),
+  36);
+  // The signature is judged by the server and drawn after the message; wait for the
+  // line itself, then for the prompt or the warning it has to carry.
+  await until("the " + name + " signature line is drawn", 30000, () =>
+    page.evaluate((pinned) => !!document.querySelector(pinned ? "aside.thread-pane .pin-voucher-warning" : "aside.thread-pane .key-change"), KC_PINNED.includes(name)),
+  36, async () => JSON.stringify(await kcFacts(page, "aside.thread-pane")));
+}
+
+async function kcMakeDraft(page, name) {
+  const m = KC.messages[name];
+  const made = await page.evaluate(async (m) => {
+    const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
+    const accountId = Object.values(sess.primaryAccounts)[0];
+    const res = await fetch(sess.apiUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+        methodCalls: [["Email/set", { accountId, create: { d: {
+          keywords: { $draft: true },
+          subject: "Key change fixture",
+          to: [{ name: m.display, email: m.address }],
+          textBody: [{ partId: "1", type: "text/plain" }],
+          bodyValues: { "1": { value: "Hello" } },
+        } } }, "c"]],
+      }),
+    });
+    const body = await res.json();
+    const r = body.methodResponses && body.methodResponses[0];
+    return r && r[1] && r[1].created && r[1].created.d ? { id: r[1].created.d.id } : { error: JSON.stringify(body) };
+  }, m);
+  if (!made || made.error) kcFail("could not create the " + name + " draft: " + (made ? made.error : "no answer"));
+  return made.id;
+}
+
+async function kcOpenComposer(page, name) {
+  const id = await kcMakeDraft(page, name);
+  await load(page, "#/inbox/review?compose=draft:" + id);
+  await waitForSelectorD(page, 'section.compose[role="dialog"]', { timeout: 30000 });
+  // The switch is drawn once the recipient's key has been looked up.
+  await until("the " + name + " encrypt switch is drawn", 45000, () =>
+    page.evaluate((pinned) => !!document.querySelector(pinned ? "section.compose .pin-voucher-warning" : "section.compose .key-change"), KC_PINNED.includes(name)),
+  36, async () => JSON.stringify(await kcFacts(page, "section.compose")));
+}
+
+async function kcCloseComposer(page) {
+  const destroyed = page.waitForResponse(
+    (r) => r.request().method() === "POST" && (r.request().postData() || "").indexOf('"destroy"') >= 0,
+    { timeout: 30000 },
+  );
+  await page.click("section.compose button.compose-discard");
+  const res = await destroyed;
+  if (!res.ok()) kcFail("discarding the fixture draft: HTTP " + res.status());
+  await until("the composer has closed", 30000, () => page.evaluate(() => !document.querySelector("section.compose")), 36);
+}
+
+/** Everything asserted about one open surface, before axe looks at it. */
+async function kcAssertSurface(page, name, surface, theme) {
+  const scope = surface === "reader" ? "aside.thread-pane" : "section.compose";
+  const label = name + "/" + surface + "/" + theme.name;
+  const facts = await kcFacts(page, scope);
+  const wording = kcWording(name, surface, facts);
+  if (wording.length) kcFail(label + " wording: " + wording.join("; ") + " (saw " + JSON.stringify(facts) + ")");
+  if (KC_CHANGED.includes(name)) {
+    const tree = await kcTreeProblems(page, scope);
+    if (tree.length) kcFail(label + " accessibility tree: " + tree.join("; "));
+    const order = await kcTabOrder(page, scope);
+    if (JSON.stringify(order) !== JSON.stringify(KC_TAB_WANT)) kcFail(label + " Tab order is " + JSON.stringify(order) + ", want " + JSON.stringify(KC_TAB_WANT));
+    const small = facts.sizes.filter((s) => s.w < KC_FLOOR || s.h < KC_FLOOR);
+    if (small.length) kcFail(label + " controls under " + KC_FLOOR + " px: " + JSON.stringify(small));
+    await page.evaluate(() => document.activeElement && document.activeElement.blur());
+  }
+  return facts;
+}
+
+async function keyChangeSurfaces(page, cdp) {
+  const seen = [];
+  for (const theme of THEMES) {
+    await chooseTheme(page, theme);
+    for (const surface of ["reader", "composer"]) {
+      for (const name of KC_NAMES) {
+        if (surface === "reader") await kcOpenReader(page, name);
+        else await kcOpenComposer(page, name);
+        const shown = await page.evaluate(() => document.documentElement.dataset["theme"]);
+        if (shown !== theme.expect) {
+          throw new Fail(13, "NOTHEME key-change " + name + "/" + surface + " loaded with data-theme=" + shown + ", want " + theme.expect);
+        }
+        const facts = await kcAssertSurface(page, name, surface, theme);
+        await injectAxe(page);
+        await axeAA(page, "keychange-" + surface + "-" + name, theme.name);
+        await axeContrastAAA(page, "keychange-" + surface + "-" + name, theme.name);
+        if (SHOTS) await page.screenshot({ path: "/tmp/shots/keychange-" + theme.name + "-" + surface + "-" + name + ".png" });
+        if (theme === THEMES[0]) {
+          seen.push(surface + "/" + name + ": " + (KC_PINNED.includes(name) ? facts.pins[0].slice(0, 60) : facts.heading.slice(0, 60)));
+        }
+        if (surface === "composer") await kcCloseComposer(page);
+      }
+    }
+  }
+
+  // ---- the in-run negative controls (light theme) ---------------------------
+  await chooseTheme(page, THEMES[0]);
+  const axeIds = () =>
+    page.evaluate(
+      (shared, tags) =>
+        window.axe.run(document, Object.assign({}, shared, { runOnly: { type: "tag", values: tags } })).then((r) => r.violations.map((v) => v.id)),
+      AXE_SHARED,
+      AA_TAGS,
+    );
+
+  // 1. THE SENTENCES GONE: the prompt is on the page, its words are not.
+  await kcOpenReader(page, "vera");
+  const intact = kcWording("vera", "reader", await kcFacts(page, "aside.thread-pane"));
+  if (intact.length) kcFail("control precondition: the untouched vera prompt already fails: " + intact.join("; "));
+  await control("keychange-wording", async () => {
+    await page.evaluate(() => {
+      const h = document.querySelector("aside.thread-pane .key-change-heading");
+      h.textContent = "";
+    });
+    return kcWording("vera", "reader", await kcFacts(page, "aside.thread-pane")).length > 0;
+  });
+
+  // 2. THE GROUP'S NAME GONE: axe passes a role=group with no name.
+  await kcOpenReader(page, "vera");
+  if ((await kcTreeProblems(page, "aside.thread-pane")).length) kcFail("control precondition: the untouched prompt's tree already fails");
+  await control("keychange-group-name", async () => {
+    await page.evaluate(() => document.querySelector("aside.thread-pane .key-change").removeAttribute("aria-label"));
+    return (await kcTreeProblems(page, "aside.thread-pane")).length > 0;
+  });
+
+  // 3. A NAMELESS BUTTON IN THE PROMPT: axe's button-name goes red on this surface.
+  await kcOpenReader(page, "vera");
+  await injectAxe(page);
+  if ((await axeIds()).includes("button-name")) kcFail("control precondition: button-name is already red on the untouched prompt");
+  await control("keychange-axe-button-name", async () => {
+    await page.evaluate(() => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.innerHTML = '<span aria-hidden="true">✕</span>';
+      document.querySelector("aside.thread-pane .key-change-actions").appendChild(b);
+    });
+    return (await axeIds()).includes("button-name");
+  });
+
+  // 4. A PALE SENTENCE: the real contrast defect, on the very text under test.
+  await kcOpenReader(page, "vera");
+  await injectAxe(page);
+  if ((await axeIds()).includes("color-contrast")) kcFail("control precondition: color-contrast is already red on the untouched prompt");
+  await control("keychange-axe-contrast", async () => {
+    await page.evaluate(() => {
+      document.querySelector("aside.thread-pane .key-change-heading").style.setProperty("color", "#c8c8c8", "important");
+    });
+    return (await axeIds()).includes("color-contrast");
+  });
+
+  // 5. THE COMPOSER'S SWITCH WITHOUT THE DECISION: the wording check goes red.
+  await kcOpenComposer(page, "rhea");
+  await control("keychange-composer-wording", async () => {
+    await page.evaluate(() => document.querySelector("section.compose .key-change").remove());
+    return kcWording("rhea", "composer", await kcFacts(page, "section.compose")).length > 0;
+  });
+  await kcCloseComposer(page);
+
+  await load(page, "#/inbox/review");
+  await waitForDesk(page);
+  tally.keyChange = 1;
+  console.log(
+    "key change        " + KC_NAMES.length + " correspondents x reader + composer x " + THEMES.length +
+      " themes: exact wording, group name, button names, Tab order and a " + KC_FLOOR + " px floor asserted before axe; 5 controls tripped",
+  );
+  for (const s of seen) console.log("key change        " + s);
+}
+
 async function main() {
   console.log(
     "fixture accountId=" +
@@ -8005,6 +8387,9 @@ async function main() {
     // Keys before the phone-width pass, which measures the keys page and the
     // revoke dialog with the keys this step makes (#796).
     await keysSurfaces(page, cdp);
+    // The key-change prompts, on mail from rotated keys (ADR-054). After keys, which
+    // makes the user's own key the composer's Encrypt switch needs.
+    await keyChangeSurfaces(page, cdp);
     // Contacts (#816) before the phone-width pass, which measures its views.
     const contactIds = await contactsSurfaces(page, cdp);
     // API keys (#49) before the phone-width pass, which measures the row and
@@ -8118,6 +8503,8 @@ async function main() {
         (tally.risky ? "ok" : "NOT-RUN") +
         " rescan_on_open=" +
         (tally.rescan ? "ok" : "NOT-RUN") +
+        " key_change=" +
+        (tally.keyChange ? "ok" : "NOT-RUN") +
         " composer_quote=" +
         (tally.quote >= 3 ? "ok" : "NOT-RUN") +
         " axe_version=" +
