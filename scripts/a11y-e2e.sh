@@ -182,7 +182,7 @@
 #                                 ordinary, a stolen-previous-key and the two
 #                                 revoked-voucher states: not the exact words, the
 #                                 group unnamed, buttons unnamed or out of order,
-#                                 a control under 24 px, a fixture that did not
+#                                 a control under the minimum target size, a fixture that did not
 #                                 make its state, axe, or an in-run control
 #                                 staying green
 #

@@ -234,7 +234,7 @@
 //                                 (revoked previous key) states: wording that is not
 //                                 exactly what the components render, the group
 //                                 not named "Signature", the buttons not named or not
-//                                 in reading order under Tab, a control under 24 px, a
+//                                 in reading order under Tab, a control under the minimum target size, a
 //                                 fixture that did not produce the state it is for, or
 //                                 an in-run negative control staying green
 
@@ -7903,7 +7903,8 @@ async function rescanOnOpenStep(page) {
 // FOR EACH, IN THE THREE THEMES, the wording is asserted BEFORE axe runs: the exact
 // sentences the components render (kcWording), the computed role and name of the
 // group that holds them and of its buttons (from the accessibility tree), the
-// order Tab walks the controls in, and a 24 px floor on their size. Axe on a
+// order Tab walks the controls in, and (for the prompts) WCAG 2.2's minimum
+// target size by axe's own rule. Axe on a
 // prompt that is not on the page passes perfectly; that is the #131 shape, so the
 // assertion that it is there comes first and names what it found when it is not.
 //
@@ -7956,7 +7957,6 @@ const KC_WORDS = {
 const KC_CHANGED = ["vera", "rhea", "wren"];
 const KC_PINNED = ["pia", "cora"];
 const KC_NAMES = ["vera", "rhea", "wren", "pia", "cora"];
-const KC_FLOOR = 24;
 
 const kcFail = (what) => {
   throw new Fail(36, "KEYCHANGE " + what);
@@ -8138,6 +8138,30 @@ async function kcCloseComposer(page) {
   await until("the composer has closed", 30000, () => page.evaluate(() => !document.querySelector("section.compose")), 36);
 }
 
+/** WCAG 2.2's minimum target size (2.5.8), by axe's own rule, which knows the
+ *  spacing and inline exceptions a bare 24 px floor does not. Only the nodes inside
+ *  `scope` count: this lane's AA gate is 2.1 and the rest of the page is not this
+ *  surface's business. Returns { violations, examined } and the caller fails on a
+ *  violation; `examined` is printed because a rule that looked at nothing says
+ *  nothing. */
+async function kcTargetSize(page, scope) {
+  await injectAxe(page);
+  return page.evaluate(
+    (scope, shared) =>
+      window.axe
+        .run(document, Object.assign({}, shared, { runOnly: { type: "rule", values: ["target-size"] }, elementRef: true }))
+        .then((r) => {
+          const inside = (n) => !!n.element && !!n.element.closest(scope + " .key-change, " + scope + " .compose-encrypt, " + scope + " .pin-voucher-warning");
+          const bad = r.violations.flatMap((v) => v.nodes.filter(inside).map((n) => String(n.target[0]) + " " + (n.failureSummary || "").replace(/\s+/g, " ").slice(0, 160)));
+          const ok = r.passes.flatMap((v) => v.nodes.filter(inside));
+          const inc = r.incomplete.flatMap((v) => v.nodes.filter(inside));
+          return { bad, passed: ok.length, incomplete: inc.length };
+        }),
+    scope,
+    AXE_SHARED,
+  );
+}
+
 /** Everything asserted about one open surface, before axe looks at it. */
 async function kcAssertSurface(page, name, surface, theme) {
   const scope = surface === "reader" ? "aside.thread-pane" : "section.compose";
@@ -8150,8 +8174,6 @@ async function kcAssertSurface(page, name, surface, theme) {
     if (tree.length) kcFail(label + " accessibility tree: " + tree.join("; "));
     const order = await kcTabOrder(page, scope);
     if (JSON.stringify(order) !== JSON.stringify(KC_TAB_WANT)) kcFail(label + " Tab order is " + JSON.stringify(order) + ", want " + JSON.stringify(KC_TAB_WANT));
-    const small = facts.sizes.filter((s) => s.w < KC_FLOOR || s.h < KC_FLOOR);
-    if (small.length) kcFail(label + " controls under " + KC_FLOOR + " px: " + JSON.stringify(small));
     await page.evaluate(() => document.activeElement && document.activeElement.blur());
   }
   return facts;
@@ -8173,6 +8195,11 @@ async function keyChangeSurfaces(page, cdp) {
         await injectAxe(page);
         await axeAA(page, "keychange-" + surface + "-" + name, theme.name);
         await axeContrastAAA(page, "keychange-" + surface + "-" + name, theme.name);
+        if (KC_CHANGED.includes(name)) {
+          const ts = await kcTargetSize(page, surface === "reader" ? "aside.thread-pane" : "section.compose");
+          console.log("axe keychange-" + surface + "-" + name + " " + theme.name + " target-size passed=" + ts.passed + " incomplete=" + ts.incomplete + " violations=" + ts.bad.length);
+          if (ts.bad.length) kcFail(name + "/" + surface + "/" + theme.name + " target size (WCAG 2.2, 2.5.8): " + ts.bad.join(" | "));
+        }
         if (SHOTS) await page.screenshot({ path: "/tmp/shots/keychange-" + theme.name + "-" + surface + "-" + name + ".png" });
         if (theme === THEMES[0]) {
           seen.push(surface + "/" + name + ": " + (KC_PINNED.includes(name) ? facts.pins[0].slice(0, 60) : facts.heading.slice(0, 60)));
@@ -8250,7 +8277,7 @@ async function keyChangeSurfaces(page, cdp) {
   tally.keyChange = 1;
   console.log(
     "key change        " + KC_NAMES.length + " correspondents x reader + composer x " + THEMES.length +
-      " themes: exact wording, group name, button names, Tab order and a " + KC_FLOOR + " px floor asserted before axe; 5 controls tripped",
+      " themes: exact wording, group name, button names and Tab order asserted before axe, then axe AA, AAA contrast and target size; 5 controls tripped",
   );
   for (const s of seen) console.log("key change        " + s);
 }
