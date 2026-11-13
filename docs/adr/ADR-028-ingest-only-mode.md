@@ -184,7 +184,8 @@ than listing three and implying they are equal.
   only production caller of `writer.go` is the writeback engine. Splitting
   `SyncSession` into read and write interfaces would turn this into a real
   compile-time property; until then the guarantee is "one call path, guarded at
-  its head", which is weaker and should not be advertised as more.
+  its head", which is weaker and should not be advertised as more. **(The split is done: see Amendment A7, which also
+  states what it does not guarantee.)**
 - **Ledger — enqueue.** `EnqueueIntent` writes `state='suppressed'` (§4) instead
   of `'pending'`. This is bookkeeping and honesty, not safety.
 - **Backstop — the writer itself.** If anything ever does obtain a writer for a
@@ -262,12 +263,13 @@ capability. **It is not a claim that no `pending` row ever exists on a shadowed
 account**: between the race and the next pass the row sits there, so the residue
 is "the mode was switched on and off again inside one sync interval". Closing
 that at source needs a locking read in `EnqueueIntent`'s subselect, which is
-tracked rather than done here.
+tracked rather than done here. **(Done: see Amendment A8.)**
 
 A hazard that exists **today, unguarded, and is NOT fixed here**:
 `sync_enabled=false` stops the pass but not the enqueue, so intents accumulate
 `pending` and re-enabling the account fires the whole set in one drain. That is
 the "mass mutation nobody reviewed" the proposal warned of, already shipped.
+**(Decided: see Amendment A10.)**
 
 ⚠ **The drain-side self-heal above does not reach it, and that is worth stating
 because the shapes look identical.** The self-heal runs inside `DrainAccount`,
@@ -509,12 +511,12 @@ of Trash is re-trashed. The engine treats only missing or stale provenance as a
 conflict — a copy that simply moved is not one. Moves are the op class that
 decides *where mail lives*, so they deserve more scrutiny than flags, not less.
 The report should flag intents whose provenance changed after the intent's
-`created_at` (#24).
+`created_at` (#24). **(Done: see Amendment A4.)**
 
 Per-op selection on `--apply` is deferred (#24); until it exists, read the
 per-op report and decide deliberately rather than replaying the ledger whole.
 There is also no `--discard`, so "decide not to replay" is a standing state
-rather than a terminal one (#24).
+rather than a terminal one (#24). **(Done: see Amendment A3.)**
 
 **Expect noise between steps 1 and 3.** Every shadow-trashed message that comes
 due in that window reports `unlanded` and logs the per-message Warn whose text
@@ -868,6 +870,17 @@ chooses which rows the `LIMIT` takes. That left one case unprobed: a `created_at
 order that differs from the insertion (heap) order. A test now inserts intents
 whose `created_at` runs against both heap and id order and requires the claim
 to follow `created_at`.
+
+**The probe found a second defect, in the neighbouring clause.** The claim's
+`LIMIT` was not honoured: a claim of 10 against 30 pending rows came back with
+19, all of them moved to `inflight` with an attempt spent. The selection was
+`id IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT n)`, and the subselect was evidently
+evaluated more than once; the mechanism is inferred from the fix rather than
+traced. Nothing noticed because a queue rarely exceeds the batch, but a replayed
+ledger is exactly a queue that does. The selection is now a `MATERIALIZED` CTE
+(one evaluation), the update joins it, and the outer `ORDER BY` orders the
+result. This only ever reduces what one pass claims: the rows it no longer takes
+are claimed by the next pass, so it cannot make replay write more.
 
 ### A10. `sync_enabled=false` keeps accumulating intents, deliberately
 
