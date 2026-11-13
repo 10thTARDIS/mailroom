@@ -685,6 +685,202 @@ account on the same provider platform is a different account, and CONDSTORE is a
 server capability rather than a per-account setting, so it carries — but it is
 one account's evidence, not two.
 
+## Amendments
+
+Decisions from the review that was deferred when this ADR was accepted. The
+sections above are left as written, because they record what was believed at the
+time and why; where an amendment changes the answer, it says which sentence it
+replaces.
+
+**Two properties hold for every amendment below, and a reviewer should check them
+rather than take them on trust.** Nothing here makes replay write *more* than it
+did: every change to `--apply` narrows the set of rows it moves to `pending`, and
+no amendment adds a path out of `suppressed`. And no amendment adds a way for one
+user's rows to be seen from another's: every query is a `UserTx` query under the
+existing row-level-security policy, and no `SECURITY DEFINER` function is added
+or changed.
+
+### A1. A scheduled send that fires while shadowed fails for good, and says so
+
+*Replaces the last sentence of §6's "Two limits".* The behaviour is unchanged and
+is now the stated decision: a submission scheduled while the account was live and
+dispatched while it was shadowed is failed permanently, is **not** held, and is
+**not** sent when the mode is lifted. Holding it was rejected: a send the user
+scheduled days earlier, released into a mode that exists because the instance is
+not trusted yet, is a surprising send, and a surprising send of mail is worse
+than a missing one the user can see and redo.
+
+What changes is the stored reason, which stopped one sentence short. It now
+says in plain words that the message was **not sent**, that lifting the mode will
+**not** send it, and that sending it again from Drafts is the way to do it. The
+failure was already visible in the Outbox; this makes the Outbox's own text
+answer the question a user asks next.
+
+### A2. Every intent records what asked for it (`source`), and the ledger reports by it
+
+The review asked for a source on the intent. **It already exists** (migration
+00057, the `source` column; the vocabulary reuses `app.message_labels.applied_by`
+plus `purge` and `draft`), and the report already breaks the ledger down by op
+and source. This amendment records the decision that was made there and closes
+the part that was still open:
+
+- **The enqueue sites, enumerated by reading the code**, are six
+  `IntentRow` literals: Email/set flags, keywords and labels, and moves (two
+  sites in `jmap_email.go`, whose `source` comes from the update's label source,
+  which defaults to `user` for the JMAP path and carries `rule`, `ml`, `agent`,
+  `desk` or `setup` from the other callers); the junk verdict's tokens (through
+  the same two sites); the draft APPEND and the draft header EXPUNGE
+  (`drafts.go`, `draft`); and the purge sweep's EXPUNGE (`purge.go`, `purge`).
+  Pre-existing rows are `NULL`, meaning *unknown*, and are never printed as a
+  user action.
+- **Source is now enforced at every site by a test.** A source-less enqueue is
+  legal SQL and silently produces an "unknown" row, which is exactly the kind of
+  thing that runs without erroring while doing nothing. A test now parses the
+  non-test sources and fails if any `IntentRow` literal omits `Source`, and an
+  integration test drives each mutation class and asserts no row came out `NULL`.
+- **Expunge eligibility is re-checked at apply time** (#555, already built): the
+  engine re-asks "is this copy still in Trash and still due" for a
+  `source = 'purge'` expunge immediately before issuing it, and withdraws the
+  intent instead of applying it when the answer changed. The test is `== purge`,
+  never `!= draft`, so a `NULL` source keeps the old behaviour. The replay path
+  needs no second check: replay moves a row to `pending`, and a pending row is
+  claimed by the same engine.
+- **Superseded draft APPENDs are reported and not replayed.** A suppressed
+  `append` is *superseded* when a later row (by `created_at`, then `id`) for the
+  same message, account and target mailbox is also an `append`: the later one
+  carries the bytes the draft has now. Replaying the earlier one files a
+  version the user replaced, and where its bytes were reclaimed it dead-letters.
+  The report counts them and `--apply` leaves them `suppressed`; they remain in
+  the ledger and are cleared by `--discard`. (The common supersession, an
+  autosave, never reaches here: it retires the old message row and the intent
+  cascades away with it. What is left is the same message re-saved with
+  different bytes, such as a draft signed at submit time.)
+
+### A3. `writeback-ledger --discard` ends the lifecycle
+
+`--discard` is report-first like `--apply`: alone it prints what it would
+discard, per op and source and account, and changes nothing. `--discard --apply`
+moves the account's `suppressed` rows to a new terminal state, `discarded`,
+and prints the number moved per source. A sixth `app.intent_state` value follows
+the same rules as `suppressed`: terminal, never claimed, excluded from every
+count of work owed, and audited at every `state` predicate (§4's migration
+note applies again).
+
+Two decisions inside it. **Discard needs no lifted mode**, unlike replay: it
+writes nothing to a mailbox, and "I will never replay this" is a legitimate
+thing to decide while still shadowed. And **a discarded row does not swallow
+the request that follows it**: a later enqueue of the same idempotency key is a
+new fact, so `EnqueueIntent` treats `discarded` as it treats `applied` and `dead`
+for a reviving caller, and as it treats `suppressed` for the upgrade arm. Without
+that the purge sweep's deterministic key would be eaten by a row that no longer
+means anything, and its message would never be expunged.
+
+`--discard` and `--apply` without `--discard` are different commands over the
+same rows and are never combined: replay moves rows to `pending`, discard moves
+them to `discarded`.
+
+### A4. Replay is a delta replay; the report flags stale intents and `--apply` skips them
+
+*Replaces "The report should flag intents whose provenance changed" in §7a, which
+was a wish.* An intent is **stale** when the message it addresses gained a live
+copy in the intent's account **after** the intent was created
+(`message_provenance.first_seen_at > writeback_intents.created_at`). That is the
+trace another client leaves when it files, copies or moves a message, or the
+server rolls UIDVALIDITY: the copy appears in its new place as a new provenance
+row. It is evaluated for the ops that address an existing copy (`move`, `+flag`,
+`-flag`, `+kw`, `-kw`); an `append` has no copy by construction and a purge
+`expunge` has its own apply-time check (A2).
+
+The report prints the stale count per op, beside the totals, and `--apply`
+**skips stale intents by default**: they stay `suppressed`, are reported as
+`skipped-stale`, and a re-run reports the same number, so nothing is silently
+reversed and nothing is silently forgotten. The operator can discard them or
+review them by hand.
+
+**Limits stated rather than discovered.** The signal is a *new* copy; it does not
+see a copy that merely lost a flag, and it does not see a message another client
+moved to a folder where Mailroom already had a copy of it. It cannot tell
+"another client filed this" from "this message was re-delivered". Both errors
+land on the safe side (skipping, not applying), and the apply report prints
+the skipped count so the operator can see how conservative it was.
+
+An opt-in flag to replay stale intents anyway is **not built**. It is not
+trivial to make safe (the engine would apply a week-old move to wherever the
+copy now is), nobody has asked for it, and the escape hatch already exists as
+discard followed by doing the thing by hand.
+
+Per-op selection on `--apply` (§7a) remains deferred for the same reason.
+
+### A5. `Account/get` reports the effective value beside the column
+
+`writebackEnabled` stays the stored column, because it is what `Account/set`
+writes. `Account/get` now also returns `writebackEffective` (the column ANDed
+with the instance switch and the provider hold) and `writebackHeldBy`: `null`
+when effective, otherwise one of `account` (the column is false), `instance`
+(`MAILROOM_WRITEBACK_DISABLED`), or `provider` (the Gmail hold). When more than one applies the
+column wins, because it is the one the user can change. Both are read-only.
+`Account/getHealth` uses the same function, so the two cannot disagree. The
+alternative of exposing the instance flag in the session capabilities was
+rejected: the answer depends on the account as well, and a client would have
+to redo the AND.
+
+### A6. A partial index serves the ledger count
+
+`SuppressedIntentCount` runs on every `Account/getHealth` poll and no index
+covered `state = 'suppressed'`. Migration 00098 adds a partial index
+`(user_id, account_id) WHERE state = 'suppressed'`, leading with `user_id` as the
+conventions require. It also serves the report's per-op and per-source reads.
+
+### A7. `SyncSession` is split into a read and a write interface
+
+`sync.ReadSession` (list, select, fetch, search, capability, idle, close) and
+`sync.WriteSession` (`StoreFlags`, `Copy`, `Move`, `Expunge`, `Append`);
+`SyncSession` is both, and is what `Dial` returns. The sync engine, the IDLE
+watcher and onboarding validation take and hold a `ReadSession`, so a write call
+from any of them no longer compiles. This turns §3's "no type-level guarantee
+here" into one for those paths. It is a **compile-time** guarantee about method
+calls; code that holds a `ReadSession` could still type-assert it back to the
+full interface, and that is the one thing that stays a grep (the same grep §3
+already used), so §3's structural control, that `DrainAccount` is the only
+construction site of the writer, remains the control and this is the second
+lock.
+
+### A8. The enqueue race is closed with a locking read
+
+*Replaces §4's "tracked rather than done here".* `EnqueueIntent` now takes the
+account row's `FOR KEY SHARE` lock in the statement that decides
+pending-versus-suppressed, instead of reading the flag from a snapshot and
+taking the lock afterwards through the foreign key. `FOR KEY SHARE` is the mode
+the foreign key already takes and it conflicts only with `Account/set`'s `FOR
+UPDATE`, so concurrent enqueuers do not block each other and an enqueue only
+waits while an `Account/set` is in flight. Either order is then correct: an
+enqueue that gets the lock first commits before `Account/set` can run its
+suppression, which then sees the row; one that waits reads the new flag. The
+drain-side self-heal stays: it also covers the boot-with-the-instance-flag case,
+which no enqueue-side lock can.
+
+### A9. The claim order is guaranteed, and now probed
+
+`ClaimPendingIntents`'s `ORDER BY` through `UPDATE ... RETURNING` was
+unverified in the review. It was fixed afterwards (#576): the order that governs
+application is the outer `ORDER BY` over the claimed rows, not the inner one that
+chooses which rows the `LIMIT` takes. That left one case unprobed: a `created_at`
+order that differs from the insertion (heap) order. A test now inserts intents
+whose `created_at` runs against both heap and id order and requires the claim
+to follow `created_at`.
+
+### A10. `sync_enabled=false` keeps accumulating intents, deliberately
+
+*Replaces §4's "tracked separately".* **Decision: unchanged, and now a decision
+rather than an accident.** Pausing sync and resuming it applies what the user did
+meanwhile. That is the right answer for a pause (the user acted on mail they can
+see, and expects it to reach the server), and the opposite of ingest-only mode,
+which exists because the user does not want it to. A characterization test pins
+the behaviour so a change to it is a visible decision. **The operator may want
+to revisit this**: a long pause on a large mailbox fires its whole backlog in one
+drain, and the only defence today is that the pending count is visible in
+`Account/getHealth`.
+
 ## References
 
 - Milestone v1.70.0 (production readiness)
