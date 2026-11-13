@@ -47,6 +47,18 @@
 #      page on a DIFFERENT message from that sender, which nobody clicked on —
 #      the same three in-frame assertions, with no click.
 #   5. The sender's host was contacted by the SERVER only, never by the browser.
+#   6. NEWSLETTER IMAGES (ADR-026's latest amendment, #26). One message with a
+#      <table background>, a <td background>, a protocol-relative <img>, images the
+#      host labels application/octet-stream and image/jpg, a <picture> with a
+#      remote <source srcset> and a fallback <img>, and an SVG labelled image/png.
+#      Before remote content is allowed the sender's host sees ZERO requests of
+#      any kind. After one click every element loads THROUGH THE PROXY (a
+#      non-zero natural size, or a computed background that is a data: URL), the
+#      host is asked for exactly the images the message references, by the server
+#      and by nobody else, the <source srcset> URL is never requested by anyone,
+#      and the SVG is still refused. The host also speaks TLS (port 8443, a
+#      certificate the app is handed in its trust bundle) because the proxy reads
+#      a leading // as https; that is the only image fetched over https.
 #
 # ⚠ THE EGRESS GUARD IS NOT WEAKENED IN ANY SHIPPED BUILD. internal/egress
 # refuses every private, loopback and documentation range, and the image proxy
@@ -115,6 +127,7 @@ APP="mailroom-proxied-e2e-app-$UNIQ"
 IMGH="mailroom-proxied-e2e-images-$UNIQ"
 CHK="mailroom-proxied-e2e-browser-$UNIQ"
 CERTGEN="mailroom-proxied-e2e-certgen-$UNIQ"
+IMGCERT="mailroom-proxied-e2e-imgcert-$UNIQ"
 
 TESTUSER="reader@example.com"
 TESTPASS="reader-mailbox-password"
@@ -126,7 +139,7 @@ SUBJECT="reader"
 # How many PASS/FAIL lines the browser stage must print. A stage that stops
 # early, or one an edit quietly removed an assertion from, is a failure — the
 # count is checked below, not just the absence of a FAIL.
-EXPECTED_CHECKS=17
+EXPECTED_CHECKS=28
 
 cd "$(dirname "$0")/.."
 # Scratch lives OUTSIDE the tree: it holds a throwaway TLS key, and nothing in
@@ -136,7 +149,7 @@ WORK_HOST="$(cd "$WORK" && { pwd -W 2>/dev/null || pwd; })"
 
 cleanup() {
   echo "--- cleaning up"
-  docker rm -fv "$CHK" "$APP" "$DV" "$OIDC" "$PG" "$IMGH" "$CERTGEN" >/dev/null 2>&1 || true
+  docker rm -fv "$CHK" "$APP" "$DV" "$OIDC" "$PG" "$IMGH" "$CERTGEN" "$IMGCERT" >/dev/null 2>&1 || true
   docker volume rm -f "$VOL" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
   # Only an image THIS run built (uniquely tagged); a MAILROOM_IMAGE override is the caller's.
@@ -234,6 +247,27 @@ docker run --rm -v "$VOL:/k" "$PG_IMAGE" sh -c \
 SESSION_KEY="$(docker run --rm "$PG_IMAGE" sh -c 'openssl rand -hex 16' | tr -d '\r\n')"
 [ -n "$SESSION_KEY" ] || { echo "FATAL: could not generate a session key" >&2; exit 1; }
 
+echo "--- the sender's TLS certificate (for the protocol-relative images, which the proxy reads as https)"
+# ADR-026's amendment: a `//host/x.png` image is fetched as https. The sender's
+# host therefore has to speak TLS for that one image, and the APP has to trust
+# the certificate it presents (the app's trust bundle, below, carries it beside
+# dovecot's). Generated INSIDE a throwaway container and copied OUT, like
+# dovecot's (#280): no bind mount. The key is made world-readable because the
+# image host runs as the browser image's unprivileged user and `docker cp` keeps
+# the owner and mode openssl gave it (root, 0600): a throwaway key for a
+# throwaway certificate.
+docker create --name "$IMGCERT" "$DOVECOT_IMAGE" sh -c '
+  openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+    -keyout /tmp/images.key -out /tmp/images.crt \
+    -subj "/CN=images.sender.example" -addext "subjectAltName=DNS:images.sender.example" >/dev/null 2>&1
+  chmod 644 /tmp/images.key' >/dev/null
+docker start -a "$IMGCERT" >/dev/null 2>&1 || true
+docker cp "$IMGCERT:/tmp/images.crt" "$WORK_HOST/images.crt"
+docker cp "$IMGCERT:/tmp/images.key" "$WORK_HOST/images.key"
+docker rm -fv "$IMGCERT" >/dev/null
+{ [ -s "$WORK/images.crt" ] && [ -s "$WORK/images.key" ] && grep -q "BEGIN CERTIFICATE" "$WORK/images.crt"; } || {
+  echo "FATAL: the image host's certificate was not generated" >&2; exit 1; }
+
 echo "--- the sender's image host (a real 64x48 PNG; it records who asked)"
 # A real, non-trivial PNG built in the container: 1x1 would be a tracking pixel
 # by the shipped rule and would never be proxied at all. Every request is logged
@@ -280,9 +314,29 @@ function png(w, h, rgb) {
   ]);
 }
 const IMG = png(64, 48, [0x2b, 0x6c, 0xb0]);
+// A real 64x48 JPEG (made by Chromium's canvas encoder), for the image a sender
+// labels `image/jpg`.
+const JPG = Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAwAEADASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAgE/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/EABcBAQEBAQAAAAAAAAAAAAAAAAAEBQb/xAAcEQACAQUBAAAAAAAAAAAAAAAAEQQUFSFioeH/2gAMAwEAAhEDEQA/AMwKyczEiVLykdDKlU6w2SaKyFto356SXTTvhJoDGNcAACskmiyJLpnhsjlRahZSKyEmi276d8JLXvz0AMY1wAAAAAAAAAAAP//Z", "base64");
+// An SVG: no signature the proxy's sniffer knows, and a scripting context in an
+// image's costume. The host labels it image/png, as a hostile one would.
+const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><script>1</script></svg>');
+// The newsletter's images (paths under /nl/): the file, and the label the host
+// gives it. The label is the sender's claim; what the proxy serves is decided on
+// the first bytes.
+const NL = {
+  "/nl/table-bg.png": [IMG, "image/png"],
+  "/nl/td-bg.png": [IMG, "image/png"],
+  "/nl/proto.png": [IMG, "image/png"],
+  "/nl/octet.png": [IMG, "application/octet-stream"],
+  "/nl/jpglabel.jpg": [JPG, "image/jpg"],
+  "/nl/fallback.png": [IMG, "image/png"],
+  // Listed so that a request for it WOULD succeed: if the <source srcset> were
+  // ever fetched, the host answers a real image and the hit is recorded.
+  "/nl/never.png": [IMG, "image/png"],
+  "/nl/evil.png": [SVG, "image/png"],
+};
 const hits = [];
-http
-  .createServer((req, res) => {
+const handler = (scheme) => (req, res) => {
     // The two control paths are the harness talking to itself and are not
     // requests for an image, so they are not hits.
     if (req.url === "/__ready") {
@@ -296,25 +350,44 @@ http
     hits.push({
       ip: String(req.socket.remoteAddress || "").replace(/^::ffff:/, ""),
       url: req.url,
+      scheme,
       ua: req.headers["user-agent"] || "",
     });
+    if (NL[req.url]) {
+      const [body, label] = NL[req.url];
+      res.writeHead(200, { "Content-Type": label, "Content-Length": body.length });
+      return res.end(body);
+    }
     if (/\.png$/.test(req.url)) {
       res.writeHead(200, { "Content-Type": "image/png", "Content-Length": IMG.length });
       return res.end(IMG);
     }
     res.writeHead(404);
     res.end();
-  })
-  .listen(8099);
+};
+http.createServer(handler("http")).listen(8099);
+require("https")
+  .createServer(
+    { key: require("fs").readFileSync("/tmp/images.key"), cert: require("fs").readFileSync("/tmp/images.crt") },
+    handler("https"),
+  )
+  .listen(8443);
 NODEEOF
 docker create --name "$IMGH" --network "$NET" --network-alias images.sender.example \
   --entrypoint node "$CHROME_IMAGE" /tmp/image-host.cjs >/dev/null
 docker cp "$WORK_HOST/image-host.cjs" "$IMGH:/tmp/image-host.cjs" >/dev/null
+docker cp "$WORK_HOST/images.crt" "$IMGH:/tmp/images.crt" >/dev/null
+docker cp "$WORK_HOST/images.key" "$IMGH:/tmp/images.key" >/dev/null
 docker start "$IMGH" >/dev/null
 # Through the network alias the app will resolve, from a separate container — so
 # "ready" means "reachable at the name in the mail", not "the process started".
 wait_for "the sender's image host" 60 "$IMGH" \
   docker run --rm --network "$NET" "$CURL_IMAGE" -sf http://images.sender.example:8099/__ready
+# The TLS listener, too (-k: this is a readiness probe, not a trust decision; the
+# decision that matters is the app's own handshake, and the proxy's refusal to
+# fetch the protocol-relative image would say so by name).
+wait_for "the sender's image host over TLS" 60 "$IMGH" \
+  docker run --rm --network "$NET" "$CURL_IMAGE" -skf https://images.sender.example:8443/__ready
 
 echo "--- postgres"
 docker run -d --name "$PG" --network "$NET" --network-alias pg \
@@ -346,7 +419,7 @@ wait_for "oidc discovery" 60 "$OIDC" \
   docker run --rm --network "$NET" "$CURL_IMAGE" -sf \
     http://oidc:8080/default/.well-known/openid-configuration
 
-echo "--- dovecot (implicit TLS, self-signed) + three messages with a remote image"
+echo "--- dovecot (implicit TLS, self-signed) + four messages with a remote image"
 # The certificate is generated INSIDE a throwaway container and copied OUT with
 # `docker cp` — see inline-images-e2e.sh for why a bind mount cannot do this on
 # the runner (#280).
@@ -434,6 +507,61 @@ write_message one-off.eml "Newsletter <news@sender.example>" "proxied-e2e one-of
 write_message grant-a.eml "Digest <digest@publisher.example>" "proxied-e2e grant-a" proxied-grant-a first.png
 write_message grant-b.eml "Digest <digest@publisher.example>" "proxied-e2e grant-b" proxied-grant-b second.png
 
+# THE NEWSLETTER (ADR-026's latest amendment). One message, from a sender nothing
+# else uses, carrying every kind of remote image the amendment is about, each
+# pointing at the lane's own image host:
+#
+#   <table background>, <td background>   the background= attribute, parked
+#                                          under its own name and restored ONLY
+#                                          when remote content is allowed
+#   <img src="//host:8443/...">            protocol-relative: the proxy reads a
+#                                          leading // as https (the host speaks
+#                                          TLS on 8443 for this one image)
+#   an image the host labels               real PNG bytes under the label
+#     application/octet-stream              application/octet-stream, and real
+#   an image the host labels image/jpg      JPEG bytes under image/jpg: the type
+#                                          is decided on the BYTES, not the label
+#   <picture><source srcset><img>          the <source> is DROPPED (a srcset
+#                                          restored by name would be fetched by
+#                                          the browser itself), the fallback <img>
+#                                          is proxied
+#   an SVG the host labels image/png       refused: SVG never sniffs as a raster
+#
+# Every <img> declares 64x48: a 1x1 is a tracking pixel by the shipped rule and
+# is never proxied at all.
+cat > "$WORK/newsletter.eml" <<EOF
+From: Letters <news@letters.example>
+To: $TESTUSER
+Subject: proxied-e2e newsletter
+Message-ID: <proxied-newsletter@example.com>
+Date: Mon, 12 Jul 2026 11:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+
+Plain-text version of the newsletter.
+--alt
+Content-Type: text/html; charset=utf-8
+
+<html><body>
+<p>proxied-e2e newsletter</p>
+<table width="320" background="http://images.sender.example:8099/nl/table-bg.png"><tr>
+<td width="300" height="60" background="http://images.sender.example:8099/nl/td-bg.png">A cell with its own background.</td>
+</tr></table>
+<img src="//images.sender.example:8443/nl/proto.png" width="64" height="48" alt="proto-relative">
+<img src="http://images.sender.example:8099/nl/octet.png" width="64" height="48" alt="octet-label">
+<img src="http://images.sender.example:8099/nl/jpglabel.jpg" width="64" height="48" alt="jpg-label">
+<picture>
+<source srcset="http://images.sender.example:8099/nl/never.png 2x" type="image/png">
+<img src="http://images.sender.example:8099/nl/fallback.png" width="64" height="48" alt="picture-fallback">
+</picture>
+<img src="http://images.sender.example:8099/nl/evil.png" width="64" height="48" alt="svg-as-png">
+</body></html>
+--alt--
+EOF
+
 DVID=$(docker create --name "$DV" --network "$NET" --network-alias dovecot "$DOVECOT_IMAGE")
 docker cp "$WORK_HOST/dovecot.conf" "$DVID:/etc/dovecot/dovecot.conf"
 docker cp "$WORK_HOST/dovecot.crt" "$DVID:/etc/dovecot/dovecot.crt"
@@ -457,11 +585,11 @@ dovecot_serves_our_cert() {
 }
 wait_for "dovecot TLS on 993 serving OUR certificate" 60 "$DV" dovecot_serves_our_cert
 
-for m in one-off grant-a grant-b; do
+for m in one-off grant-a grant-b newsletter; do
   docker cp "$WORK_HOST/$m.eml" "$DV:/tmp/$m.eml"
   docker exec "$DV" sh -c "doveadm save -u '$TESTUSER' -m INBOX < /tmp/$m.eml"
 done
-echo "delivered three messages into $TESTUSER INBOX"
+echo "delivered four messages into $TESTUSER INBOX"
 
 cat > "$WORK/accounts.json" <<EOF
 {"accounts":[{"name":"dovecot","imap_host":"dovecot","imap_port":993,
@@ -506,7 +634,13 @@ APPID=$(docker create --name "$APP" --network "$NET" --network-alias mailroom \
   -e MAILROOM_LOG_FORMAT=text \
   "$IMAGE")
 docker cp "$WORK_HOST/accounts.json" "$APPID:/tmp/accounts.json"
-docker cp "$WORK_HOST/dovecot.crt" "$APPID:/tmp/dovecot.crt"
+# ⚠ THE APP'S TRUST BUNDLE HOLDS TWO CERTIFICATES: dovecot's (IMAP over implicit
+# TLS) and the image host's (the proxy's https fetch of the protocol-relative
+# image). SSL_CERT_FILE replaces the system roots, so this is the whole set of
+# things the app will believe, and the image host's certificate is in it only
+# because one image is fetched over https on purpose.
+cat "$WORK/dovecot.crt" "$WORK/images.crt" > "$WORK/trust.crt"
+docker cp "$WORK_HOST/trust.crt" "$APPID:/tmp/dovecot.crt"
 docker start "$APPID" >/dev/null
 
 wait_for "mailroom /readyz" 60 "$APP" \
@@ -561,7 +695,9 @@ const SUBJECTS = {
   oneOff: "proxied-e2e one-off",
   grantA: "proxied-e2e grant-a",
   grantB: "proxied-e2e grant-b",
+  newsletter: "proxied-e2e newsletter",
 };
+const SHOTS = process.env.PROXIED_SHOTS === "1";
 
 let checks = 0;
 let fails = 0;
@@ -716,7 +852,7 @@ const controlFrameNotes = [];
     async () => {
       const q = await jmap([["Email/query", { accountId }, "q"]]);
       const ids = q[0][1].ids || [];
-      if (ids.length < 3) return null;
+      if (ids.length < 4) return null;
       const g = await jmap([
         [
           "Email/get",
@@ -731,12 +867,12 @@ const controlFrameNotes = [];
           if (e.subject === subject) mail[key] = { id: e.id, html };
         }
       }
-      return mail.oneOff && mail.grantA && mail.grantB ? true : null;
+      return mail.oneOff && mail.grantA && mail.grantB && mail.newsletter ? true : null;
     },
     90000,
     2000,
   );
-  if (!synced) bail("NOSYNC", "the three messages never reached Mailroom (have: " + Object.keys(mail).join(",") + ")");
+  if (!synced) bail("NOSYNC", "the four messages never reached Mailroom (have: " + Object.keys(mail).join(",") + ")");
   for (const [key, m] of Object.entries(mail)) {
     const parked = /data-mailroom-remote-src="([^"]*)"/.exec(m.html);
     if (!parked) bail("NOTPARKED", key + " carries no parked remote image: " + clip(m.html, 300));
@@ -1058,6 +1194,135 @@ const controlFrameNotes = [];
   assertRendered("grant", gbState);
   await gb.close();
 
+
+  // ---- 4b. THE NEWSLETTER (ADR-026's latest amendment) ------------------------
+  //
+  // One message, every kind of remote image the amendment is about. Per case,
+  // never one total: "the newsletter rendered" cannot tell a background that
+  // loaded from one that was silently dropped.
+  //
+  // ⚠ THE ORDER IS THE ARGUMENT. Blocked first, with the sender's host asked for
+  // nothing (counted over EVERY request it has seen, not only this message's, so a
+  // request for anything at all would show); then one click; then everything.
+  {
+    const serverParks = (html, name) => (html.match(new RegExp(' data-mailroom-remote-' + name + '="/jmap/proxy/', "g")) || []).length;
+    const html = mail.newsletter.html;
+    check(
+      serverParks(html, "background") === 2 && !/<source\b/i.test(html) && !/\ssrcset=/i.test(html) &&
+        !/\sbackground="/i.test(html),
+      "newsletter: the server parks BOTH background= attributes under their own name, drops the <source> and every srcset, and leaves no live background=",
+      "backgrounds parked=" + serverParks(html, "background") + " source=" + /<source\b/i.test(html) +
+        " srcset=" + /\ssrcset=/i.test(html) + " liveBackground=" + /\sbackground="/i.test(html) + " html=" + clip(html, 400),
+    );
+
+    const frameNL = async (page) => {
+      const handle = await page.$("iframe.message-html");
+      const frame = handle ? await handle.contentFrame() : null;
+      if (!frame) return null;
+      return frame.evaluate(() => {
+        const att = (e, n) => (e ? e.getAttribute(n) || "" : "");
+        const bg = (e) => ({
+          present: !!e,
+          attr: att(e, "background").slice(0, 30),
+          parked: att(e, "data-mailroom-remote-background").slice(0, 30),
+          css: e ? getComputedStyle(e).backgroundImage.slice(0, 40) : "",
+        });
+        return {
+          imgs: [...document.images].map((i) => ({
+            alt: i.alt, w: i.naturalWidth, h: i.naturalHeight, complete: i.complete,
+            src: att(i, "src").slice(0, 30), parked: att(i, "data-mailroom-remote-src").slice(0, 30),
+          })),
+          table: bg(document.querySelector("table")),
+          td: bg(document.querySelector("td")),
+          sources: document.querySelectorAll("source").length,
+          pictures: document.querySelectorAll("picture").length,
+          srcsets: document.querySelectorAll("[srcset]").length,
+          proxyRefs: [...document.querySelectorAll("[src],[srcset],[background]")].filter(
+            (e) => (att(e, "src") + att(e, "srcset") + att(e, "background")).indexOf("/jmap/proxy/") >= 0,
+          ).length,
+        };
+      });
+    };
+    const nlHits = async () => (await senderHits()).filter((h) => h.url.indexOf("/nl/") === 0);
+    const totalBefore = (await senderHits()).length;
+
+    const nl = await openMessage(mail.newsletter.id);
+    await until(async () => (await banner(nl)).buttons.includes(SHOW_REMOTE), 25000);
+    // Long enough for an eager fetch to have happened, were there one.
+    await sleep(2500);
+    const blocked = await frameNL(nl);
+    const totalAfterOpen = (await senderHits()).length;
+    check(
+      !!blocked && totalAfterOpen === totalBefore && (await nlHits()).length === 0 &&
+        blocked.imgs.every((i) => i.src === "" && i.w === 0) &&
+        blocked.table.attr === "" && blocked.table.parked.indexOf("/jmap/proxy/") === 0 && blocked.table.css === "none" &&
+        blocked.td.attr === "" && blocked.td.parked.indexOf("/jmap/proxy/") === 0 && blocked.td.css === "none",
+      "newsletter: BEFORE remote content is allowed the sender's host saw ZERO requests, every image and both backgrounds are parked and nothing is painted",
+      "senderRequests " + totalBefore + " -> " + totalAfterOpen + " nl=" + (await nlHits()).length + " frame=" + JSON.stringify(blocked),
+    );
+
+    if (!(await clickBannerButton(nl, SHOW_REMOTE))) info("newsletter: there was no " + JSON.stringify(SHOW_REMOTE) + " button to click");
+    // Settled = every image is done either way AND both backgrounds have either
+    // painted or been given up on. Waiting for success only would turn every
+    // failure into a timeout that says nothing about what the frame held.
+    const done = (st) =>
+      st && st.imgs.length >= 5 && st.imgs.every((i) => i.complete && i.src !== "" || i.alt === "svg-as-png") &&
+      st.table.css !== "none" && st.td.css !== "none";
+    await until(async () => done(await frameNL(nl)), 40000, 500);
+    await sleep(800);
+    const st = await frameNL(nl);
+    const byAlt = (alt) => (st ? st.imgs.find((i) => i.alt === alt) : undefined);
+    const seen = JSON.stringify(st);
+    for (const alt of ["proto-relative", "octet-label", "jpg-label", "picture-fallback"]) {
+      const i = byAlt(alt);
+      check(
+        !!i && i.w === IMG_W && i.h === IMG_H && i.src.indexOf("data:image/") === 0,
+        "newsletter: <img alt=" + alt + "> loaded through the proxy (" + IMG_W + "x" + IMG_H + ", src is a data:image/ URL)",
+        seen,
+      );
+    }
+    check(
+      !!st && st.table.attr.indexOf("data:image/") === 0 && st.table.css.indexOf('url("data:image/') === 0,
+      "newsletter: <table background> is restored as a background attribute holding a data: URL and is painted",
+      seen,
+    );
+    check(
+      !!st && st.td.attr.indexOf("data:image/") === 0 && st.td.css.indexOf('url("data:image/') === 0,
+      "newsletter: <td background> is restored as a background attribute holding a data: URL and is painted",
+      seen,
+    );
+    const evil = byAlt("svg-as-png");
+    const hitsNL = await nlHits();
+    check(
+      !!evil && evil.w === 0 && evil.src.indexOf("data:") !== 0 && hitsNL.some((h) => h.url === "/nl/evil.png"),
+      "newsletter: the SVG the host labels image/png is still refused (the proxy asked for it, sniffed it, and the frame got nothing)",
+      "evil=" + JSON.stringify(evil || null) + " asked=" + hitsNL.some((h) => h.url === "/nl/evil.png"),
+    );
+    const appIpNL = (await dns.lookup("mailroom")).address;
+    const want = ["/nl/table-bg.png", "/nl/td-bg.png", "/nl/proto.png", "/nl/octet.png", "/nl/jpglabel.jpg", "/nl/fallback.png", "/nl/evil.png"];
+    const got = [...new Set(hitsNL.map((h) => h.url))].sort();
+    const proto = hitsNL.find((h) => h.url === "/nl/proto.png");
+    check(
+      JSON.stringify(got) === JSON.stringify([...want].sort()) && hitsNL.every((h) => h.ip === appIpNL) &&
+        !!proto && proto.scheme === "https" && hitsNL.filter((h) => h.url !== "/nl/proto.png").every((h) => h.scheme === "http"),
+      "newsletter: the sender's host was asked by the SERVER for exactly the images the message references (the protocol-relative one over https) and by nobody else",
+      "app=" + appIpNL + " got=" + JSON.stringify(hitsNL.map((h) => h.scheme + " " + h.ip + " " + h.url)),
+    );
+    check(
+      !!st && st.sources === 0 && st.pictures === 0 && st.srcsets === 0 && st.proxyRefs === 0 &&
+        !hitsNL.some((h) => h.url === "/nl/never.png") && !browserToSender.some((u) => u.indexOf("/nl/never.png") >= 0),
+      "newsletter: the <source srcset> URL was NEVER requested, by the server or by the browser; no <source>, <picture> or srcset is left in the frame",
+      "never.png asked of the host=" + hitsNL.some((h) => h.url === "/nl/never.png") + " frame=" + seen,
+    );
+    info("newsletter: " + hitsNL.length + " request(s): " + hitsNL.map((h) => h.scheme + ":" + h.url).join(" "));
+    if (SHOTS) {
+      require("fs").mkdirSync("/tmp/shots", { recursive: true });
+      await nl.screenshot({ path: "/tmp/shots/newsletter-allowed.png", fullPage: true });
+      info("shot newsletter-allowed");
+    }
+    await nl.close();
+  }
+
   // ---- 5. WHO TALKED TO THE SENDER ----------------------------------------
   const appIp = (await dns.lookup("mailroom")).address;
   const hits = await senderHits();
@@ -1092,6 +1357,7 @@ docker create --name "$CHK" --network "$NET" --shm-size=1g \
   -e SHOW_REMOTE="$SHOW_REMOTE" \
   -e ALWAYS_ALLOW="$ALWAYS_ALLOW" \
   -e MESSAGE_SANDBOX="$MESSAGE_SANDBOX" \
+  -e PROXIED_SHOTS="$([ -n "${PROXIED_SHOT_DIR:-}" ] && echo 1 || echo 0)" \
   --entrypoint node "$CHROME_IMAGE" /tmp/proxied-check.cjs >/dev/null
 docker cp "$WORK_HOST/proxied-check.cjs" "$CHK:/tmp/proxied-check.cjs" >/dev/null
 # ⚠ THE EXIT CODE COMES FROM `docker wait`, NOT FROM THE PIPELINE: `tee`'s status
@@ -1101,6 +1367,11 @@ set +e
 docker start -a "$CHK" 2>&1 | tee "$WORK/check.out"
 set -e
 CHK_RC="$(docker wait "$CHK" 2>/dev/null || echo 99)"
+# Screenshots, only when asked for (PROXIED_SHOT_DIR); CI never sets it.
+if [ -n "${PROXIED_SHOT_DIR:-}" ]; then
+  mkdir -p "$PROXIED_SHOT_DIR"
+  docker cp "$CHK:/tmp/shots/." "$PROXIED_SHOT_DIR/" >/dev/null 2>&1 || echo "note: no screenshots to copy"
+fi
 docker rm -fv "$CHK" >/dev/null 2>&1 || true
 
 PASSES="$(grep -c '^PASS  ' "$WORK/check.out" || true)"
