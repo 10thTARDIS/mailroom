@@ -43,7 +43,7 @@ func (f fakeAccountSecrets) SealAccountCredentials(_ context.Context, userID uli
 // account and reports three folders.
 func newAccountAPI(t *testing.T, st *store.Store) *API {
 	t.Helper()
-	dial := func(_ context.Context, _ imapsync.Config) (imapsync.SyncSession, error) {
+	dial := func(_ context.Context, _ imapsync.Config) (imapsync.ReadSession, error) {
 		return &fakeIMAP{mailboxes: make([]imapsync.Mailbox, 3)}, nil
 	}
 	return New(st,

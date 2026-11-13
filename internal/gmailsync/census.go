@@ -140,7 +140,7 @@ var ErrAllMailHidden = errors.New("gmailsync: this Gmail account does not show A
 
 // Census reads an authenticated Gmail session and reports what an import
 // would do. It never downloads a body and never selects a label folder.
-func Census(ctx context.Context, sess sync.SyncSession, st CensusStore, opt CensusOptions) (Report, error) {
+func Census(ctx context.Context, sess sync.ReadSession, st CensusStore, opt CensusOptions) (Report, error) {
 	if opt.TopLabels <= 0 {
 		opt.TopLabels = 20
 	}
@@ -254,7 +254,7 @@ func roleOf(m sync.Mailbox) string {
 	}
 }
 
-func censusMailbox(ctx context.Context, sess sync.SyncSession, st CensusStore, opt CensusOptions, m sync.Mailbox, r *Report, userCounts map[string]int) (MailboxCensus, error) {
+func censusMailbox(ctx context.Context, sess sync.ReadSession, st CensusStore, opt CensusOptions, m sync.Mailbox, r *Report, userCounts map[string]int) (MailboxCensus, error) {
 	mc := MailboxCensus{Name: m.Name, Role: roleOf(m)}
 	// LiveUIDs is EXAMINE + UID SEARCH ALL: the exact UID list, 4 bytes a
 	// message, so a sample can be the NEWEST N and pages can name exact UIDs.

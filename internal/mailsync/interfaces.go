@@ -16,7 +16,7 @@ import (
 // SessionFactory opens an authenticated SyncSession for cfg. The production
 // value is sync.Dial; tests inject a factory returning a fake session. It is a
 // seam, not an interface, because there is exactly one operation.
-type SessionFactory func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)
+type SessionFactory func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)
 
 // Ingester canonicalizes one raw fetched message. It is the single-method
 // projection of *ingest.Ingestor the sync loop needs, so the loop can be

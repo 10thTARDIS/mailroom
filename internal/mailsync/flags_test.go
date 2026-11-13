@@ -168,7 +168,7 @@ func TestIngestRereadsFlagsTheResponseLacked(t *testing.T) {
 	// The re-read FETCH (FLAGS only) is answered properly: a split response's
 	// FLAGS normally arrives on the next command.
 	reread := &rereadSession{fakeSession: sess, box: box}
-	sum, err := New(st, ing, func(context.Context, sync.Config) (sync.SyncSession, error) { return reread, nil },
+	sum, err := New(st, ing, func(context.Context, sync.Config) (sync.ReadSession, error) { return reread, nil },
 		WithObserver(obs)).SyncAccount(context.Background(), testReq())
 	if err != nil {
 		t.Fatal(err)

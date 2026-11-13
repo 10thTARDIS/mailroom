@@ -30,7 +30,7 @@ func TestGmailCensusCommandSeam(t *testing.T) {
 	g.StandardMailboxes()
 	g.Append("[Gmail]/All Mail", &gmailtest.Message{Body: []byte("Subject: a\r\n\r\nhello"), Labels: []string{`\Inbox`, "Work"}})
 	var out bytes.Buffer
-	if err := gmailCensus(context.Background(), &out, sync.Dial, g.Listen(sync.TLSInsecure), nopCensusStore{},
+	if err := gmailCensus(context.Background(), &out, sync.DialRead, g.Listen(sync.TLSInsecure), nopCensusStore{},
 		gmailsync.CensusOptions{DailyBudgetBytes: 1000}); err != nil {
 		t.Fatalf("census: %v", err)
 	}

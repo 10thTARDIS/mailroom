@@ -135,7 +135,7 @@ func TestAddAccountSealsAndValidates(t *testing.T) {
 	userID := ulid.Make()
 	st := &fakeStore{}
 
-	dial := func(_ context.Context, cfg sync.Config) (sync.SyncSession, error) {
+	dial := func(_ context.Context, cfg sync.Config) (sync.ReadSession, error) {
 		if cfg.Username != "you@example.com" || cfg.Password != "hunter2" {
 			t.Errorf("validation dial got wrong credentials: %q/%q", cfg.Username, cfg.Password)
 		}
@@ -208,7 +208,7 @@ func TestAddAccountValidationFailureDisablesSyncOnlyWhenRejected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			st := &fakeStore{}
-			dial := func(context.Context, sync.Config) (sync.SyncSession, error) { return nil, tc.dialErr }
+			dial := func(context.Context, sync.Config) (sync.ReadSession, error) { return nil, tc.dialErr }
 
 			res, err := AddAccount(context.Background(), st, fakeKeys{testMaster()}, ulid.Make(), validSpec(), WithDialer(dial), WithResolver(addrs(t, "93.184.216.34")))
 			if err == nil {

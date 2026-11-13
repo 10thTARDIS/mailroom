@@ -47,7 +47,7 @@ import (
 // because the server still has the message — and that asymmetry is the whole bug.
 func (f *liveFixture) lossyEngine(drop sync.UID) *Engine {
 	return New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err
@@ -289,7 +289,7 @@ func TestLiveGapDetectionOnAFailedLiveUIDsReadConcludesNothing(t *testing.T) {
 
 	// Now the FETCH is healthy but we cannot ask the server what it holds.
 	blind := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err
@@ -338,7 +338,7 @@ func TestLiveGapDetectionRefusesABrokenUIDSet(t *testing.T) {
 	before := f.liveProvenanceCount(t)
 
 	broken := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err
@@ -386,7 +386,7 @@ func TestLiveMailArrivingAfterThePollIsNotAGap(t *testing.T) {
 	// poll once, then append, then verify by polling again is NOT the same thing —
 	// so instead we inject the append into the session's LiveUIDs call.
 	arriving := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

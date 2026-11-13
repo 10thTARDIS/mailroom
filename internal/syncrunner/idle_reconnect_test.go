@@ -44,7 +44,7 @@ func TestIdleSessionRereadsTheGrantBeforeDialling(t *testing.T) {
 	r := New(lister, &fakeSyncer{}, prepare,
 		WithLogger(discardLogger()),
 		WithIdle(true, 0),
-		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.SyncSession, error) {
+		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.ReadSession, error) {
 			dials.Add(1)
 			return nil, errors.New("dial attempted")
 		}),

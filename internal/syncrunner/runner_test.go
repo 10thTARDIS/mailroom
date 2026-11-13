@@ -54,7 +54,7 @@ func (f *fakeSyncer) SyncAccount(_ context.Context, req mailsync.AccountSync) (m
 	return f.summary, nil
 }
 
-func (f *fakeSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.SyncSession) (mailsync.Summary, error) {
+func (f *fakeSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.ReadSession) (mailsync.Summary, error) {
 	return f.SyncAccount(ctx, req)
 }
 
@@ -390,7 +390,7 @@ func (s *signalSyncer) SyncAccount(_ context.Context, req mailsync.AccountSync) 
 	return mailsync.Summary{}, nil
 }
 
-func (s *signalSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.SyncSession) (mailsync.Summary, error) {
+func (s *signalSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.ReadSession) (mailsync.Summary, error) {
 	return s.SyncAccount(ctx, req)
 }
 
@@ -474,7 +474,7 @@ func (b *barrierSyncer) SyncAccount(ctx context.Context, _ mailsync.AccountSync)
 	return b.summary, nil
 }
 
-func (b *barrierSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.SyncSession) (mailsync.Summary, error) {
+func (b *barrierSyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.ReadSession) (mailsync.Summary, error) {
 	return b.SyncAccount(ctx, req)
 }
 

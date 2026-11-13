@@ -30,7 +30,7 @@ import (
 // real session would only add surface.
 type recordingDialer struct{ called bool }
 
-func (d *recordingDialer) dial(context.Context, sync.Config) (sync.SyncSession, error) {
+func (d *recordingDialer) dial(context.Context, sync.Config) (sync.ReadSession, error) {
 	d.called = true
 	return nil, errors.New("dialer reached (this is the observation, not a failure)")
 }
