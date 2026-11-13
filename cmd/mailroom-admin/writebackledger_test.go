@@ -94,6 +94,7 @@ func TestLedgerReportPrintsStaleAndSupersededPerBucket(t *testing.T) {
 		"+kw        unknown           7        0           0",
 		"STALE           2  intent(s)",
 		"SUPERSEDED      1  append(s)",
+		"--apply would replay 12 of 15, and leave 2 stale and 1 superseded in the ledger.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report does not contain %q:\n%s", want, out)
@@ -107,5 +108,31 @@ func TestLedgerReportPrintsStaleAndSupersededPerBucket(t *testing.T) {
 		if !strings.Contains(none, want) {
 			t.Errorf("a clean ledger must still say it checked; missing %q:\n%s", want, none)
 		}
+	}
+}
+
+// TestLedgerApplySummaryNamesEveryOutcome: --apply reports replayed, skipped-stale
+// and skipped-superseded as three numbers, zeros included.
+//
+// NEGATIVE CONTROL: print only the replayed count and the skipped lines vanish.
+func TestLedgerApplySummaryNamesEveryOutcome(t *testing.T) {
+	out := captureStdout(t, func() {
+		printWritebackLedgerApplied(store.Account{Name: "primary"}, store.ReplayResult{Replayed: 4, SkippedStale: 2})
+	})
+	for _, want := range []string{
+		"replayed                4",
+		"skipped-stale           2",
+		"skipped-superseded      0",
+		"--discard removes them",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("apply summary does not contain %q:\n%s", want, out)
+		}
+	}
+	clean := captureStdout(t, func() {
+		printWritebackLedgerApplied(store.Account{Name: "primary"}, store.ReplayResult{})
+	})
+	if !strings.Contains(clean, "skipped-stale           0") || strings.Contains(clean, "--discard") {
+		t.Errorf("a replay that skipped nothing must still print the zeros and no discard hint:\n%s", clean)
 	}
 }

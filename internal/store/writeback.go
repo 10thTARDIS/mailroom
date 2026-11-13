@@ -525,9 +525,35 @@ func (tx *UserTx) SuppressedIntentsByOp(ctx context.Context, accountID ulid.ULID
 	return out, nil
 }
 
+// ReplayResult is what one ReplaySuppressedIntents call did, per outcome.
+//
+// ⚠ THREE NUMBERS, NEVER ONE. "Replayed 0" must be distinguishable from "there
+// was nothing suppressed" and from "everything was skipped as stale", and a single
+// total cannot be (CLAUDE.md: report per-case counts).
+type ReplayResult struct {
+	// Replayed rows were moved to 'pending' and will be applied by the next drain.
+	Replayed int64
+	// SkippedStale rows were left 'suppressed': their message gained a live copy
+	// after they were created (ledgerStaleSQL), so applying them would impose an
+	// old delta on whatever filing happened since.
+	SkippedStale int64
+	// SkippedSuperseded rows were left 'suppressed': a later APPEND of the same
+	// message into the same mailbox exists (ledgerSupersededSQL).
+	SkippedSuperseded int64
+}
+
 // ReplaySuppressedIntents moves an account's suppressed ledger back to
-// 'pending' so the next pass applies it, returning how many it revived. It
-// exists solely behind the admin CLI's explicit --apply (ADR-028 §4).
+// 'pending' so the next pass applies it, returning how many it revived and how
+// many it left behind. It exists solely behind the admin CLI's explicit --apply
+// (ADR-028 §4).
+//
+// ⚠ IT REPLAYS A SUBSET OF THE LEDGER, NEVER MORE. Rows the report calls stale or
+// superseded (ADR-028 amendments A2 and A4) are left 'suppressed' — still in the
+// ledger, still counted, still reported on every run, and removable only by
+// --discard. They are classified by the SAME predicates the report counts with
+// (ledgerStaleSQL, ledgerSupersededSQL), inside this one statement, so the rows
+// the operator read about are the rows skipped, and a row cannot change class
+// between being classified and being moved.
 //
 // ⚠ It is the only path that moves the ledger IN BULK, but it is not the only
 // path out of 'suppressed' — EnqueueIntent's second ON CONFLICT arm upgrades a
@@ -541,17 +567,34 @@ func (tx *UserTx) SuppressedIntentsByOp(ctx context.Context, accountID ulid.ULID
 // is a mass mutation nobody reviewed, arriving at the worst possible moment —
 // which is precisely the hazard sync_enabled already has and this mode refuses
 // to reproduce. The report comes first; applying it is a separate decision.
-func (tx *UserTx) ReplaySuppressedIntents(ctx context.Context, accountID ulid.ULID) (int64, error) {
-	tag, err := tx.tx.Exec(ctx, `
-		UPDATE app.writeback_intents
-		   SET state = 'pending', attempts = 0, claimed_at = NULL,
-		       last_error = NULL, dead_reason = NULL
-		 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'`,
-		tx.userID.String(), accountID.String())
+func (tx *UserTx) ReplaySuppressedIntents(ctx context.Context, accountID ulid.ULID) (ReplayResult, error) {
+	var res ReplayResult
+	err := tx.tx.QueryRow(ctx, `
+		WITH ledger AS (
+			SELECT w.id,
+			       `+ledgerStaleSQL+` AS stale,
+			       `+ledgerSupersededSQL+` AS superseded
+			  FROM app.writeback_intents w
+			 WHERE w.user_id = $1 AND w.account_id = $2 AND w.state = 'suppressed'
+		), moved AS (
+			UPDATE app.writeback_intents w
+			   SET state = 'pending', attempts = 0, claimed_at = NULL,
+			       last_error = NULL, dead_reason = NULL
+			  FROM ledger l
+			 WHERE w.id = l.id AND w.user_id = $1
+			   AND w.state = 'suppressed'
+			   AND NOT l.stale AND NOT l.superseded
+			RETURNING w.id
+		)
+		SELECT (SELECT count(*) FROM moved),
+		       count(*) FILTER (WHERE stale),
+		       count(*) FILTER (WHERE superseded)
+		  FROM ledger`,
+		tx.userID.String(), accountID.String()).Scan(&res.Replayed, &res.SkippedStale, &res.SkippedSuperseded)
 	if err != nil {
-		return 0, fmt.Errorf("writeback: replay suppressed intents: %w", err)
+		return ReplayResult{}, fmt.Errorf("writeback: replay suppressed intents: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	return res, nil
 }
 
 // MarkIntentApplied transitions a claimed intent 'inflight' -> 'applied' and

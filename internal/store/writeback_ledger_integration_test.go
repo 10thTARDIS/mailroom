@@ -69,6 +69,7 @@ type ledgerFx struct {
 	t    *testing.T
 	h    *harness
 	a    fixtureUser
+	b    fixtureUser // a second user, for the isolation tests
 	acct ulid.ULID
 	uid  ulid.ULID
 	msg  ulid.ULID
@@ -77,8 +78,8 @@ type ledgerFx struct {
 func newLedgerFx(t *testing.T) *ledgerFx {
 	t.Helper()
 	h := newHarness(t)
-	a, _ := seedTwoUsers(t, h.super)
-	f := &ledgerFx{t: t, h: h, a: a, acct: mustULID(t, a.AccountID),
+	a, b := seedTwoUsers(t, h.super)
+	f := &ledgerFx{t: t, h: h, a: a, b: b, acct: mustULID(t, a.AccountID),
 		uid: mustULID(t, a.ID), msg: mustULID(t, a.MessageID)}
 	f.exec(`DELETE FROM app.writeback_intents WHERE user_id = $1`, a.ID)
 	return f
@@ -287,5 +288,95 @@ func TestLedgerFlagsSupersededAppends(t *testing.T) {
 	f.exec(`UPDATE app.writeback_intents SET state = 'dead' WHERE id = $1`, v2.String())
 	if got := f.buckets()["append/draft"]; got.Superseded != 0 {
 		t.Fatalf("superseded = %d with the later append dead, want 0 — a dead successor files nothing", got.Superseded)
+	}
+}
+
+// TestReplayMovesOnlyWhatTheReportCallsReplayable: --apply replays a SUBSET of
+// the ledger, the subset the report counted as neither stale nor superseded, and
+// touches nothing that is not 'suppressed'.
+//
+// The assertions are per row, not totals: a skip count of 2 is also what a replay
+// that skipped the WRONG two would report.
+//
+// NEGATIVE CONTROL: delete `AND NOT l.stale` (or `AND NOT l.superseded`) from
+// ReplaySuppressedIntents and the named row below moves to pending.
+func TestReplayMovesOnlyWhatTheReportCallsReplayable(t *testing.T) {
+	f := newLedgerFx(t)
+	now := time.Now()
+	f.dateProvenance(now.Add(-10 * time.Hour))
+	f.addCopy(now.Add(-3*time.Hour), "live") // a copy seen after the OLD intents below
+
+	staleMove := f.intent("move", "suppressed", "user", now.Add(-5*time.Hour), `{"mailbox":"Archive"}`)
+	freshMove := f.intent("move", "suppressed", "user", now.Add(-time.Hour), `{"mailbox":"Archive"}`)
+	oldAppend := f.intent("append", "suppressed", "draft", now.Add(-6*time.Hour), `{"mailbox":"Drafts","content_hash":"0a"}`)
+	newAppend := f.intent("append", "suppressed", "draft", now.Add(-2*time.Hour), `{"mailbox":"Drafts","content_hash":"0b"}`)
+	purge := f.intent("expunge", "suppressed", "purge", now.Add(-5*time.Hour), `{}`)
+	unknownSrc := f.intent("+kw", "suppressed", "", now.Add(-time.Hour), `{"keyword":"k"}`)
+	// Rows that are not in the ledger and must come out exactly as they went in.
+	applied := f.intent("+flag", "applied", "user", now.Add(-9*time.Hour), `{"flag":"\\Seen"}`)
+	dead := f.intent("-flag", "dead", "user", now.Add(-9*time.Hour), `{"flag":"\\Seen"}`)
+	pending := f.intent("+flag", "pending", "user", now.Add(-time.Hour), `{"flag":"\\Flagged"}`)
+
+	var res ReplayResult
+	if err := f.h.appStore().UserTx(context.Background(), f.uid, func(tx *UserTx) error {
+		var e error
+		res, e = tx.ReplaySuppressedIntents(context.Background(), f.acct)
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res.Replayed != 4 || res.SkippedStale != 1 || res.SkippedSuperseded != 1 {
+		t.Fatalf("replay = %+v, want 4 replayed, 1 skipped-stale, 1 skipped-superseded", res)
+	}
+	for name, tc := range map[string]struct {
+		id   ulid.ULID
+		want string
+	}{
+		"the stale move":                                {staleMove, "suppressed"},
+		"the move made after the copy":                  {freshMove, "pending"},
+		"the superseded append":                         {oldAppend, "suppressed"},
+		"the append that supersedes it":                 {newAppend, "pending"},
+		"a purge expunge (apply-time check decides it)": {purge, "pending"},
+		"a row with no recorded source":                 {unknownSrc, "pending"},
+		"an applied row":                                {applied, "applied"},
+		"a dead row":                                    {dead, "dead"},
+		"a row already pending":                         {pending, "pending"},
+	} {
+		if got := f.state(tc.id); got != tc.want {
+			t.Errorf("%s is %q, want %q", name, got, tc.want)
+		}
+	}
+	// The skipped rows are still reported on the next run: skipping is not
+	// forgetting.
+	b := f.buckets()
+	if b["move/user"].Stale != 1 || b["append/draft"].Superseded != 1 {
+		t.Errorf("after the replay the report shows move/user stale=%d append/draft superseded=%d, want 1 and 1",
+			b["move/user"].Stale, b["append/draft"].Superseded)
+	}
+}
+
+// TestReplayCannotReachAnotherUsersLedger: ReplaySuppressedIntents is scoped by
+// the caller's identity. The same call by a different user, naming the first
+// user's account, replays nothing and changes nothing.
+//
+// NEGATIVE CONTROL: the first read in this test proves the rows exist and would
+// be replayed by their owner.
+func TestReplayCannotReachAnotherUsersLedger(t *testing.T) {
+	f := newLedgerFx(t)
+	id := f.intent("move", "suppressed", "user", time.Now().Add(-time.Hour), `{"mailbox":"Archive"}`)
+	other := mustULID(t, f.b.ID)
+	var res ReplayResult
+	if err := f.h.appStore().UserTx(context.Background(), other, func(tx *UserTx) error {
+		var e error
+		res, e = tx.ReplaySuppressedIntents(context.Background(), f.acct)
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if res != (ReplayResult{}) {
+		t.Fatalf("another user's replay = %+v, want all zero", res)
+	}
+	if got := f.state(id); got != "suppressed" {
+		t.Fatalf("the ledger row is %q after another user's replay, want suppressed", got)
 	}
 }
