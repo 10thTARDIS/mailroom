@@ -37,13 +37,6 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   ingest-only, and would then have been applied the moment the mode was lifted. It is now
   held back like every other change.
 
-### Fixes
-
-- **Escape closes only the question you are answering.** Pressing Escape on the risky-file
-  question, the confirmation for releasing a withheld attachment, the snippet picker or the
-  send-later chooser in the composer, or the add-account wizard used to close the message or
-  the draft behind it as well. It now closes just that question.
-
 ### Under the hood
 
 - Code that only reads a mailbox (the sync pass, the idle watcher, account validation) can no
@@ -57,9 +50,6 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   the order changes are applied in follows when they were made, and that pausing sync (as
   opposed to ingest-only mode) keeps queueing changes to apply when sync resumes, which is
   deliberate.
-- The automated browser checks now cover this release's attachment and image work end to
-  end: the risky-file question in a real browser, old attachments re-checked against a real
-  virus scanner, and newsletter images loaded through the real image proxy.
 
 ### Upgrading
 
@@ -67,6 +57,26 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   state for discarded ledger entries. Nothing needs to be done by hand. Rolling back to an
   earlier version moves any discarded entries to the failed state, as the earlier version
   cannot read the new one.
+
+## [1.103.0-beta.2] — 2026-11-13
+
+**The second beta of v1.103 fixes Escape in confirmation questions.** Pressing Escape on the
+risky-file question, or on four other small dialogs, used to close the message or draft behind
+it as well; now it closes just the question. The automated browser checks found it while
+proving this release's attachment and image work end to end.
+
+### Fixes
+
+- **Escape closes only the question you are answering.** Pressing Escape on the risky-file
+  question, the confirmation for releasing a withheld attachment, the snippet picker or the
+  send-later chooser in the composer, or the add-account wizard used to close the message or
+  the draft behind it as well. It now closes just that question.
+
+### Under the hood
+
+- The automated browser checks now cover this release's attachment and image work end to
+  end: the risky-file question in a real browser, old attachments re-checked against a real
+  virus scanner, and newsletter images loaded through the real image proxy.
 
 ## [1.103.0-beta.1] — 2026-11-10
 
