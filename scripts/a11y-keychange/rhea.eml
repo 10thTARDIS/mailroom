@@ -1,0 +1,32 @@
+From: Rhea Ordinary <rhea@example.org>
+To: Reader <reader@example.com>
+Subject: Signed note from Rhea Ordinary
+Message-ID: <kc-rhea@example.test>
+Date: Tue, 20 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=rhea@example.org; keydata=
+ mDMEapfzoBYJKwYBBAHaRw8BAQdA2Jad6nvU+r8KhosCWEJTpH3hPEeYnUauKfUlEQSfYcW0
+ IFJoZWEgT3JkaW5hcnkgPHJoZWFAZXhhbXBsZS5vcmc+iJMEExYKADsWIQS6ea1MFZJRIAy7
+ IAmJc0FXrosbYgUCapfzoAIbAwULCQgHAgIiAgYVCgkICwIEFgIDAQIeBwIXgAAKCRCJc0FX
+ rosbYmwYAP9Mxp6oKQSkrfYz62+gfk7mY2i6NWlOXJjeHVXRG0k6PgD/YbecGZvQ/DQ9u1aC
+ IUxJFAJMRRM3hjMDV1selTp+OQy4OARql/OgEgorBgEEAZdVAQUBAQdAjEkkxjsxIawdkJxL
+ WNXx/nmutcRPmh0m2Y21grn1MUQDAQgHiHgEGBYKACAWIQS6ea1MFZJRIAy7IAmJc0FXrosb
+ YgUCapfzoAIbDAAKCRCJc0FXrosbYvDKAP4syuKCoXg4ifF+zH9hm1aZw8JTCKoRty47JAFj
+ VA1f6AD/XpAA30pt2/18cbo+vB9NS3m/hVWWLcNB+T1n1eTa7Ak=
+Content-Type: multipart/signed; micalg=pgp-sha512; protocol="application/pgp-signature"; boundary="kcb"
+
+--kcb
+Content-Type: text/plain; charset=utf-8
+
+Synthetic note from Rhea Ordinary, signed with a key made for this test.
+--kcb
+Content-Type: application/pgp-signature; name="signature.asc"
+
+-----BEGIN PGP SIGNATURE-----
+
+iHUEABYKAB0WIQS6ea1MFZJRIAy7IAmJc0FXrosbYgUCatc7oAAKCRCJc0FXrosb
+YoSBAQDIDq/htKv7REjHnAV2KwGukOU9TPsSAsooM6k17a8ZmgEAnWPhSL48uGX7
+WD8sjee5xnPM+/1mKEm9/qFsMxPALwA=
+=uVkL
+-----END PGP SIGNATURE-----
+--kcb--

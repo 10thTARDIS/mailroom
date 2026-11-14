@@ -1,0 +1,21 @@
+From: Cora Compromised <cora@example.org>
+To: Reader <reader@example.com>
+Subject: A note about my old key (cora)
+Message-ID: <kc-cora-revoke@example.test>
+Date: Wed, 21 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Autocrypt: addr=cora@example.org; keydata=
+ mDMEam3DoBYJKwYBBAHaRw8BAQdAMahc4K4nCoGVE3i2lTXQY7pH4JlFXG0ESnGtQ8PgFE+I
+ jAQgFgoANBYhBAlxH9XK5dVlkhj3VdaqWmYFEt64BQJq0KQgFh0CU3ludGhldGljIHJldm9j
+ YXRpb24ACgkQ1qpaZgUS3rgwLwEAoEzJdZL4zFm1x8CR2ldeBOmaE8cHy7PQkEMAXnSOoo8B
+ AMKOtE8ufcdDKfVgK0OpxP6moyPs8/nVtGuov8lo0wsEtCNDb3JhIENvbXByb21pc2VkIDxj
+ b3JhQGV4YW1wbGUub3JnPoiTBBMWCgA7FiEECXEf1crl1WWSGPdV1qpaZgUS3rgFAmptw6AC
+ GwMFCwkIBwICIgIGFQoJCAsCBBYCAwECHgcCF4AACgkQ1qpaZgUS3rjUJwEAtcRXQ+YVfylX
+ affnwCOMPWFSFc13STQuXHvEX+0qACoA/1HgSR+7OhzBZVVTf0ET+WWoyOXKI5s/RoYgxmzG
+ yQQCuDgEam3DoRIKKwYBBAGXVQEFAQEHQBNFej0YiieNNuSWta/QDeT/AACd2UencSHZsHhN
+ Pip4AwEIB4h4BBgWCgAgFiEECXEf1crl1WWSGPdV1qpaZgUS3rgFAmptw6ECGwwACgkQ1qpa
+ ZgUS3rj7XQD+Ju7dIFQsabNouCjilmrQoXCFicd0TasDlRWath0zhoMBANVokStb6Ac+yV8a
+ HdMDvNOQjoAXZONdtw/PDDn2JVUN
+Content-Type: text/plain; charset=utf-8
+
+My old key is no longer in use.

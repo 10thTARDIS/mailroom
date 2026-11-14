@@ -2853,6 +2853,13 @@ kbd {
 .pin-voucher-warning {
   margin: 8px 0 0;
 }
+/* The sentence is a `.hint`, whose muted colour reads 5.3:1 on the warn background
+   (AA, not the 7:1 the browser lane holds a sentence to). Inside the reader's
+   warn block it takes the block's own colour, as every other sentence there does
+   (#150). In the composer it sits on the plain background, where `.hint` is right. */
+.signature-line-pin-voucher .pin-voucher-warning {
+  color: inherit;
+}
 /* A signature by a key that has since expired (#795): neither the warn palette
    of a signature that does not check out, nor the plain note of one that does.
    The sunken background and the dashed edge mark it as a stale fact. */
