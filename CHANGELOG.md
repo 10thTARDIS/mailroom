@@ -37,6 +37,16 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   ingest-only, and would then have been applied the moment the mode was lifted. It is now
   held back like every other change.
 
+### Fixes
+
+- **A draft opened straight from its link can send as you straight away.** If the composer opened
+  before your sending addresses had finished loading, it could stay on "no sending address yet",
+  with no key to sign or encrypt with, until you closed and reopened it. It now picks up your
+  address as soon as it arrives.
+- **The note about a revoked earlier key is easier to read.** When you trusted a new key because
+  the previous key vouched for it, and that previous key was later revoked, the note under the
+  signature now uses the same text colour as the rest of the warning instead of a paler one.
+
 ### Under the hood
 
 - Code that only reads a mailbox (the sync pass, the idle watcher, account validation) can no
@@ -50,6 +60,11 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   the order changes are applied in follows when they were made, and that pausing sync (as
   opposed to ingest-only mode) keeps queueing changes to apply when sync resumes, which is
   deliberate.
+- The automated browser checks now also cover the prompts that appear when a correspondent's
+  encryption key changes, in the reading pane and in the composer: the gentler wording when their
+  previous key vouches for the new one, the ordinary prompt, the warning for a stolen previous key,
+  and the notes for a key you trusted whose voucher was later revoked. Each is checked in light,
+  dark and system dark.
 
 ### Upgrading
 
@@ -73,24 +88,12 @@ proving this release's attachment and image work end to end.
   question, the confirmation for releasing a withheld attachment, the snippet picker or the
   send-later chooser in the composer, or the add-account wizard used to close the message or
   the draft behind it as well. It now closes just that question.
-- **A draft opened straight from its link can send as you straight away.** If the composer opened
-  before your sending addresses had finished loading, it could stay on "no sending address yet",
-  with no key to sign or encrypt with, until you closed and reopened it. It now picks up your
-  address as soon as it arrives.
-- **The note about a revoked earlier key is easier to read.** When you trusted a new key because
-  the previous key vouched for it, and that previous key was later revoked, the note under the
-  signature now uses the same text colour as the rest of the warning instead of a paler one.
 
 ### Under the hood
 
 - The automated browser checks now cover this release's attachment and image work end to
   end: the risky-file question in a real browser, old attachments re-checked against a real
   virus scanner, and newsletter images loaded through the real image proxy.
-- The automated browser checks now also cover the prompts that appear when a correspondent's
-  encryption key changes, in the reading pane and in the composer: the gentler wording when their
-  previous key vouches for the new one, the ordinary prompt, the warning for a stolen previous key,
-  and the notes for a key you trusted whose voucher was later revoked. Each is checked in light,
-  dark and system dark.
 
 ## [1.103.0-beta.1] — 2026-11-10
 
