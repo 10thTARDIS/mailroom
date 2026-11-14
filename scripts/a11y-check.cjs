@@ -8198,8 +8198,9 @@ async function kcAssertSurface(page, name, surface, theme) {
 
 /** Binds one of the user's own keys to their sending identity (or unbinds it), by
  *  UserKey/set, and says which. The composer offers Encrypt only for an identity
- *  that has a key bound to it, and nothing else in this lane binds one: the keys
- *  step makes keys and leaves them unbound. So the step binds, and puts it back. */
+ *  that has a key bound to it. The keys step's own dialog binds the key it makes,
+ *  so there is normally one already (answered `already`, and left alone); when
+ *  there is not, the step binds one, and puts it back. */
 async function kcBindOwnKey(page, bind, keyId) {
   const r = await page.evaluate(async (bind, keyId) => {
     const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
@@ -8212,6 +8213,10 @@ async function kcBindOwnKey(page, bind, keyId) {
     let id = keyId;
     if (!id) {
       const [ks] = await call([["UserKey/get", { accountId, ids: null }, "k"]]);
+      // The keys step's own dialog binds the key it makes, so there is usually one
+      // already; then there is nothing to do and nothing to put back.
+      const bound = (ks[1].list || []).find((x) => x.identityId === ident.id && x.canSign === true && !x.revokedAt && !x.decryptOnly);
+      if (bound) return { keyId: bound.id, identityId: ident.id, already: true };
       const k = (ks[1].list || []).find((x) => x.canSign === true && !x.revokedAt && !x.decryptOnly && !x.expiringSoon && !x.expired && !x.identityId);
       if (!k) return { error: "no unbound, signing key that is not about to expire: " + JSON.stringify((ks[1].list || []).map((x) => ({ id: x.id, identityId: x.identityId, canSign: x.canSign, expiresAt: x.expiresAt }))) };
       id = k.id;
@@ -8227,7 +8232,7 @@ async function kcBindOwnKey(page, bind, keyId) {
 async function keyChangeSurfaces(page, cdp) {
   const seen = [];
   const own = await kcBindOwnKey(page, true);
-  console.log("key change        bound own key " + own.keyId + " to the sending identity for the composer's switch");
+  console.log("key change        own key " + own.keyId + (own.already ? " is already bound to the sending identity" : " bound to the sending identity for the composer's switch"));
   for (const theme of THEMES) {
     await chooseTheme(page, theme);
     for (const surface of ["reader", "composer"]) {
@@ -8319,7 +8324,7 @@ async function keyChangeSurfaces(page, cdp) {
   });
   await kcCloseComposer(page);
 
-  await kcBindOwnKey(page, false, own.keyId);
+  if (!own.already) await kcBindOwnKey(page, false, own.keyId);
   await load(page, "#/inbox/review");
   await waitForDesk(page);
   tally.keyChange = 1;
