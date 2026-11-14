@@ -9,6 +9,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### What's new
+
+- When you pause sync on an account, the account's health panel now tells you how many of your
+  changes are waiting ("3 changes are waiting. They will be applied to this mailbox when you turn
+  sync back on."), so you can see the backlog before you resume. Nothing extra is shown while
+  sync is on.
+
 ## [1.103.0-beta.3] — 2026-11-14
 
 **The third beta of v1.103 completes the hardening milestone.** For the person running

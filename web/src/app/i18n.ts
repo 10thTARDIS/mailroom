@@ -1048,6 +1048,10 @@ const en = {
   "health.writeback.localDurable": "Labels, filing and trash stay local and are durable.",
   "health.writeback.suppressed.one": "1 change recorded but not sent.",
   "health.writeback.suppressed.other": "{count} changes recorded but not sent.",
+  "health.pending.one":
+    "1 change is waiting. It will be applied to this mailbox when you turn sync back on.",
+  "health.pending.other":
+    "{count} changes are waiting. They will be applied to this mailbox when you turn sync back on.",
 
   "labels.title": "Apply a label",
   "labels.none": "You have no labels yet.",

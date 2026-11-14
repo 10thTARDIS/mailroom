@@ -135,6 +135,13 @@ type accountHealth struct {
 	// attachmentScanner below, which are per-USER and live on the envelope):
 	// two accounts on the same user can be in different modes.
 	Writeback healthWriteback `json:"writeback"`
+	// PendingIntentCount is how many of the user's changes are still waiting to
+	// be applied to this mailbox: intents in state pending or inflight, counted
+	// by store.CountOutstandingIntents (the same definition as
+	// mailroom_action_queue_depth). While sync is paused (ADR-028 A10) they keep
+	// queueing and all apply on resume, so the panel shows the backlog.
+	// Suppressed (ingest-only), applied, dead and discarded intents are not in it.
+	PendingIntentCount int64 `json:"pendingIntentCount"`
 	// SyncHold says why this account's sync is held OFF by the server and
 	// cannot be switched on yet (#52: a connected Gmail account until the
 	// Gmail sync model lands, oauthmail.SyncHold). Computed from the account
@@ -562,6 +569,11 @@ func (a *API) accountGetHealth(ctx context.Context, userID ulid.ULID, rawArgs js
 				Enabled:           effective,
 				SuppressedIntents: suppressed,
 			}
+			pending, err := tx.CountOutstandingIntents(ctx, ac.ID)
+			if err != nil {
+				return &MethodError{Type: errServerFail, Description: err.Error()}
+			}
+			entry.PendingIntentCount = pending
 
 			list = append(list, entry)
 		}

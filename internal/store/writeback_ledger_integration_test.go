@@ -381,3 +381,44 @@ func TestReplayCannotReachAnotherUsersLedger(t *testing.T) {
 		t.Fatalf("the ledger row is %q after another user's replay, want suppressed", got)
 	}
 }
+
+// TestOutstandingIntentCountHasAnIndex: the pending-backlog count Account/getHealth
+// reports (CountOutstandingIntents) must be servable by writeback_pending, whose
+// predicate is the same state IN ('pending','inflight'). Read with sequential
+// scans off, as TestSuppressedLedgerHasAnIndex does.
+//
+// NEGATIVE CONTROL: drop writeback_pending and the plan names another index.
+func TestOutstandingIntentCountHasAnIndex(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, _ := seedTwoUsers(t, h.super)
+
+	tx, err := h.super.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `
+		EXPLAIN SELECT count(*) FROM app.writeback_intents
+		 WHERE user_id = $1 AND account_id = $2
+		   AND state IN ('pending', 'inflight')`,
+		a.ID, a.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, line)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "writeback_pending") {
+		t.Fatalf("the pending count does not use writeback_pending:\n%s", strings.Join(plan, "\n"))
+	}
+}

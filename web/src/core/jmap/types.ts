@@ -3200,6 +3200,9 @@ export interface AccountHealth {
   deadLetters: AccountDeadLetters;
   sendQuota: AccountSendQuota;
   writeback: AccountWriteback;
+  /** Changes queued to apply to the mailbox (pending or in flight). Absent from
+   * an older server. Shown only while sync is paused. */
+  pendingIntentCount?: number;
   /** Absent when the server is not holding this account's sync off. */
   syncHold?: AccountSyncHold;
   /** Absent from a server before v1.96. */

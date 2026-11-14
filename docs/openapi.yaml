@@ -568,7 +568,17 @@ components:
         urn:ietf:params:jmap:submission: { $ref: "#/components/schemas/SubmissionCapability" }
         urn:mailroom:labels: { type: object, description: Label extension (spec §6/§13). No capability properties. }
         urn:mailroom:compose: { type: object, description: Compose/alias extension (spec §5). No capability properties. }
-        urn:mailroom:accounts: { type: object, description: In-UI account management (spec §12). No capability properties. }
+        urn:mailroom:accounts:
+          type: object
+          description: |
+            In-UI account management (spec §12). No capability properties.
+            Account/getHealth returns, per account, `pendingIntentCount`
+            (integer): how many of the user's changes are queued to be applied
+            to the mailbox (writeback intents pending or in flight). While an
+            account's sync is paused they keep queueing and all apply when sync
+            is switched back on (ADR-028 A10), so this is the backlog to expect
+            on resume. Changes withheld by ingest-only mode, and applied, dead
+            or discarded ones, are not counted.
         urn:mailroom:contacts: { type: object, description: Auto-derived contacts (spec §10a). No capability properties. }
         urn:mailroom:rules:
           type: object

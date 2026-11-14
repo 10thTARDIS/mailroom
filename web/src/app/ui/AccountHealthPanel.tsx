@@ -201,7 +201,25 @@ function SearchStaleness({ staleness }: { staleness: number | undefined }): JSX.
   );
 }
 
-function HealthCard({ h }: { h: AccountHealth }): JSX.Element {
+/**
+ * The backlog of changes queued while sync is paused (ADR-028 A10): they keep
+ * queueing and are all applied on resume, so the user sees how many before
+ * turning sync back on. Rendered only when paused AND there is something
+ * waiting; while sync is on a live queue drains in moments and a flickering
+ * number is noise. Plain text, so it does not depend on colour.
+ */
+export function PendingChanges({
+  paused,
+  count,
+}: {
+  paused: boolean;
+  count: number;
+}): JSX.Element | null {
+  if (!paused || count <= 0) return null;
+  return <p className="health-line">{tCount("health.pending", count)}</p>;
+}
+
+function HealthCard({ h, paused }: { h: AccountHealth; paused: boolean }): JSX.Element {
   const sev = severityOf(h);
   const sevLabel =
     sev === "error"
@@ -217,6 +235,7 @@ function HealthCard({ h }: { h: AccountHealth }): JSX.Element {
         <span className="health-muted">· {sevLabel}</span>
       </div>
       <SyncStatus h={h} />
+      <PendingChanges paused={paused} count={h.pendingIntentCount ?? 0} />
       <WritebackStatus h={h} />
       <DeliveryFailures h={h} />
       <DeadLetters h={h} />
@@ -235,7 +254,7 @@ function HealthCard({ h }: { h: AccountHealth }): JSX.Element {
  * accounts have problems" and "we could not ask" must not look alike.
  */
 export function AccountHealthContent(): JSX.Element {
-  const { healthCards, loading, error, loaded, searchStalenessSeconds, reload } = useAccounts();
+  const { accounts, healthCards, loading, error, loaded, searchStalenessSeconds, reload } = useAccounts();
 
   // Mount-only: opening the switcher is the gesture that asks for a fresh
   // snapshot, and re-running on every change of the snapshot itself would be a
@@ -271,7 +290,11 @@ export function AccountHealthContent(): JSX.Element {
     <>
       <ul className="health-list">
         {cards.map((h) => (
-          <HealthCard key={h.id} h={h} />
+          <HealthCard
+            key={h.id}
+            h={h}
+            paused={accounts.find((a) => a.id === h.id)?.status === "paused"}
+          />
         ))}
       </ul>
       <SearchStaleness staleness={searchStalenessSeconds} />
