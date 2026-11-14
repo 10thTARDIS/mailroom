@@ -57,6 +57,8 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   state for discarded ledger entries. Nothing needs to be done by hand. Rolling back to an
   earlier version moves any discarded entries to the failed state, as the earlier version
   cannot read the new one.
+  On a large instance the index takes a few moments to build on first start, and changes
+  you make in that moment wait for it.
 
 ## [1.103.0-beta.2] — 2026-11-13
 

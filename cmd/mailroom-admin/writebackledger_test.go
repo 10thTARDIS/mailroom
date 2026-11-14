@@ -170,3 +170,24 @@ func TestLedgerDiscardSummaryCountsPerSourceAndAccount(t *testing.T) {
 		t.Errorf("an empty discard must say so and print no table:\n%s", empty)
 	}
 }
+
+// The provider hold (ADR-047) is part of the one evaluation: a Gmail OAuth
+// account whose column reads true is still held while Gmail writeback is not
+// ready, and --apply must refuse rather than report a replay the drain undoes.
+func TestWritebackShadowReasonNamesTheProviderHold(t *testing.T) {
+	gmail := store.Account{WritebackEnabled: true, AuthKind: "oauth2", ProviderProfile: "gmail"}
+	got := writebackShadowReason(gmail, false)
+	if store.GmailWritebackReady {
+		if got != "" {
+			t.Fatalf("Gmail writeback is ready, yet the account reads as held: %q", got)
+		}
+		return
+	}
+	if !strings.Contains(got, "provider hold") {
+		t.Fatalf("a held Gmail account reads as %q; want the provider hold named", got)
+	}
+	// Control: the same account over a generic IMAP login is live.
+	if r := writebackShadowReason(store.Account{WritebackEnabled: true, AuthKind: "password", ProviderProfile: "gmail"}, false); r != "" {
+		t.Fatalf("an app-password Gmail account reads as held: %q", r)
+	}
+}

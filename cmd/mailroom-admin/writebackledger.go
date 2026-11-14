@@ -234,6 +234,13 @@ func printWritebackLedgerDiscarded(acct store.Account, rows []store.SuppressedIn
 // which is about Account/get reporting the column instead of the effective
 // value; this fixes the CLI report only.)
 func writebackShadowReason(acct store.Account, instanceDisabled bool) string {
+	// The provider hold comes from store.EffectiveWriteback, the same
+	// evaluation Account/get, getHealth and the writeback drain use (ADR-028
+	// A5). Without it, --apply on a held Gmail account reported "replayed N"
+	// while the drain put every row straight back to suppressed.
+	if eff, heldBy := store.EffectiveWriteback(acct, instanceDisabled); !eff && heldBy == store.WritebackHeldByProvider {
+		return "the provider hold is set: writeback to Gmail OAuth accounts is not enabled in this version (ADR-047)"
+	}
 	switch {
 	case !acct.WritebackEnabled && instanceDisabled:
 		return "the account's writebackEnabled column is false AND the instance-level MAILROOM_WRITEBACK_DISABLED is set"

@@ -813,7 +813,11 @@ review them by hand.
 **Limits stated rather than discovered.** The signal is a *new* copy; it does not
 see a copy that merely lost a flag, and it does not see a message another client
 moved to a folder where Mailroom already had a copy of it. It cannot tell
-"another client filed this" from "this message was re-delivered". Both errors
+"another client filed this" from "this message was re-delivered", nor from the
+copy Mailroom's OWN earlier move created: a flag the user set just after a move
+that had already been applied, then suppressed when the mode was switched on,
+is judged stale once sync records the moved copy. The flag stays in the ledger
+(reported, not lost). Both errors
 land on the safe side (skipping, not applying), and the apply report prints
 the skipped count so the operator can see how conservative it was.
 
@@ -885,9 +889,12 @@ to follow `created_at`.
 **The probe found a second defect, in the neighbouring clause.** The claim's
 `LIMIT` was not honoured: a claim of 10 against 30 pending rows came back with
 19, all of them moved to `inflight` with an attempt spent. The selection was
-`id IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT n)`, and the subselect was evidently
-evaluated more than once; the mechanism is inferred from the fix rather than
-traced. Nothing noticed because a queue rarely exceeds the batch, but a replayed
+`id IN (SELECT ... FOR UPDATE SKIP LOCKED LIMIT n)`. The review traced it on
+PostgreSQL 18: the plan is a nested-loop semi join with the locking subquery as
+the inner side, rescanned per outer row; once the UPDATE has moved rows to
+`inflight`, each rescan's lock re-check excludes them and the LIMIT window
+slides forward. The same 19 of 30 came back with index scans on and off, so the
+over-claim was live whenever the queue exceeded the batch. Nothing noticed because a queue rarely exceeds the batch, but a replayed
 ledger is exactly a queue that does. The selection is now a `MATERIALIZED` CTE
 (one evaluation), the update joins it, and the outer `ORDER BY` orders the
 result. This only ever reduces what one pass claims: the rows it no longer takes

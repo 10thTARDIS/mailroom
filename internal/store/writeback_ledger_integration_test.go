@@ -26,8 +26,9 @@ import (
 // the planner would pick a scan whether or not an index could serve the query;
 // what is being asked is whether the index is ELIGIBLE.
 //
-// NEGATIVE CONTROL: drop writeback_suppressed (or write its predicate as
-// `state::text = 'suppressed'`) and the plan below falls back to the table.
+// NEGATIVE CONTROL: drop writeback_suppressed and the plan below falls back to
+// another index with a Filter (observed in review). A `state::text` predicate is
+// not a usable control: PostgreSQL refuses it in an index (42P17, not IMMUTABLE).
 func TestSuppressedLedgerHasAnIndex(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
