@@ -502,6 +502,15 @@ export function Compose({ intent, placement, scope, onClose, onDraftSaved }: Pro
   }, [resumed, identities, parentFacts]);
 
   const [identityId, setIdentityId] = useState<string>(initialIdentity?.id ?? "");
+  // The identities can arrive AFTER the composer mounts: a draft opened from a
+  // reload's own URL renders as soon as the draft has loaded, and the identity list
+  // is fetched alongside it. useState reads its initial value once, so a composer
+  // that mounted first stayed on "no sending address yet" for good, with no key
+  // bound to sign or encrypt with (found by the browser lane's key-change surfaces,
+  // #150). Only the EMPTY choice is filled; one the user made is never replaced.
+  useEffect(() => {
+    if (identityId === "" && initialIdentity) setIdentityId(initialIdentity.id);
+  }, [identityId, initialIdentity]);
   const identity: Identity | undefined = state.identities[identityId];
   const primary = useMemo(() => primaryIdentity(identities), [identities]);
 
