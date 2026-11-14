@@ -281,7 +281,7 @@ func TestLiveUIDValidityRollWithAPartialRefetchSoftDeletesNothing(t *testing.T) 
 	// message — a truncated response, a library bug, a half-read connection. It
 	// returns no error, which is the entire point.
 	lossy := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err
@@ -358,7 +358,7 @@ func TestLiveUIDValidityRollWithAFailedCorroborationStaysPending(t *testing.T) {
 	oldV, _ := f.rollUIDValidity(t, f.archive) // recreated EMPTY: the message is gone
 
 	broken := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

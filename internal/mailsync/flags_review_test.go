@@ -56,7 +56,7 @@ func TestFlagSweepFailureStillDeliversNewMail(t *testing.T) {
 	box.status.UIDNext = 4
 	box.msgs = append(box.msgs, msg(3, 0, "brand new"))
 	bad := &badFlagsSession{fakeSession: sess}
-	sum, err := New(st, ing, func(context.Context, sync.Config) (sync.SyncSession, error) { return bad, nil },
+	sum, err := New(st, ing, func(context.Context, sync.Config) (sync.ReadSession, error) { return bad, nil },
 		WithFlagSweep(sweepOn)).SyncAccount(context.Background(), testReq())
 	if err != nil {
 		t.Fatal(err)

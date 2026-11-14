@@ -250,7 +250,7 @@ func TestAccountSetOnOAuthAccount(t *testing.T) {
 	}
 	dials := 0
 	h.api.accountSecrets = sealingSecrets{}
-	h.api.accountDialer = func(context.Context, sync.Config) (sync.SyncSession, error) {
+	h.api.accountDialer = func(context.Context, sync.Config) (sync.ReadSession, error) {
 		dials++
 		return nil, errDialRefusedForTest
 	}

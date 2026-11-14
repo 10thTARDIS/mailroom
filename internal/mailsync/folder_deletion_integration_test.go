@@ -195,7 +195,7 @@ func TestLiveDeletedFolderFailedListReconcilesNothing(t *testing.T) {
 	// The LIST fails outright — the one failure mode "the folder is gone" must never
 	// be confused with.
 	broken := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

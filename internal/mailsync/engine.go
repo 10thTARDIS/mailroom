@@ -152,10 +152,10 @@ func WithFetchChunk(n int) Option {
 	}
 }
 
-// New constructs an Engine. dial defaults to sync.Dial when nil.
+// New constructs an Engine. dial defaults to sync.DialRead when nil.
 func New(mailboxes MailboxStore, ingester Ingester, dial SessionFactory, opts ...Option) *Engine {
 	if dial == nil {
-		dial = sync.Dial
+		dial = sync.DialRead
 	}
 	e := &Engine{
 		dial:         dial,
@@ -604,7 +604,7 @@ func (e *Engine) SyncAccount(ctx context.Context, req AccountSync) (Summary, err
 // depend on the selected mailbox either.
 //
 // Summary.Duration is this call's wall time.
-func (e *Engine) SyncAccountWith(ctx context.Context, req AccountSync, sess sync.SyncSession) (Summary, error) {
+func (e *Engine) SyncAccountWith(ctx context.Context, req AccountSync, sess sync.ReadSession) (Summary, error) {
 	start := time.Now()
 	summary, err := e.syncAccountWith(ctx, req, sess)
 	summary.Duration = time.Since(start)
@@ -612,7 +612,7 @@ func (e *Engine) SyncAccountWith(ctx context.Context, req AccountSync, sess sync
 }
 
 // syncAccountWith is SyncAccountWith's body; the wrapper only times it.
-func (e *Engine) syncAccountWith(ctx context.Context, req AccountSync, sess sync.SyncSession) (Summary, error) {
+func (e *Engine) syncAccountWith(ctx context.Context, req AccountSync, sess sync.ReadSession) (Summary, error) {
 	var summary Summary
 	if err := req.validate(); err != nil {
 		return summary, err
@@ -853,7 +853,7 @@ func (e *Engine) syncAccountWith(ctx context.Context, req AccountSync, sess sync
 // space the reaper must diff in, and no other — and,
 // when that generation is NEW (a UIDVALIDITY roll), the rolledMailbox that phase
 // 2 has to finish.
-func (e *Engine) syncMailbox(ctx context.Context, req AccountSync, sess sync.SyncSession, condStore bool, name string, stored StoredMailbox, nonMail bool, summary *Summary) (mailboxSync, error) {
+func (e *Engine) syncMailbox(ctx context.Context, req AccountSync, sess sync.ReadSession, condStore bool, name string, stored StoredMailbox, nonMail bool, summary *Summary) (mailboxSync, error) {
 	status, err := sess.Select(ctx, name, sync.SelectOptions{ReadOnly: true, CondStore: condStore})
 	if err != nil {
 		return mailboxSync{}, fmt.Errorf("mailsync: select %q: %w", name, err)
@@ -1134,7 +1134,7 @@ func (e *Engine) recordPartialPoll(ctx context.Context, req AccountSync, mailbox
 // A due mailbox whose LIST-STATUS matches its last REAL observation is not asked
 // at all (#620, observationUnchanged): its cadence is re-stamped and it is NOT
 // returned as verified, so a skip can never lead to a reap.
-func (e *Engine) verifyAccount(ctx context.Context, req AccountSync, sess sync.SyncSession, condStore bool, targets []reapTarget, summary *Summary) []verifiedMailbox {
+func (e *Engine) verifyAccount(ctx context.Context, req AccountSync, sess sync.ReadSession, condStore bool, targets []reapTarget, summary *Summary) []verifiedMailbox {
 	now := e.now()
 	interval := e.observeInterval()
 	verified := make([]verifiedMailbox, 0, len(targets))
@@ -1224,7 +1224,7 @@ func countDue(targets []reapTarget, now time.Time, interval time.Duration) int {
 // EXAMINEs the mailbox, so it is the session's selected mailbox, and FetchByUID
 // operates on the selected mailbox (RFC 9051). Nothing may be inserted between
 // them.
-func (e *Engine) verifyMailbox(ctx context.Context, req AccountSync, sess sync.SyncSession, condStore bool, t reapTarget, summary *Summary) (verifiedMailbox, error) {
+func (e *Engine) verifyMailbox(ctx context.Context, req AccountSync, sess sync.ReadSession, condStore bool, t reapTarget, summary *Summary) (verifiedMailbox, error) {
 	status, uids, err := sess.LiveUIDs(ctx, t.name)
 	if err != nil {
 		// WE FAILED TO ASK. Nothing is concluded — not that a message is gone, and
@@ -1605,7 +1605,7 @@ func uidSetOf(uids []int64) sync.UIDSet {
 // provenance row", which is a coherent choice about STALE membership. It has no
 // bearing on a roll, where the alternative to reconciling is not stale membership
 // but a message that is in no folder at all and that nobody was ever told about.
-func (e *Engine) reconcileRolled(ctx context.Context, req AccountSync, sess sync.SyncSession, rolled []rolledMailbox, summary *Summary) {
+func (e *Engine) reconcileRolled(ctx context.Context, req AccountSync, sess sync.ReadSession, rolled []rolledMailbox, summary *Summary) {
 	for _, r := range rolled {
 		if err := e.reconcileGeneration(ctx, req, sess, r, summary); err != nil {
 			summary.addError(r.name, err)
@@ -1615,7 +1615,7 @@ func (e *Engine) reconcileRolled(ctx context.Context, req AccountSync, sess sync
 
 // reconcileGeneration corroborates one rolled mailbox's re-fetch against the
 // server and, if the proof holds, reconciles the retired generation.
-func (e *Engine) reconcileGeneration(ctx context.Context, req AccountSync, sess sync.SyncSession, r rolledMailbox, summary *Summary) error {
+func (e *Engine) reconcileGeneration(ctx context.Context, req AccountSync, sess sync.ReadSession, r rolledMailbox, summary *Summary) error {
 	status, uids, err := sess.LiveUIDs(ctx, r.name)
 	if err != nil {
 		// WE FAILED TO ASK. The re-fetch may have been perfect or may have been
@@ -2022,7 +2022,7 @@ type ingestBatch struct {
 // fetchAndIngest fetches the requested UIDs and ingests each message, attaching
 // provenance (account/mailbox/uid/uidvalidity/flags/internaldate). It fails on
 // the first ingest error so the caller leaves the cursors unadvanced.
-func (e *Engine) fetchAndIngest(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems) (ingestBatch, error) {
+func (e *Engine) fetchAndIngest(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems) (ingestBatch, error) {
 	var b ingestBatch
 	// Each message is ingested AS IT ARRIVES rather than after the whole range
 	// has been read (#351). The range here was once an entire mailbox — a first
@@ -2122,7 +2122,7 @@ func (e *Engine) fetchAndIngest(ctx context.Context, req AccountSync, sess sync.
 // withholding it, and the counter says how often it happens. On Gmail the re-read carries no labels (FLAGS only, a few bytes, nothing
 // against the download budget); the labels came with the body or the Gmail
 // sweep reads them.
-func (e *Engine) rereadAbsentFlags(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids []int64) error {
+func (e *Engine) rereadAbsentFlags(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids []int64) error {
 	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
 	var scratch Summary
 	_, _, _, err := e.refreshFlagsCounting(ctx, req, sess, mailboxID, status, name, uidSetOf(uids),
@@ -2156,7 +2156,7 @@ func (b *ingestBatch) add(o ingestBatch) {
 // commands of at most e.fetchChunk UIDs each (#656). It stops at the first
 // failing command and returns what the earlier ones ingested alongside the
 // error — every message is ingested as it arrives, so that work is kept.
-func (e *Engine) fetchAndIngestUIDs(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids []int64, items sync.FetchItems) (ingestBatch, error) {
+func (e *Engine) fetchAndIngestUIDs(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids []int64, items sync.FetchItems) (ingestBatch, error) {
 	var total ingestBatch
 	for _, chunk := range uidChunks(uids, e.fetchChunk) {
 		b, err := e.fetchAndIngest(ctx, req, sess, mailboxID, status, name, chunk, items)
@@ -2180,7 +2180,7 @@ func (e *Engine) fetchAndIngestUIDs(ctx context.Context, req AccountSync, sess s
 // Errors are wrapped/named exactly like fetchAndIngest's, for the same reason:
 // a callback error is already named, and only a transport-level failure needs
 // the fetch context added.
-func (e *Engine) refreshFlags(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems, summary *Summary) (refreshed int, missing []int64, err error) {
+func (e *Engine) refreshFlags(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems, summary *Summary) (refreshed int, missing []int64, err error) {
 	refreshed, missing, _, err = e.refreshFlagsCounting(ctx, req, sess, mailboxID, status, name, uids, items, "refresh", summary)
 	return refreshed, missing, err
 }
@@ -2203,7 +2203,7 @@ func (e *Engine) refreshFlags(ctx context.Context, req AccountSync, sess sync.Sy
 // patch 2), the same absent-versus-empty rule #52 review H1 set for
 // X-GM-LABELS. A FLAGS item that WAS parsed is a genuine reading even if a
 // later item in the same command fails, so per-message commits stay.
-func (e *Engine) refreshFlagsCounting(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems, path string, summary *Summary) (refreshed int, missing []int64, labelChanges int, err error) {
+func (e *Engine) refreshFlagsCounting(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, uids sync.UIDSet, items sync.FetchItems, path string, summary *Summary) (refreshed int, missing []int64, labelChanges int, err error) {
 	applied, absent := 0, 0
 	defer func() {
 		if absent > 0 {

@@ -20,13 +20,22 @@ import (
 // channel, not a delivery-guaranteed one — see notify.
 const notificationBufferSize = 64
 
-// SyncSession is the anti-corruption seam over go-imap v2's imapclient
-// package (spec §3/§4). No go-imap type appears in this interface, or
-// anywhere else exported from this package: callers only ever see
-// mailroom's own Mailbox/MailboxStatus/Message/Notification/Error types.
-// This keeps go-imap's pre-stable API churn from rippling into the
-// single-account sync engine (#10) or anything downstream of it.
-type SyncSession interface {
+// ReadSession is everything a session can do WITHOUT changing the mailbox:
+// list, select, fetch, search, capability probes, IDLE and teardown. It is what
+// the sync engine, the IDLE watcher and onboarding validation are given
+// (ADR-028 amendment A7), so a write call from any of them does not compile.
+//
+// ⚠ WHAT THIS IS AND IS NOT. It is a compile-time fact about METHOD CALLS: code
+// holding a ReadSession has no StoreFlags, Copy, Move, Expunge or Append to call.
+// It is not a capability boundary at runtime: the value behind it is the same
+// connection, and a type assertion to WriteSession would succeed. ADR-028 §3's
+// structural control (the writer is constructed in exactly one place, behind the
+// shadow check) is still the control; this is the second lock, and "no code
+// asserts it back" remains a grep.
+//
+// SearchMessageID is here, not with the writes: it is a read (UID SEARCH HEADER),
+// and the writeback engine's Sent self-append dedup needs it through the writer.
+type ReadSession interface {
 	// ListMailboxes returns every mailbox visible to the account, including
 	// RFC 6154 SPECIAL-USE attributes when the server supports SPECIAL-USE.
 	//
@@ -88,58 +97,6 @@ type SyncSession interface {
 	// An empty set with a nil error means the server said the mailbox is
 	// empty. An error means we FAILED TO ASK — never that anything is gone.
 	LiveUIDs(ctx context.Context, mailbox string) (*MailboxStatus, []UID, error)
-
-	// StoreFlags issues a UID STORE that adds and/or removes flags/keywords
-	// on the message identified by uid in mailbox (RFC 9051 §6.4.6),
-	// implemented as two STORE commands (+FLAGS.SILENT / -FLAGS.SILENT) when
-	// both add and remove are non-empty, one otherwise. It is a no-op when
-	// both are empty. mailbox is SELECTed read-write first if it is not
-	// already this session's current write-selected mailbox (see the
-	// package doc on writeSelected in session.go for why writes never trust
-	// a prior read-only EXAMINE).
-	StoreFlags(ctx context.Context, mailbox string, uid UID, add, remove []Flag) error
-
-	// Copy copies every message in uids from mailbox to dest in one command
-	// (UID COPY, RFC 9051 §6.4.8). uids must not be empty.
-	Copy(ctx context.Context, mailbox string, uids UIDSet, dest string) error
-
-	// Move moves every message in uids from mailbox to dest in one command
-	// (UID MOVE, RFC 6851) when the server advertises
-	// Supports(CapabilityMove). Otherwise go-imap's client library falls
-	// back internally to UID COPY + UID STORE +FLAGS.SILENT \Deleted +
-	// (UID) EXPUNGE/EXPUNGE — see move.go in
-	// github.com/emersion/go-imap/v2/imapclient, read directly out of the
-	// module cache for this change. uids must not be empty.
-	Move(ctx context.Context, mailbox string, uids UIDSet, dest string) error
-
-	// Expunge permanently removes every message in uids from mailbox (UID
-	// EXPUNGE, RFC 4315 UIDPLUS / RFC 9051 IMAP4rev2). When the server
-	// supports neither, there is no protocol-level way to expunge a UID
-	// subset, so Expunge falls back to a plain EXPUNGE, which removes every
-	// \Deleted message in mailbox — on such servers the caller must ensure
-	// uids is exactly the set of messages it marked \Deleted before calling
-	// Expunge. uids must not be empty.
-	//
-	// It returns HOW MANY MESSAGES THE SERVER SAID IT REMOVED — one per
-	// untagged EXPUNGE response — because a UID EXPUNGE naming a UID the
-	// server no longer holds succeeds while removing nothing (#296). Without
-	// that number, "I destroyed the message" and "there was nothing there"
-	// are the same green, which is the failure mode #268 was about. A count
-	// of 0 with a nil error is therefore a real and expected answer, not an
-	// error; on the no-UIDPLUS fallback the count is every \Deleted message
-	// the mailbox held, so treat it as "at least this much happened" rather
-	// than as attributable per UID.
-	Expunge(ctx context.Context, mailbox string, uids UIDSet) (int, error)
-
-	// Append appends body (raw RFC 5322 message bytes) to mailbox with the
-	// given flags and internalDate (RFC 9051 §6.3.11). A zero internalDate
-	// lets the server assign one. APPEND does not require mailbox to be
-	// selected. It returns the message's assigned UID when the server
-	// advertises Supports(CapabilityUIDPlus) (RFC 4315) and actually returns
-	// an APPENDUID response code; otherwise it returns UID(0) with a nil
-	// error, and the caller must discover the UID some other way (e.g. a
-	// follow-up FetchByUID/search) on such servers.
-	Append(ctx context.Context, mailbox string, flags []Flag, internalDate time.Time, body []byte) (UID, error)
 
 	// SearchMessageID returns the UIDs in mailbox whose Message-ID header
 	// equals messageID (angle brackets optional; the server matches the
@@ -204,6 +161,82 @@ type SyncSession interface {
 	// Close immediately closes the underlying connection. Safe to call
 	// after Logout, or instead of it.
 	Close() error
+}
+
+// WriteSession is the five calls that CHANGE a mailbox's contents. Nothing
+// outside internal/sync's Writer adapter calls them in production (ADR-028 §3),
+// and no read-only path is handed this interface.
+//
+// There is deliberately no Create, Delete, Rename or Subscribe here: no code
+// path can create, delete or rename a remote folder (the one exception, the
+// Gmail label CREATE, is GmailWriteSession and is not part of any of these).
+type WriteSession interface {
+	// StoreFlags issues a UID STORE that adds and/or removes flags/keywords
+	// on the message identified by uid in mailbox (RFC 9051 §6.4.6),
+	// implemented as two STORE commands (+FLAGS.SILENT / -FLAGS.SILENT) when
+	// both add and remove are non-empty, one otherwise. It is a no-op when
+	// both are empty. mailbox is SELECTed read-write first if it is not
+	// already this session's current write-selected mailbox (see the
+	// package doc on writeSelected in session.go for why writes never trust
+	// a prior read-only EXAMINE).
+	StoreFlags(ctx context.Context, mailbox string, uid UID, add, remove []Flag) error
+
+	// Copy copies every message in uids from mailbox to dest in one command
+	// (UID COPY, RFC 9051 §6.4.8). uids must not be empty.
+	Copy(ctx context.Context, mailbox string, uids UIDSet, dest string) error
+
+	// Move moves every message in uids from mailbox to dest in one command
+	// (UID MOVE, RFC 6851) when the server advertises
+	// Supports(CapabilityMove). Otherwise go-imap's client library falls
+	// back internally to UID COPY + UID STORE +FLAGS.SILENT \Deleted +
+	// (UID) EXPUNGE/EXPUNGE — see move.go in
+	// github.com/emersion/go-imap/v2/imapclient, read directly out of the
+	// module cache for this change. uids must not be empty.
+	Move(ctx context.Context, mailbox string, uids UIDSet, dest string) error
+
+	// Expunge permanently removes every message in uids from mailbox (UID
+	// EXPUNGE, RFC 4315 UIDPLUS / RFC 9051 IMAP4rev2). When the server
+	// supports neither, there is no protocol-level way to expunge a UID
+	// subset, so Expunge falls back to a plain EXPUNGE, which removes every
+	// \Deleted message in mailbox — on such servers the caller must ensure
+	// uids is exactly the set of messages it marked \Deleted before calling
+	// Expunge. uids must not be empty.
+	//
+	// It returns HOW MANY MESSAGES THE SERVER SAID IT REMOVED — one per
+	// untagged EXPUNGE response — because a UID EXPUNGE naming a UID the
+	// server no longer holds succeeds while removing nothing (#296). Without
+	// that number, "I destroyed the message" and "there was nothing there"
+	// are the same green, which is the failure mode #268 was about. A count
+	// of 0 with a nil error is therefore a real and expected answer, not an
+	// error; on the no-UIDPLUS fallback the count is every \Deleted message
+	// the mailbox held, so treat it as "at least this much happened" rather
+	// than as attributable per UID.
+	Expunge(ctx context.Context, mailbox string, uids UIDSet) (int, error)
+
+	// Append appends body (raw RFC 5322 message bytes) to mailbox with the
+	// given flags and internalDate (RFC 9051 §6.3.11). A zero internalDate
+	// lets the server assign one. APPEND does not require mailbox to be
+	// selected. It returns the message's assigned UID when the server
+	// advertises Supports(CapabilityUIDPlus) (RFC 4315) and actually returns
+	// an APPENDUID response code; otherwise it returns UID(0) with a nil
+	// error, and the caller must discover the UID some other way (e.g. a
+	// follow-up FetchByUID/search) on such servers.
+	Append(ctx context.Context, mailbox string, flags []Flag, internalDate time.Time, body []byte) (UID, error)
+}
+
+// SyncSession is a session that can read AND write: what Dial returns and what
+// the writeback engine's Writer adapts. Code that does not write should take a
+// ReadSession instead (ADR-028 amendment A7).
+//
+// It is the anti-corruption seam over go-imap v2's imapclient package (spec
+// §3/§4). No go-imap type appears in this interface, or anywhere else exported
+// from this package: callers only ever see mailroom's own
+// Mailbox/MailboxStatus/Message/Notification/Error types. This keeps go-imap's
+// pre-stable API churn from rippling into the single-account sync engine (#10)
+// or anything downstream of it.
+type SyncSession interface {
+	ReadSession
+	WriteSession
 }
 
 // IdleSession represents a running IMAP IDLE command.
@@ -941,4 +974,23 @@ func (i *idleSession) Wait() error {
 		return newOpError("idle", err)
 	}
 	return nil
+}
+
+// DialRead is Dial narrowed to the read half (ADR-028 amendment A7): it opens
+// the same authenticated connection and hands back only the methods that cannot
+// change the mailbox. It is what the sync engine, the IDLE watcher and onboarding
+// validation dial with, so a write call from any of them does not compile.
+//
+// It is a distinct function rather than a conversion at each call site so that a
+// dial seam typed `func(ctx, Config) (ReadSession, error)` has a production value
+// that needs no wrapper, and so "which code dials read-only" is one grep.
+func DialRead(ctx context.Context, cfg Config) (ReadSession, error) {
+	s, err := Dial(ctx, cfg)
+	if err != nil {
+		// Never `return s, err`: s is a nil SyncSession here, and converting a nil
+		// interface value to another interface type yields a nil interface, but
+		// spelling it out keeps the next edit from changing that.
+		return nil, err
+	}
+	return s, nil
 }

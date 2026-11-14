@@ -72,7 +72,7 @@ func (f *liveFixture) chunkPass(t *testing.T, failOn, failAfter int) (Summary, *
 	t.Helper()
 	rec := &chunkRecorder{selects: map[string]int{}, failOn: failOn, failAfter: failAfter}
 	e := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

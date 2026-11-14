@@ -75,7 +75,7 @@ func TestLiveGmailReadPathEndToEnd(t *testing.T) {
 	g.Append(allMail, &gmailtest.Message{Body: body("a draft", "5@example.com", ""), WireLabels: `\Draft "&AAA-x"`, MsgID: 105, ThrID: 903})
 
 	clock := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
-	e := New(NewStoreAdapter(st), ingest.New(st, mustBlobs(t)), sync.Dial,
+	e := New(NewStoreAdapter(st), ingest.New(st, mustBlobs(t)), sync.DialRead,
 		WithClock(func() time.Time { return clock }), WithReapInterval(time.Nanosecond))
 	req := AccountSync{UserID: userID, AccountID: accountID, Config: g.Listen(sync.TLSInsecure), DEK: randomKey(t), DEKID: ulid.Make(),
 		Gmail: &GmailSync{DailyBudgetBytes: 10_000_000, LabelSweepInterval: time.Hour}}

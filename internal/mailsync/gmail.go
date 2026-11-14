@@ -207,7 +207,7 @@ func gmailMailboxSynced(m sync.Mailbox) bool {
 // startGmailPass checks the account really is Gmail with All Mail visible,
 // and reads today's meter. Any failure fails the whole pass: syncing a Gmail
 // account any other way is the thing ADR-047 exists to prevent.
-func (e *Engine) startGmailPass(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxes []sync.Mailbox) (*gmailPass, error) {
+func (e *Engine) startGmailPass(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxes []sync.Mailbox) (*gmailPass, error) {
 	gs, ok := e.store.(GmailStore)
 	if !ok {
 		return nil, errors.New("mailsync: this store cannot sync Gmail (no GmailStore)")
@@ -283,7 +283,7 @@ type sized struct {
 }
 
 // fetchSizes reads RFC822.SIZE (no bodies) for a UID set.
-func fetchSizes(ctx context.Context, sess sync.SyncSession, name string, uids sync.UIDSet) ([]sized, error) {
+func fetchSizes(ctx context.Context, sess sync.ReadSession, name string, uids sync.UIDSet) ([]sized, error) {
 	var out []sized
 	err := sess.FetchByUID(ctx, uids, sync.FetchItems{RFC822Size: true}, func(m sync.Message) error {
 		out = append(out, sized{uid: int64(m.UID), size: m.RFC822Size})
@@ -319,7 +319,7 @@ func (g *gmailPass) takeWithin(cands []sized, budget int64) []sized {
 
 // fetchBudgeted fetches and ingests the given candidates' bodies, metering
 // each command's bytes. It never fetches a UID that is not in cands.
-func (e *Engine) fetchBudgeted(ctx context.Context, req AccountSync, sess sync.SyncSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, cands []sized, items sync.FetchItems) (ingestBatch, error) {
+func (e *Engine) fetchBudgeted(ctx context.Context, req AccountSync, sess sync.ReadSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, cands []sized, items sync.FetchItems) (ingestBatch, error) {
 	var total ingestBatch
 	uids := make([]int64, len(cands))
 	for i, c := range cands {
@@ -370,7 +370,7 @@ func unseenSize(set sync.UIDSet, seen []int64, size map[int64]int64) int64 {
 }
 
 // syncGmailMailbox is syncMailbox for a Gmail \All, \Junk or \Trash mailbox.
-func (e *Engine) syncGmailMailbox(ctx context.Context, req AccountSync, sess sync.SyncSession, g *gmailPass, condStore bool, name string, stored StoredMailbox, summary *Summary) (mailboxSync, int64, error) {
+func (e *Engine) syncGmailMailbox(ctx context.Context, req AccountSync, sess sync.ReadSession, g *gmailPass, condStore bool, name string, stored StoredMailbox, summary *Summary) (mailboxSync, int64, error) {
 	status, err := sess.Select(ctx, name, sync.SelectOptions{ReadOnly: true, CondStore: condStore})
 	if err != nil {
 		return mailboxSync{}, 0, fmt.Errorf("mailsync: select %q: %w", name, err)
@@ -499,7 +499,7 @@ func (e *Engine) syncGmailMailbox(ctx context.Context, req AccountSync, sess syn
 // the history share of the budget lasts. It returns the new floor; the floor
 // is persisted after every chunk, so whatever was fetched is never fetched
 // again. errBudgetSpent means it stopped for the day.
-func (e *Engine) backfillGmailHistory(ctx context.Context, req AccountSync, sess sync.SyncSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, floor int64, items sync.FetchItems, summary *Summary) (int64, error) {
+func (e *Engine) backfillGmailHistory(ctx context.Context, req AccountSync, sess sync.ReadSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, floor int64, items sync.FetchItems, summary *Summary) (int64, error) {
 	step := int64(e.fetchChunk)
 	for floor > 1 {
 		if g.remaining(true) <= 0 {
@@ -551,7 +551,7 @@ func (e *Engine) backfillGmailHistory(ctx context.Context, req AccountSync, sess
 // left for the gap backfill. Progress is recorded after every chunk
 // (app.mailboxes.label_sweep_next_uid), so an interrupted sweep resumes
 // rather than starting over.
-func (e *Engine) sweepGmailLabels(ctx context.Context, req AccountSync, sess sync.SyncSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, from, lastSeen int64, summary *Summary) error {
+func (e *Engine) sweepGmailLabels(ctx context.Context, req AccountSync, sess sync.ReadSession, g *gmailPass, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, from, lastSeen int64, summary *Summary) error {
 	for lo := from; lo <= lastSeen; lo += gmailSweepChunk {
 		hi := lo + gmailSweepChunk - 1
 		if hi > lastSeen {

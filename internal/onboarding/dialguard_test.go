@@ -58,7 +58,7 @@ func TestValidationRefusesARebindBetweenCheckAndDial(t *testing.T) {
 func TestValidationDialCarriesThePolicy(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		var got sync.Config
-		dial := func(_ context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		dial := func(_ context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			got = cfg
 			return nil, errors.New("recorded")
 		}

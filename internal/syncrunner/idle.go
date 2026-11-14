@@ -327,7 +327,7 @@ func (r *Runner) idleSession(ctx context.Context, userID ulid.ULID, acct store.A
 //
 // Non-EXISTS hints (flag/expunge changes) are ignored WITHOUT leaving IDLE —
 // they are not new mail, and the periodic reap/poll reconciles them.
-func (r *Runner) awaitIdleEvent(ctx context.Context, sess sync.SyncSession, notifs <-chan sync.Notification, idle sync.IdleSession) (trigger bool, err error) {
+func (r *Runner) awaitIdleEvent(ctx context.Context, sess sync.ReadSession, notifs <-chan sync.Notification, idle sync.IdleSession) (trigger bool, err error) {
 	reissue := time.NewTimer(r.idleReissue)
 	defer reissue.Stop()
 

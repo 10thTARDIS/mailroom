@@ -553,12 +553,13 @@ func (a *API) accountGetHealth(ctx context.Context, userID ulid.ULID, rawArgs js
 			// value (the column ANDed with the instance-wide switch), not the column
 			// alone — see healthWriteback's doc comment for why the distinction
 			// matters to a reader of this panel.
+			effective, _ := store.EffectiveWriteback(ac, a.store.WritebackDisabled())
 			suppressed, err := tx.SuppressedIntentCount(ctx, ac.ID)
 			if err != nil {
 				return &MethodError{Type: errServerFail, Description: err.Error()}
 			}
 			entry.Writeback = healthWriteback{
-				Enabled:           ac.WritebackEnabled && !a.store.WritebackDisabled() && !writebackHeld(ac),
+				Enabled:           effective,
 				SuppressedIntents: suppressed,
 			}
 

@@ -102,7 +102,7 @@ type ReconnectLister interface {
 //     so a warm connection is reused across passes.
 type Syncer interface {
 	SyncAccount(ctx context.Context, req mailsync.AccountSync) (mailsync.Summary, error)
-	SyncAccountWith(ctx context.Context, req mailsync.AccountSync, sess sync.SyncSession) (mailsync.Summary, error)
+	SyncAccountWith(ctx context.Context, req mailsync.AccountSync, sess sync.ReadSession) (mailsync.Summary, error)
 }
 
 // Prepare converts a stored account into a ready-to-sync request: it opens the
@@ -330,10 +330,10 @@ type Runner struct {
 	// connection via Syncer.SyncAccount (dial+close), exactly as before Stage 3.
 	// poolIdleTimeout evicts a warm connection unused longer than it. poolDial
 	// opens a fresh sync connection (a seam so the pool unit-tests with no
-	// network); production is sync.Dial.
+	// network); production is sync.DialRead.
 	poolEnabled     bool
 	poolIdleTimeout time.Duration
-	poolDial        func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)
+	poolDial        func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)
 
 	// --- IMAP IDLE (mailroom#103 Stage 2) --------------------------------
 	// idleEnabled gates RunIdle entirely (off => poll-only, RunIdle returns
@@ -343,7 +343,7 @@ type Runner struct {
 	// metrics (0 down / 1 connecting / 2 idling).
 	idleEnabled bool
 	idleReissue time.Duration
-	idleDial    func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)
+	idleDial    func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)
 	idleState   func(accountID ulid.ULID, state float64)
 }
 
@@ -473,10 +473,10 @@ func WithPool(enabled bool, idleTimeout time.Duration) Option {
 }
 
 // WithPoolDialer overrides how the sync pool opens a fresh connection (default
-// sync.Dial). It is the seam that lets the pool unit-test against fake sessions
+// sync.DialRead). It is the seam that lets the pool unit-test against fake sessions
 // with no network, and it is where a dial-counting factory is injected to prove
 // reuse.
-func WithPoolDialer(d func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)) Option {
+func WithPoolDialer(d func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)) Option {
 	return func(r *Runner) {
 		if d != nil {
 			r.poolDial = d
@@ -485,9 +485,9 @@ func WithPoolDialer(d func(ctx context.Context, cfg sync.Config) (sync.SyncSessi
 }
 
 // WithIdleDialer overrides how an IDLE watcher opens its own IMAP session
-// (default sync.Dial). It is the seam that lets the watcher unit-test against a
+// (default sync.DialRead). It is the seam that lets the watcher unit-test against a
 // fake SyncSession with no network.
-func WithIdleDialer(d func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)) Option {
+func WithIdleDialer(d func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)) Option {
 	return func(r *Runner) {
 		if d != nil {
 			r.idleDial = d
@@ -521,9 +521,9 @@ func New(lister AccountLister, syncer Syncer, prepare Prepare, opts ...Option) *
 		gates:           make(map[ulid.ULID]map[ulid.ULID]*syncGate),
 		pools:           make(map[ulid.ULID]map[ulid.ULID]*pooledSession),
 		poolIdleTimeout: DefaultPoolIdleTimeout,
-		poolDial:        sync.Dial,
+		poolDial:        sync.DialRead,
 		idleReissue:     DefaultIdleReissue,
-		idleDial:        sync.Dial,
+		idleDial:        sync.DialRead,
 		idleState:       func(ulid.ULID, float64) {},
 	}
 	for _, o := range opts {
@@ -545,13 +545,13 @@ func New(lister AccountLister, syncer Syncer, prepare Prepare, opts ...Option) *
 		r.poolIdleTimeout = DefaultPoolIdleTimeout
 	}
 	if r.poolDial == nil {
-		r.poolDial = sync.Dial
+		r.poolDial = sync.DialRead
 	}
 	if r.idleReissue <= 0 {
 		r.idleReissue = DefaultIdleReissue
 	}
 	if r.idleDial == nil {
-		r.idleDial = sync.Dial
+		r.idleDial = sync.DialRead
 	}
 	if r.idleState == nil {
 		r.idleState = func(ulid.ULID, float64) {}

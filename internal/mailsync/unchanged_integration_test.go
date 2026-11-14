@@ -49,7 +49,7 @@ func (f *liveFixture) countingPass(t *testing.T) (Summary, *countingSession) {
 	t.Helper()
 	counter := &countingSession{selects: map[string]int{}, lives: map[string]int{}}
 	e := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

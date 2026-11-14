@@ -236,8 +236,10 @@ CREATE TYPE app.job_state        AS ENUM ('pending', 'running', 'done',
 -- what an intent becomes on an ingest-only account, forming a countable ledger
 -- of every change Mailroom would have made to a mailbox it must not touch.
 -- Lifting the mode does NOT drain it; replay is an explicit --apply command.
+-- 'discarded' (ADR-028 A3, migration 00099) is the operator's decision never to
+-- replay a ledger row: TERMINAL, never claimed, and not a failure ('dead' is).
 CREATE TYPE app.intent_state     AS ENUM ('pending', 'inflight', 'applied',
-                                          'dead', 'suppressed');
+                                          'dead', 'suppressed', 'discarded');
 CREATE TYPE app.key_kind         AS ENUM ('pgp', 'smime');
 CREATE TYPE app.dsn_action       AS ENUM ('failed', 'delayed', 'delivered',
                                           'relayed', 'expanded');
@@ -1590,6 +1592,11 @@ CREATE INDEX writeback_pending ON app.writeback_intents (account_id, created_at)
   WHERE state IN ('pending', 'inflight');
 CREATE INDEX writeback_dead ON app.writeback_intents (user_id, created_at)
   WHERE state = 'dead';
+-- The ingest-only ledger (ADR-028 A6, migration 00098): SuppressedIntentCount
+-- runs on every Account/getHealth poll and the writeback-ledger report reads
+-- the same rows. Leads with user_id; the predicate must match the queries'.
+CREATE INDEX writeback_suppressed ON app.writeback_intents (user_id, account_id)
+  WHERE state = 'suppressed';
 
 -- One durable job table for every timer in the product (spec §16):
 -- snooze wake-ups, delayed submission (Undo Send / send-later), trash purge,

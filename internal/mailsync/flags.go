@@ -174,7 +174,7 @@ func (s *sweepStates) get(id ulid.ULID, validity int64) *sweepState {
 // Readings are applied only after the FETCH command completed (FetchByUID
 // returned nil), and a message whose response lacks FLAGS is no reading
 // (#909).
-func (e *Engine) sweepFlags(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, lastSeen int64, summary *Summary) error {
+func (e *Engine) sweepFlags(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, lastSeen int64, summary *Summary) error {
 	cfg := e.sweepCfg
 	now := e.now()
 	st := e.sweeps.get(mailboxID, int64(status.UIDValidity))
@@ -245,7 +245,7 @@ func (e *Engine) sweepFlags(ctx context.Context, req AccountSync, sess sync.Sync
 // is skipped (review L6 of #910): the server has not been told about the local
 // edit yet, so its reading is older than Mailroom's. The sweep after the
 // writeback drains converges.
-func (e *Engine) sweepRange(ctx context.Context, req AccountSync, sess sync.SyncSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, lo, hi int64, keywords bool, summary *Summary) error {
+func (e *Engine) sweepRange(ctx context.Context, req AccountSync, sess sync.ReadSession, mailboxID ulid.ULID, status *sync.MailboxStatus, name string, lo, hi int64, keywords bool, summary *Summary) error {
 	type reading struct {
 		uid   int64
 		flags []string
@@ -372,6 +372,6 @@ func sameFlags(a, b []string) bool {
 
 // sweepable reports whether the flag sweep should run against this session:
 // configured, and the server has no CONDSTORE and no QRESYNC.
-func (e *Engine) sweepable(sess sync.SyncSession, condStore bool) bool {
+func (e *Engine) sweepable(sess sync.ReadSession, condStore bool) bool {
 	return e.sweepCfg.enabled() && !condStore && !sess.Supports(sync.CapabilityQResync)
 }

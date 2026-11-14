@@ -57,7 +57,7 @@ var allowPrivateHostsTestMaster = []byte("mailroom-admin-allow-private-key")
 // comes back.
 type recordingIMAPDialer struct{ called bool }
 
-func (d *recordingIMAPDialer) dial(context.Context, sync.Config) (sync.SyncSession, error) {
+func (d *recordingIMAPDialer) dial(context.Context, sync.Config) (sync.ReadSession, error) {
 	d.called = true
 	return nil, errors.New("recordingIMAPDialer: reached (this is the observation, not a failure)")
 }

@@ -52,7 +52,7 @@ func (r *recordingSession) FetchByUID(ctx context.Context, uids sync.UIDSet, ite
 // session is wrapped to record every FETCH into log.
 func (f *liveFixture) recordingEngine(log *fetchLog) *Engine {
 	return New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs),
-		func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+		func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 			s, err := sync.Dial(ctx, cfg)
 			if err != nil {
 				return nil, err

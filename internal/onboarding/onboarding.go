@@ -26,8 +26,8 @@ type AccountStore interface {
 }
 
 // Dialer opens an authenticated IMAP session used to validate an account's
-// credentials. The production value is sync.Dial; tests inject a fake.
-type Dialer func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error)
+// credentials. The production value is sync.DialRead; tests inject a fake.
+type Dialer func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error)
 
 // AccountSpec is the operator-provided description of an account to add.
 type AccountSpec struct {
@@ -104,7 +104,7 @@ type options struct {
 	resolver     egress.Resolver
 }
 
-// WithDialer overrides the IMAP dialer used for validation (default sync.Dial).
+// WithDialer overrides the IMAP dialer used for validation (default sync.DialRead).
 func WithDialer(d Dialer) Option { return func(o *options) { o.dial = d } }
 
 // ErrHostNotPermitted is returned when the account's IMAP host resolves to an
@@ -162,7 +162,7 @@ func AddAccount(ctx context.Context, st AccountStore, keys crypto.KeyProvider, u
 	if err := spec.Validate(); err != nil {
 		return Result{}, err
 	}
-	o := options{dial: sync.Dial, log: slog.Default()}
+	o := options{dial: sync.DialRead, log: slog.Default()}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -274,14 +274,14 @@ var TLSImplicit = sync.TLSImplicit
 // standalone validation + SPECIAL-USE-detection step AddAccount runs, factored
 // out so the JMAP Account/set path can reuse the EXACT same check (dial, confirm
 // the credentials work, detect folders) and surface a failure as a per-object
-// /set error rather than a 500. dial defaults to the production sync.Dial when
+// /set error rather than a 500. dial defaults to the production sync.DialRead when
 // nil. It performs I/O and no database work, so a caller runs it OUTSIDE any
 // database transaction.
 func ValidateAccount(ctx context.Context, dial Dialer, spec AccountSpec, opts ...Option) (int, error) {
 	if err := spec.Validate(); err != nil {
 		return 0, err
 	}
-	o := options{dial: sync.Dial, log: slog.Default()}
+	o := options{dial: sync.DialRead, log: slog.Default()}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -305,7 +305,7 @@ func validateIMAP(ctx context.Context, o options, spec AccountSpec) (int, error)
 		ServerName:         spec.ServerName,
 		InsecureSkipVerify: spec.InsecureSkipVerify,
 		// The SAME rule the pre-dial check below applies, carried onto the dial
-		// itself (#625 §3): sync.Dial resolves once, refuses unless every
+		// itself (#625 §3): sync.DialRead resolves once, refuses unless every
 		// address passes, and connects to the checked literal. Validation and
 		// every later sync pass are therefore held to one rule, through one
 		// resolver seam.
@@ -338,7 +338,7 @@ func validateIMAP(ctx context.Context, o options, spec AccountSpec) (int, error)
 	// rules, same address list, one implementation. On its own this check does
 	// not close DNS rebinding (see egress.CheckHost): the dial re-resolves. What
 	// closes it is that every account dial is now guarded too (#625 §3) — the
-	// IMAP dial below and every later sync pass through sync.Dial's
+	// IMAP dial below and every later sync pass through sync.DialRead's
 	// egress.Dialer, and the SMTP submission dial through provider.SMTPSender's
 	// — each of which checks the address it is about to connect to and dials
 	// that literal. This check stays because it is the only place the SMTP host
