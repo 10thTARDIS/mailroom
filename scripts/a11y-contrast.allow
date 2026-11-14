@@ -130,6 +130,11 @@
 # same muted tone as the tile notes above, measured 5.34:1 in the light theme.
 # Never the only carrier: the chip's accessible name says the same.
 .compose-chip-nokey 5.3 a recipient chip's "no key" note
+# A recipient chip's "key held" note (⚿), first linted when the key-change composer
+# surfaces (#150) put a recipient who has a key in the composer: the seal tone on the
+# chip's face, 6.29:1 measured in the light theme. Never the only carrier: the glyph
+# and the chip's accessible name say the same.
+.compose-chip-key 6.2 a recipient chip's "key held" note
 # A link inside a quoted paragraph of the composer's body, first linted when the
 # quoted-reply surface (ADR-051 beta 5) put a formatted original's link in the
 # editor: the link colour on the editor surface, 6.68:1 measured in the dark theme.
@@ -165,3 +170,17 @@
 # #1e2228, measured 6.68:1): the held file's name and its WITHHELD pill.
 .attachment-withheld-open>.attachment-name 6.6 a held file's name on its withheld chip
 .attachment-withheld-state 6.6 the WITHHELD pill on a withheld chip
+# The composer's Encrypt switch sentences (#150): "Can't encrypt: ..." and the rule-8
+# note, both `.hint`, the muted tone on the composer's plain face, 5.94:1 measured in
+# the light theme. Said in words (never colour alone) and announced as status.
+.compose-encrypt-note 5.9 the composer's encryption note under the switch
+.pin-voucher-warning 5.9 the "previous key has since been revoked" note where it sits on the plain face (the composer)
+# The composer's Rich text / Markdown toggle label, first linted when a composer
+# surface was held open with its toolbar drawn: the same muted tone, 5.94:1 in light.
+.editor-markdown-toggle>span 5.9 the composer's Markdown toggle label
+# The key-change prompt's Keep and Import buttons (#150) are the browser's own
+# button face, which the dark theme draws white on #6b6b6b, 5.32:1 (AA passes; the
+# light theme's black on #efefef is far above 7:1). Only the primary Trust button
+# carries the app's button class. Each is named by its words.
+.key-change-actions>button 5.3 the key-change prompt's decision buttons on the browser's own dark button face
+.key-import-action>button 5.3 the "Import a key for this sender" button on the same face

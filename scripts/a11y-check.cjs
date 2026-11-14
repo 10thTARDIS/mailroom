@@ -8094,6 +8094,19 @@ async function kcMakeDraft(page, name) {
   const made = await page.evaluate(async (m) => {
     const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
     const accountId = Object.values(sess.primaryAccounts)[0];
+    // A saved draft carries its From. Without one the composer chooses a sending
+    // identity itself, which it did late under load (it said "no sending address
+    // yet" for the whole wait), and an unbound identity draws no Encrypt switch.
+    const idRes = await (await fetch(sess.apiUrl, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission"],
+        methodCalls: [["Identity/get", { accountId, ids: null }, "i"]],
+      }),
+    })).json();
+    const ident = idRes.methodResponses[0][1].list.find((i) => !i.isWildcard);
     const res = await fetch(sess.apiUrl, {
       method: "POST",
       credentials: "include",
@@ -8102,6 +8115,7 @@ async function kcMakeDraft(page, name) {
         using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
         methodCalls: [["Email/set", { accountId, create: { d: {
           keywords: { $draft: true },
+          from: [{ name: ident.name || "", email: ident.email }],
           subject: "Key change fixture",
           to: [{ name: m.display, email: m.address }],
           textBody: [{ partId: "1", type: "text/plain" }],
@@ -8124,7 +8138,10 @@ async function kcOpenComposer(page, name) {
   // The switch is drawn once the recipient's key has been looked up.
   await until("the " + name + " encrypt switch is drawn", 45000, () =>
     page.evaluate((pinned) => !!document.querySelector(pinned ? "section.compose .pin-voucher-warning" : "section.compose .key-change"), KC_PINNED.includes(name)),
-  36, async () => JSON.stringify(await kcFacts(page, "section.compose")));
+  36, async () =>
+    JSON.stringify(await kcFacts(page, "section.compose")) + " text=" +
+    JSON.stringify(await page.evaluate(() => ((document.querySelector("section.compose") || {}).innerText || "").replace(/\s+/g, " ").slice(0, 500))) +
+    " issues=" + JSON.stringify(recentPageIssues));
 }
 
 async function kcCloseComposer(page) {
@@ -8179,8 +8196,38 @@ async function kcAssertSurface(page, name, surface, theme) {
   return facts;
 }
 
+/** Binds one of the user's own keys to their sending identity (or unbinds it), by
+ *  UserKey/set, and says which. The composer offers Encrypt only for an identity
+ *  that has a key bound to it, and nothing else in this lane binds one: the keys
+ *  step makes keys and leaves them unbound. So the step binds, and puts it back. */
+async function kcBindOwnKey(page, bind, keyId) {
+  const r = await page.evaluate(async (bind, keyId) => {
+    const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
+    const accountId = Object.values(sess.primaryAccounts)[0];
+    const using = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission", "urn:mailroom:pgp"];
+    const call = async (calls) =>
+      (await (await fetch(sess.apiUrl, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ using, methodCalls: calls }) })).json()).methodResponses;
+    const [ids] = await call([["Identity/get", { accountId, ids: null }, "i"]]);
+    const ident = ids[1].list.find((i) => !i.isWildcard);
+    let id = keyId;
+    if (!id) {
+      const [ks] = await call([["UserKey/get", { accountId, ids: null }, "k"]]);
+      const k = (ks[1].list || []).find((x) => x.canSign === true && !x.revokedAt && !x.decryptOnly && !x.expiringSoon && !x.expired && !x.identityId);
+      if (!k) return { error: "no unbound, signing key that is not about to expire: " + JSON.stringify((ks[1].list || []).map((x) => ({ id: x.id, identityId: x.identityId, canSign: x.canSign, expiresAt: x.expiresAt }))) };
+      id = k.id;
+    }
+    const [s] = await call([["UserKey/set", { accountId, update: { [id]: { identityId: bind ? ident.id : null } } }, "s"]]);
+    const done = s[1] && s[1].updated && Object.prototype.hasOwnProperty.call(s[1].updated, id);
+    return done ? { keyId: id, identityId: ident.id } : { error: "UserKey/set: " + JSON.stringify(s) };
+  }, bind, keyId);
+  if (!r || r.error) kcFail("could not " + (bind ? "bind" : "unbind") + " an own key: " + (r ? r.error : "no answer"));
+  return r;
+}
+
 async function keyChangeSurfaces(page, cdp) {
   const seen = [];
+  const own = await kcBindOwnKey(page, true);
+  console.log("key change        bound own key " + own.keyId + " to the sending identity for the composer's switch");
   for (const theme of THEMES) {
     await chooseTheme(page, theme);
     for (const surface of ["reader", "composer"]) {
@@ -8272,6 +8319,7 @@ async function keyChangeSurfaces(page, cdp) {
   });
   await kcCloseComposer(page);
 
+  await kcBindOwnKey(page, false, own.keyId);
   await load(page, "#/inbox/review");
   await waitForDesk(page);
   tally.keyChange = 1;
