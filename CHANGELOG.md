@@ -15,6 +15,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   question, the confirmation for releasing a withheld attachment, the snippet picker or the
   send-later chooser in the composer, or the add-account wizard used to close the message or
   the draft behind it as well. It now closes just that question.
+- **A draft opened straight from its link can send as you straight away.** If the composer opened
+  before your sending addresses had finished loading, it could stay on "no sending address yet",
+  with no key to sign or encrypt with, until you closed and reopened it. It now picks up your
+  address as soon as it arrives.
+- **The note about a revoked earlier key is easier to read.** When you trusted a new key because
+  the previous key vouched for it, and that previous key was later revoked, the note under the
+  signature now uses the same text colour as the rest of the warning instead of a paler one.
 
 ### Under the hood
 
