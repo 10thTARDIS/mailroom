@@ -562,6 +562,62 @@ func TestAccountGetHealthReportsEffectiveWriteback(t *testing.T) {
 	}
 }
 
+// TestAccountGetReportsEffectiveWriteback pins ADR-028 amendment A5: Account/get
+// reports the EFFECTIVE writeback value beside the stored column, and says which
+// switch is the reason.
+//
+// ⚠ THE ROW THAT MATTERS IS "column true, INSTANCE FLAG SET". Before this,
+// Account/get reported writebackEnabled:true for an account the instance flag had
+// shadowed, which told a client mail was being written back when nothing was.
+// The column must keep reporting the column (it is what Account/set writes) while
+// the new property reports the truth. The first row is the control: with nothing
+// holding it, effective is true and the reason is null, so the property is not
+// simply "false".
+//
+// NEGATIVE CONTROL: have accountObject read the column for writebackEffective and
+// the second row fails.
+func TestAccountGetReportsEffectiveWriteback(t *testing.T) {
+	h := newAPIHarness(t)
+	f := seedAPIUser(t, h.super, "get-wb-"+store.NewULID().String())
+
+	for _, tc := range []struct {
+		name       string
+		column     bool
+		instance   bool
+		wantEffect bool
+		wantHeldBy any
+	}{
+		{"column true, nothing holding it (control)", true, false, true, nil},
+		{"column true, INSTANCE FLAG SET", true, true, false, "instance"},
+		{"column false, no instance flag", false, false, false, "account"},
+		{"both off: the column is the reason, because the user can change it", false, true, false, "account"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.setWritebackColumn(t, f.AccountID.String(), tc.column)
+			h.store.SetWritebackDisabled(tc.instance)
+			t.Cleanup(func() { h.store.SetWritebackDisabled(false) })
+
+			res := call(t, h.api.accountGet, f.UserID, map[string]any{"ids": []string{f.AccountID.String()}})
+			list := res["list"].([]any)
+			if len(list) != 1 {
+				t.Fatalf("Account/get returned %d accounts, want 1", len(list))
+			}
+			acct := list[0].(map[string]any)
+			if acct["writebackEnabled"] != tc.column {
+				t.Errorf("writebackEnabled = %v, want the stored column %v", acct["writebackEnabled"], tc.column)
+			}
+			if acct["writebackEffective"] != tc.wantEffect {
+				t.Errorf("writebackEffective = %v, want %v (column=%v instance=%v)",
+					acct["writebackEffective"], tc.wantEffect, tc.column, tc.instance)
+			}
+			if got, present := acct["writebackHeldBy"]; !present || got != tc.wantHeldBy {
+				t.Errorf("writebackHeldBy = %v (present=%v), want %v — the key must be present and null when effective",
+					got, present, tc.wantHeldBy)
+			}
+		})
+	}
+}
+
 // ============================================================================
 // C. EmailSubmission/set
 // ============================================================================

@@ -207,7 +207,7 @@ func TestCredentialsEqual(t *testing.T) {
 func TestAccountValidationErrorNeverLeaksPassword(t *testing.T) {
 	const password = "s3cret-rotate-me"
 	const username = "someone@example.com"
-	dial := func(_ context.Context, cfg sync.Config) (sync.SyncSession, error) {
+	dial := func(_ context.Context, cfg sync.Config) (sync.ReadSession, error) {
 		if cfg.Username != username || cfg.Password != password {
 			t.Fatalf("dial got unexpected credentials: %q/%q", cfg.Username, cfg.Password)
 		}

@@ -569,7 +569,7 @@ func testReq() AccountSync {
 }
 
 func factoryFor(s *fakeSession) SessionFactory {
-	return func(context.Context, sync.Config) (sync.SyncSession, error) { return s, nil }
+	return func(context.Context, sync.Config) (sync.ReadSession, error) { return s, nil }
 }
 
 func newEngine(sess *fakeSession, st *fakeStore, ing *fakeIngester) *Engine {
@@ -1174,7 +1174,7 @@ func (r *recordingStore) UpsertMailbox(ctx context.Context, userID ulid.ULID, re
 func TestSyncAccountDialError(t *testing.T) {
 	dialErr := errors.New("boom")
 	eng := New(newFakeStore(), newFakeIngester(),
-		func(context.Context, sync.Config) (sync.SyncSession, error) { return nil, dialErr })
+		func(context.Context, sync.Config) (sync.ReadSession, error) { return nil, dialErr })
 	_, err := eng.SyncAccount(context.Background(), testReq())
 	if !errors.Is(err, dialErr) {
 		t.Fatalf("err = %v, want wrapped dial error", err)

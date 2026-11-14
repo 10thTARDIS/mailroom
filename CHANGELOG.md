@@ -9,6 +9,64 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Ingest-only mode: a safer replay, and a way to say "never"
+
+- **Replaying what an ingest-only account would have done skips the changes that went stale.**
+  `mailroom-admin writeback-ledger` now flags intents whose message gained a new copy in the
+  account after the intent was made (another app filed, copied or moved it, or the folder was
+  recreated), and `--apply` leaves those in the ledger instead of replaying them over the top
+  of filing done since. It also leaves out draft saves that a later save of the same draft has
+  replaced. The report shows both counts next to every operation and source, and `--apply`
+  prints how many it replayed and how many it skipped, so "replayed 0" can be told from "the
+  ledger was empty". It replays a subset of what it did before, never more.
+- **You can now decide not to replay.** `writeback-ledger --discard` shows what would be
+  discarded, and `--discard --apply` moves the account's whole ledger to a final "discarded"
+  state, with counts per source. Nothing is written to your mailbox, and it works while the
+  account is still in ingest-only mode.
+- **Account details now say whether Mailroom is really writing.** `writebackEnabled` still
+  shows the account's own setting; the new read-only `writebackEffective` says whether
+  Mailroom will write to the mailbox, and `writebackHeldBy` says which switch is holding it
+  off (the account's setting, the server-wide setting, or a provider hold). The account
+  health panel uses the same answer.
+- **A message scheduled to send while the account was in ingest-only mode now says so.** If a
+  send was scheduled before the mode was switched on, it fails when it comes due, as before.
+  The reason shown in the Outbox now also says it was not sent, that turning the mode off
+  will not send it later, and that you can open it from Drafts and send it again.
+- **A change made at the instant the mode is switched on can no longer slip through.** A change
+  that raced the switch could land as queued work on an account that had just become
+  ingest-only, and would then have been applied the moment the mode was lifted. It is now
+  held back like every other change.
+
+### Under the hood
+
+- Code that only reads a mailbox (the sync pass, the idle watcher, account validation) can no
+  longer call anything that changes it: the mailbox connection is split into a read side and a
+  write side, and the compiler enforces it.
+- A partial index keeps the ingest-only ledger count quick on large mailboxes.
+- A write-back pass now takes no more changes than its batch size. Before, a large backlog
+  could be claimed in a larger lump than intended; replaying a long ingest-only ledger is the
+  kind of backlog where it could have happened.
+- Tests now check that every change queued for your mailbox records what asked for it, that
+  the order changes are applied in follows when they were made, and that pausing sync (as
+  opposed to ingest-only mode) keeps queueing changes to apply when sync resumes, which is
+  deliberate.
+
+### Upgrading
+
+- Two small database migrations run on first start: an index (no data change) and a new final
+  state for discarded ledger entries. Nothing needs to be done by hand. Rolling back to an
+  earlier version moves any discarded entries to the failed state, as the earlier version
+  cannot read the new one.
+  On a large instance the index takes a few moments to build on first start, and changes
+  you make in that moment wait for it.
+
+## [1.103.0-beta.2] — 2026-11-13
+
+**The second beta of v1.103 fixes Escape in confirmation questions.** Pressing Escape on the
+risky-file question, or on four other small dialogs, used to close the message or draft behind
+it as well; now it closes just the question. The automated browser checks found it while
+proving this release's attachment and image work end to end.
+
 ### Fixes
 
 - **Escape closes only the question you are answering.** Pressing Escape on the risky-file

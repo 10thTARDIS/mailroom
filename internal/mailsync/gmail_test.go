@@ -222,7 +222,7 @@ func newGmailRig(t *testing.T, budget int64, sweep time.Duration) *gmailRig {
 	r.ing.st = r.st.fakeStore
 	r.req = withCfg(testReq(), r.cfg)
 	r.req.Gmail = &GmailSync{DailyBudgetBytes: budget, LabelSweepInterval: sweep}
-	r.e = New(r.st, r.ing, sync.Dial, WithClock(func() time.Time { return r.clock }), WithFetchChunk(4))
+	r.e = New(r.st, r.ing, sync.DialRead, WithClock(func() time.Time { return r.clock }), WithFetchChunk(4))
 	return r
 }
 
@@ -485,7 +485,7 @@ func TestGmailRefusals(t *testing.T) {
 		g.AddMailbox(&gmailtest.Mailbox{Name: "Work"})
 		req := testReq()
 		req.Gmail = &GmailSync{}
-		_, err := New(newGmailStore(), newGmailIngester(), sync.Dial).SyncAccount(context.Background(), withCfg(req, g.Listen(sync.TLSInsecure)))
+		_, err := New(newGmailStore(), newGmailIngester(), sync.DialRead).SyncAccount(context.Background(), withCfg(req, g.Listen(sync.TLSInsecure)))
 		if !errors.Is(err, ErrGmailAllMailHidden) {
 			t.Errorf("err = %v", err)
 		}
@@ -499,7 +499,7 @@ func TestGmailRefusals(t *testing.T) {
 		g.GmailExt = false
 		req := testReq()
 		req.Gmail = &GmailSync{}
-		_, err := New(newGmailStore(), newGmailIngester(), sync.Dial).SyncAccount(context.Background(), withCfg(req, g.Listen(sync.TLSInsecure)))
+		_, err := New(newGmailStore(), newGmailIngester(), sync.DialRead).SyncAccount(context.Background(), withCfg(req, g.Listen(sync.TLSInsecure)))
 		if !errors.Is(err, ErrGmailNoExtension) || len(g.Selects()) != 0 {
 			t.Errorf("err = %v selects = %v", err, g.Selects())
 		}
@@ -534,7 +534,7 @@ func TestGenericSyncNeverAsksForGmailItems(t *testing.T) {
 	g := gmailtest.New(t)
 	g.AddMailbox(&gmailtest.Mailbox{Name: "INBOX"})
 	g.Append("INBOX", &gmailtest.Message{Body: bytes.Repeat([]byte("y"), 50)})
-	_, err := New(newGmailStore(), newGmailIngester(), sync.Dial).SyncAccount(context.Background(), withCfg(testReq(), g.Listen(sync.TLSInsecure)))
+	_, err := New(newGmailStore(), newGmailIngester(), sync.DialRead).SyncAccount(context.Background(), withCfg(testReq(), g.Listen(sync.TLSInsecure)))
 	if err != nil {
 		t.Fatal(err)
 	}

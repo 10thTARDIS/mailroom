@@ -19,7 +19,7 @@ import (
 // checkoutPooled) for its whole duration and RETURNS it on success (returnPooled),
 // so a session in the map is never one a pass is mid-flight on.
 type pooledSession struct {
-	sess     sync.SyncSession
+	sess     sync.ReadSession
 	lastUsed time.Time
 }
 
@@ -51,7 +51,7 @@ func (r *Runner) checkoutPooled(userID, accountID ulid.ULID) *pooledSession {
 // benign teardown race the gates carry, except it costs one live connection, so
 // it can only happen for a pass that SUCCEEDED (only success returns to the pool)
 // after teardown, a window a cancelled shutdown pass never reaches.
-func (r *Runner) returnPooled(userID, accountID ulid.ULID, sess sync.SyncSession) {
+func (r *Runner) returnPooled(userID, accountID ulid.ULID, sess sync.ReadSession) {
 	r.scheduleMu.Lock()
 	byAcct := r.pools[userID]
 	if byAcct == nil {
@@ -100,7 +100,7 @@ func (r *Runner) closeUserPools(userID ulid.ULID) {
 // from the pool and passed its probe — the retry-once guard needs that, because
 // only a reused session can have died in the race between the probe and the
 // pass's first real command.
-func (r *Runner) acquireSession(ctx context.Context, userID ulid.ULID, acct store.Account, cfg sync.Config) (sess sync.SyncSession, reused bool, err error) {
+func (r *Runner) acquireSession(ctx context.Context, userID ulid.ULID, acct store.Account, cfg sync.Config) (sess sync.ReadSession, reused bool, err error) {
 	if ps := r.checkoutPooled(userID, acct.ID); ps != nil {
 		// Reuse only a connection that is both fresh enough AND provably alive.
 		// A NOOP that returns nil is the health gate; any error (or an expired

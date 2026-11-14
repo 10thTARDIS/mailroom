@@ -22,7 +22,7 @@ import (
 // embedded interface and would panic if the watcher ever called it — a guard
 // that the watcher really does only listen, never fetch or ingest.
 type fakeIdleSession struct {
-	mrsync.SyncSession
+	mrsync.ReadSession
 	supportsIdle bool
 	notifs       chan mrsync.Notification
 	selectErr    error
@@ -84,7 +84,7 @@ func (c *concurrencySyncer) SyncAccount(_ context.Context, _ mailsync.AccountSyn
 	return mailsync.Summary{}, nil
 }
 
-func (c *concurrencySyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.SyncSession) (mailsync.Summary, error) {
+func (c *concurrencySyncer) SyncAccountWith(ctx context.Context, req mailsync.AccountSync, _ mrsync.ReadSession) (mailsync.Summary, error) {
 	return c.SyncAccount(ctx, req)
 }
 
@@ -127,7 +127,7 @@ func TestIdleWatcherTriggersSyncOnExists(t *testing.T) {
 	r := New(lister, syncer, idPrepare,
 		WithLogger(discardLogger()),
 		WithIdle(true, time.Hour), // large reissue so only the EXISTS drives a trigger
-		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.SyncSession, error) { return fake, nil }),
+		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.ReadSession, error) { return fake, nil }),
 	)
 
 	userID := ulid.Make()
@@ -161,7 +161,7 @@ func TestIdleWatcherIgnoresNonExists(t *testing.T) {
 	r := New(&fakeLister{accts: []store.Account{acct}}, syncer, idPrepare,
 		WithLogger(discardLogger()),
 		WithIdle(true, time.Hour),
-		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.SyncSession, error) { return fake, nil }),
+		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.ReadSession, error) { return fake, nil }),
 	)
 
 	userID := ulid.Make()
@@ -189,7 +189,7 @@ func TestIdleWatcherExitsWhenUnsupported(t *testing.T) {
 	r := New(&fakeLister{accts: []store.Account{acct}}, &fakeSyncer{}, idPrepare,
 		WithLogger(discardLogger()),
 		WithIdle(true, time.Hour),
-		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.SyncSession, error) { return fake, nil }),
+		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.ReadSession, error) { return fake, nil }),
 	)
 
 	done := make(chan struct{})
@@ -209,7 +209,7 @@ func TestRunIdleDisabledIsNoOp(t *testing.T) {
 	r := New(&fakeLister{accts: accounts("a")}, &fakeSyncer{}, idPrepare,
 		WithLogger(discardLogger()),
 		WithIdle(false, time.Hour),
-		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.SyncSession, error) {
+		WithIdleDialer(func(context.Context, mrsync.Config) (mrsync.ReadSession, error) {
 			dialed = true
 			return &fakeIdleSession{}, nil
 		}),

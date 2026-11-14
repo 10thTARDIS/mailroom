@@ -98,7 +98,7 @@ func runGmailCensus(ctx context.Context, args []string) error {
 	if *budgetMB > 0 {
 		budget = int64(*budgetMB) * 1000 * 1000
 	}
-	return gmailCensus(ctx, os.Stdout, sync.Dial, req.Config, censusStore{st: d.store, userID: userID, accountID: acct.ID},
+	return gmailCensus(ctx, os.Stdout, sync.DialRead, req.Config, censusStore{st: d.store, userID: userID, accountID: acct.ID},
 		gmailsync.CensusOptions{Limit: *limit, TopLabels: *top, SkipDedup: *skipDedup, DailyBudgetBytes: budget})
 }
 

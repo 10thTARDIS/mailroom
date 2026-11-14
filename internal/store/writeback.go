@@ -258,6 +258,38 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 	// 'suppressed', so Revive (the purge worker's re-enqueue) cannot resurrect
 	// the ledger either.
 	//
+	// ⚠ THE ACCOUNT READ IS A LOCKING READ (`FOR KEY SHARE`), AND THAT CLOSES THE
+	// RACE ADR-028 §4 USED TO DESCRIBE AS TRACKED (amendment A8). Without it this
+	// statement decided pending-versus-suppressed from its own snapshot and only
+	// afterwards took KEY SHARE on the account row through the foreign key. That
+	// lock conflicts with UpdateAccount's FOR UPDATE, so an enqueue that began
+	// before the mode was switched on would block mid-statement, be invisible to
+	// the SuppressAccountIntents in the switching transaction (the row does not
+	// exist yet), and land 'pending' on an account that is by then shadowed.
+	//
+	// With the lock taken by the read itself, in READ COMMITTED a row that was
+	// concurrently updated is re-read at its NEW version once the lock is granted.
+	// So either order is correct: an enqueue that gets the lock first commits
+	// before UpdateAccount can run, and the SuppressAccountIntents that follows it
+	// sees the row; one that waits reads the new flag and is born suppressed.
+	//
+	// KEY SHARE is the mode the foreign key already takes, and it conflicts only
+	// with FOR UPDATE, so enqueuers do not block each other and an enqueue waits
+	// only while an Account/set is in flight. The drain-side self-heal stays: it
+	// also covers booting with the instance flag over rows already pending, which
+	// no enqueue-side lock can.
+	//
+	// ⚠ A 'discarded' ROW NEVER SWALLOWS A LATER REQUEST (ADR-028 A3). Discarding
+	// is the operator's decision about the rows that existed THEN; the same
+	// deterministic key arriving afterwards is a new request, and answering it with
+	// DO NOTHING would drop it silently - the purge sweep re-enqueues the same key
+	// every pass, so one discarded row would stop that message ever being expunged.
+	// So the third arm re-dates and re-decides it in any case, to whichever state
+	// this enqueue is born in (suppressed while shadowed, pending while live).
+	//
+	// That is the one place 'discarded' differs from 'suppressed' here, and it does
+	// not widen what replay can write: the new row is born under the same
+	// pending-versus-suppressed decision as any other.
 	// ⚠ `source = EXCLUDED.source` ON THE UPDATE ARM, deliberately. Both arms
 	// re-date the row and reset its state — they describe a request made NOW,
 	// not the one it collapsed into — so the antecedent has to move with it.
@@ -270,7 +302,8 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 		WITH wb AS (
 			SELECT COALESCE((SELECT a.writeback_enabled AND NOT `+gmailWritebackHeldSQL+`
 			                   FROM app.accounts a
-			                  WHERE a.id = $4 AND a.user_id = $2), false)
+			                  WHERE a.id = $4 AND a.user_id = $2
+			                    FOR KEY SHARE OF a), false)
 			       AND NOT $9::boolean AS live
 		)
 		INSERT INTO app.writeback_intents AS w
@@ -290,6 +323,7 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 		       source      = EXCLUDED.source
 		 WHERE ($8::boolean AND w.state IN ('applied', 'dead'))
 		    OR (w.state = 'suppressed' AND EXCLUDED.state = 'pending')
+		    OR w.state = 'discarded'
 		RETURNING id`,
 		id.String(), tx.userID.String(), messageID, in.AccountID.String(),
 		string(in.Op), payload, in.IdempotencyKey, in.Revive, tx.writebackDisabled,
@@ -350,6 +384,16 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 // order EnqueueIntent was called. COLLATE "C" because app.ulid is text and the
 // ULID alphabet only sorts by time under byte order.
 //
+// ⚠ THE SELECTION IS A MATERIALIZED CTE, NOT `id IN (SELECT ... LIMIT)` (ADR-028
+// amendment A9). With the subselect inline, a claim of 10 against 30 pending rows
+// MEASURED as 19 rows claimed: all moved to inflight, all with attempts
+// incremented, and the LIMIT not honoured. The mechanism is INFERRED, not traced:
+// Postgres is free to run a locking subselect more than once under an IN, and the
+// fix (MATERIALIZED forces a single evaluation) removes the symptom. Nothing in
+// production noticed because a queue rarely exceeds the batch size; a replayed
+// ledger is the queue that does. TestClaimOrderFollowsCreatedAtNotInsertionOrder
+// asserts the bound.
+//
 // ⚠ AND THE ORDER BY HAS TO BE ON THE OUTSIDE. The inner one only chooses
 // WHICH rows the LIMIT claims; an UPDATE ... RETURNING hands its rows back in
 // whatever order it happened to update them, which is not the subquery's.
@@ -359,18 +403,20 @@ func (tx *UserTx) EnqueueIntent(ctx context.Context, in IntentRow) (ulid.ULID, e
 // governed application order at all.
 func (tx *UserTx) ClaimPendingIntents(ctx context.Context, accountID ulid.ULID, limit int) ([]Intent, error) {
 	rows, err := tx.tx.Query(ctx, `
-		WITH claimed AS (
+		WITH picked AS MATERIALIZED (
+			SELECT id FROM app.writeback_intents
+			 WHERE user_id = $1 AND account_id = $2
+			   AND (state = 'pending'
+			        OR (state = 'inflight' AND claimed_at IS NOT NULL
+			            AND claimed_at < now() - interval '15 minutes'))
+			 ORDER BY created_at, id COLLATE "C"
+			   FOR UPDATE SKIP LOCKED
+			 LIMIT $3
+		), claimed AS (
 			UPDATE app.writeback_intents w
 			   SET state = 'inflight', attempts = attempts + 1, claimed_at = now()
-			 WHERE w.id IN (
-				SELECT id FROM app.writeback_intents
-				 WHERE user_id = $1 AND account_id = $2
-				   AND (state = 'pending'
-				        OR (state = 'inflight' AND claimed_at IS NOT NULL
-				            AND claimed_at < now() - interval '15 minutes'))
-				 ORDER BY created_at, id COLLATE "C"
-				   FOR UPDATE SKIP LOCKED
-				 LIMIT $3)
+			  FROM picked p
+			 WHERE w.id = p.id AND w.user_id = $1
 			RETURNING w.id, w.message_id, w.account_id, w.op, w.payload,
 			          w.idempotency_key, w.state, w.attempts,
 			          COALESCE(w.last_error, '') AS last_error,
@@ -525,9 +571,35 @@ func (tx *UserTx) SuppressedIntentsByOp(ctx context.Context, accountID ulid.ULID
 	return out, nil
 }
 
+// ReplayResult is what one ReplaySuppressedIntents call did, per outcome.
+//
+// ⚠ THREE NUMBERS, NEVER ONE. "Replayed 0" must be distinguishable from "there
+// was nothing suppressed" and from "everything was skipped as stale", and a single
+// total cannot be (CLAUDE.md: report per-case counts).
+type ReplayResult struct {
+	// Replayed rows were moved to 'pending' and will be applied by the next drain.
+	Replayed int64
+	// SkippedStale rows were left 'suppressed': their message gained a live copy
+	// after they were created (ledgerStaleSQL), so applying them would impose an
+	// old delta on whatever filing happened since.
+	SkippedStale int64
+	// SkippedSuperseded rows were left 'suppressed': a later APPEND of the same
+	// message into the same mailbox exists (ledgerSupersededSQL).
+	SkippedSuperseded int64
+}
+
 // ReplaySuppressedIntents moves an account's suppressed ledger back to
-// 'pending' so the next pass applies it, returning how many it revived. It
-// exists solely behind the admin CLI's explicit --apply (ADR-028 §4).
+// 'pending' so the next pass applies it, returning how many it revived and how
+// many it left behind. It exists solely behind the admin CLI's explicit --apply
+// (ADR-028 §4).
+//
+// ⚠ IT REPLAYS A SUBSET OF THE LEDGER, NEVER MORE. Rows the report calls stale or
+// superseded (ADR-028 amendments A2 and A4) are left 'suppressed' — still in the
+// ledger, still counted, still reported on every run, and removable only by
+// --discard. They are classified by the SAME predicates the report counts with
+// (ledgerStaleSQL, ledgerSupersededSQL), inside this one statement, so the rows
+// the operator read about are the rows skipped, and a row cannot change class
+// between being classified and being moved.
 //
 // ⚠ It is the only path that moves the ledger IN BULK, but it is not the only
 // path out of 'suppressed' — EnqueueIntent's second ON CONFLICT arm upgrades a
@@ -541,17 +613,83 @@ func (tx *UserTx) SuppressedIntentsByOp(ctx context.Context, accountID ulid.ULID
 // is a mass mutation nobody reviewed, arriving at the worst possible moment —
 // which is precisely the hazard sync_enabled already has and this mode refuses
 // to reproduce. The report comes first; applying it is a separate decision.
-func (tx *UserTx) ReplaySuppressedIntents(ctx context.Context, accountID ulid.ULID) (int64, error) {
-	tag, err := tx.tx.Exec(ctx, `
-		UPDATE app.writeback_intents
-		   SET state = 'pending', attempts = 0, claimed_at = NULL,
-		       last_error = NULL, dead_reason = NULL
-		 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'`,
+func (tx *UserTx) ReplaySuppressedIntents(ctx context.Context, accountID ulid.ULID) (ReplayResult, error) {
+	var res ReplayResult
+	err := tx.tx.QueryRow(ctx, `
+		WITH ledger AS (
+			SELECT w.id,
+			       `+ledgerStaleSQL+` AS stale,
+			       `+ledgerSupersededSQL+` AS superseded
+			  FROM app.writeback_intents w
+			 WHERE w.user_id = $1 AND w.account_id = $2 AND w.state = 'suppressed'
+		), moved AS (
+			UPDATE app.writeback_intents w
+			   SET state = 'pending', attempts = 0, claimed_at = NULL,
+			       last_error = NULL, dead_reason = NULL
+			  FROM ledger l
+			 WHERE w.id = l.id AND w.user_id = $1
+			   AND w.state = 'suppressed'
+			   AND NOT l.stale AND NOT l.superseded
+			RETURNING w.id
+		)
+		SELECT (SELECT count(*) FROM moved),
+		       count(*) FILTER (WHERE stale),
+		       count(*) FILTER (WHERE superseded)
+		  FROM ledger`,
+		tx.userID.String(), accountID.String()).Scan(&res.Replayed, &res.SkippedStale, &res.SkippedSuperseded)
+	if err != nil {
+		return ReplayResult{}, fmt.Errorf("writeback: replay suppressed intents: %w", err)
+	}
+	return res, nil
+}
+
+// DiscardSuppressedIntents moves an account's whole suppressed ledger to the
+// terminal 'discarded' state and returns what it moved, per (op, source). It
+// exists solely behind `mailroom-admin writeback-ledger --discard --apply`
+// (ADR-028 amendment A3).
+//
+// ⚠ IT WRITES NOTHING TO ANY MAILBOX AND NEEDS NO LIFTED MODE. 'discarded' is
+// terminal and never claimed, exactly like 'suppressed': the only difference is
+// that the operator has decided the row will not be replayed, so it stops being
+// counted as ledger. That is why the caller does not check the shadow state
+// first, unlike replay.
+//
+// The result is a slice of buckets rather than a total for the reason the report
+// is: "discarded 40" cannot say whether those were 40 user moves or 40 rule
+// keywords, and that is the question asked before running it.
+//
+// Only 'suppressed' rows move. A pending, inflight, applied or dead row is not
+// the ledger and is left exactly as it is; in particular a row a replay already
+// moved to 'pending' is no longer discardable, which is right (it is on its way).
+func (tx *UserTx) DiscardSuppressedIntents(ctx context.Context, accountID ulid.ULID) ([]SuppressedIntentRow, error) {
+	rows, err := tx.tx.Query(ctx, `
+		WITH moved AS (
+			UPDATE app.writeback_intents
+			   SET state = 'discarded', claimed_at = NULL
+			 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'
+			RETURNING op, source
+		)
+		SELECT op, COALESCE(source, ''), count(*)
+		  FROM moved
+		 GROUP BY op, source
+		 ORDER BY op, source`,
 		tx.userID.String(), accountID.String())
 	if err != nil {
-		return 0, fmt.Errorf("writeback: replay suppressed intents: %w", err)
+		return nil, fmt.Errorf("writeback: discard suppressed intents: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	defer rows.Close()
+	var out []SuppressedIntentRow
+	for rows.Next() {
+		var r SuppressedIntentRow
+		if err := rows.Scan(&r.Op, &r.Source, &r.Count); err != nil {
+			return nil, fmt.Errorf("writeback: scan discarded intent bucket: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("writeback: discard suppressed intents: %w", err)
+	}
+	return out, nil
 }
 
 // MarkIntentApplied transitions a claimed intent 'inflight' -> 'applied' and
@@ -810,6 +948,13 @@ type SuppressedIntentRow struct {
 	// "unknown" by the report rather than folded into any named source.
 	Source string
 	Count  int64
+	// Stale is how many of Count are STALE (ledgerStaleSQL): the message gained a
+	// live copy in this account after the intent was created. --apply skips them.
+	Stale int64
+	// Superseded is how many of Count are SUPERSEDED (ledgerSupersededSQL): a
+	// later APPEND of the same message into the same mailbox exists. --apply
+	// skips them.
+	Superseded int64
 }
 
 // SuppressedIntentsByOpAndSource breaks an account's shadow ledger down by BOTH
@@ -829,11 +974,13 @@ type SuppressedIntentRow struct {
 // is the failure the op-only version already guards against by name.
 func (tx *UserTx) SuppressedIntentsByOpAndSource(ctx context.Context, accountID ulid.ULID) ([]SuppressedIntentRow, error) {
 	rows, err := tx.tx.Query(ctx, `
-		SELECT op, COALESCE(source, ''), count(*)
-		  FROM app.writeback_intents
-		 WHERE user_id = $1 AND account_id = $2 AND state = 'suppressed'
-		 GROUP BY op, source
-		 ORDER BY op, source`,
+		SELECT w.op, COALESCE(w.source, ''), count(*),
+		       count(*) FILTER (WHERE `+ledgerStaleSQL+`),
+		       count(*) FILTER (WHERE `+ledgerSupersededSQL+`)
+		  FROM app.writeback_intents w
+		 WHERE w.user_id = $1 AND w.account_id = $2 AND w.state = 'suppressed'
+		 GROUP BY w.op, w.source
+		 ORDER BY w.op, w.source`,
 		tx.userID.String(), accountID.String())
 	if err != nil {
 		return nil, fmt.Errorf("writeback: suppressed intents by op and source: %w", err)
@@ -842,7 +989,7 @@ func (tx *UserTx) SuppressedIntentsByOpAndSource(ctx context.Context, accountID 
 	var out []SuppressedIntentRow
 	for rows.Next() {
 		var r SuppressedIntentRow
-		if err := rows.Scan(&r.Op, &r.Source, &r.Count); err != nil {
+		if err := rows.Scan(&r.Op, &r.Source, &r.Count, &r.Stale, &r.Superseded); err != nil {
 			return nil, fmt.Errorf("writeback: scan suppressed intent bucket: %w", err)
 		}
 		out = append(out, r)

@@ -69,7 +69,7 @@ func TestLiveOutlookProfileFoldersAndFlagSweep(t *testing.T) {
 
 	clock := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	sweep := FlagSweepConfig{Interval: 5 * time.Minute, Window: 500, FullInterval: 6 * time.Hour, FullChunk: 2000}
-	e := New(NewStoreAdapter(st), ingest.New(st, mustBlobs(t)), sync.Dial,
+	e := New(NewStoreAdapter(st), ingest.New(st, mustBlobs(t)), sync.DialRead,
 		WithClock(func() time.Time { return clock }), WithFlagSweep(sweep))
 	req := AccountSync{UserID: userID, AccountID: accountID, Config: g.Listen(sync.TLSInsecure),
 		DEK: randomKey(t), DEKID: ulid.Make(), ProviderProfile: "microsoft"}

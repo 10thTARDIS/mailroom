@@ -34,6 +34,13 @@ import (
 // expunge) with a total alongside, and states the account it counted for so a
 // "0" cannot be misread as "0 across the instance".
 //
+// --discard (ADR-028 amendment A3) is the end of the lifecycle: report-first, and
+// with --apply it moves the account's suppressed ledger to the terminal
+// 'discarded' state and prints the counts per source.
+//
+// --apply REPLAYS A SUBSET, NEVER THE WHOLE LEDGER: stale intents and superseded
+// draft appends are skipped and stay in the ledger (amendments A2 and A4).
+//
 // REFUSES TO REPLAY A STILL-SHADOWED ACCOUNT, checking BOTH halves of ADR-028
 // §2's switch: the account's own `writeback_enabled` column and the
 // instance-level MAILROOM_WRITEBACK_DISABLED kill switch. Either one being off
@@ -57,7 +64,8 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 	var (
 		userIDStr    = fs.String("user-id", "", "operator user id (ULID)")
 		accountIDStr = fs.String("account-id", "", "account id (ULID; see list-accounts)")
-		apply        = fs.Bool("apply", false, "replay the suppressed ledger back to pending (default: report only)")
+		apply        = fs.Bool("apply", false, "replay the suppressed ledger back to pending (default: report only). With --discard, discards instead")
+		discard      = fs.Bool("discard", false, "decide NOT to replay: report what would be discarded (default), or with --apply move the ledger to the terminal 'discarded' state")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -108,6 +116,32 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 	instanceDisabled := d.store.WritebackDisabled()
 	printWritebackLedgerReport(acct, byOp, buckets, total, instanceDisabled)
 
+	// --discard is the other end of the lifecycle (ADR-028 amendment A3). It is
+	// report-first like --apply, and it is checked BEFORE the replay path so that
+	// `--discard --apply` can never fall through into a replay.
+	//
+	// It deliberately does NOT refuse a still-shadowed account, unlike replay:
+	// discarding writes nothing to any mailbox and nothing becomes drainable, so
+	// "I will never replay these" is a legitimate decision to make while shadowed.
+	if *discard {
+		if !*apply {
+			fmt.Printf("\nREPORT ONLY - nothing was changed. --discard --apply would move all %d suppressed intent(s) "+
+				"for account %s (%s) to the terminal 'discarded' state. They are then no longer counted as the "+
+				"ledger and can never be replayed; the mail itself is not touched.\n", total, acct.ID, acct.Name)
+			return nil
+		}
+		var rows []store.SuppressedIntentRow
+		if err := d.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
+			var e error
+			rows, e = tx.DiscardSuppressedIntents(ctx, accountID)
+			return e
+		}); err != nil {
+			return fmt.Errorf("writeback-ledger: discard: %w", err)
+		}
+		printWritebackLedgerDiscarded(acct, rows)
+		return nil
+	}
+
 	if !*apply {
 		fmt.Println("\nREPORT ONLY — nothing was changed. Re-run with --apply to replay this ledger.")
 		return nil
@@ -129,17 +163,65 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 			"that is the one blocking), then re-run with --apply", acct.ID, acct.Name, which, total)
 	}
 
-	var replayed int64
+	var res store.ReplayResult
 	if err := d.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
 		var e error
-		replayed, e = tx.ReplaySuppressedIntents(ctx, accountID)
+		res, e = tx.ReplaySuppressedIntents(ctx, accountID)
 		return e
 	}); err != nil {
 		return fmt.Errorf("writeback-ledger: replay: %w", err)
 	}
-	fmt.Printf("\nAPPLIED: replayed %d suppressed intent(s) for account %s (%s) back to pending — "+
-		"the writeback engine will apply them on its next drain pass.\n", replayed, acct.ID, acct.Name)
+	printWritebackLedgerApplied(acct, res)
 	return nil
+}
+
+// printWritebackLedgerApplied states what --apply did, per outcome. All three
+// numbers are printed, including zeros: "replayed 0" must be readable as "every
+// row was skipped" or "the ledger was empty", and a single total cannot say which.
+func printWritebackLedgerApplied(acct store.Account, res store.ReplayResult) {
+	fmt.Printf("\nAPPLIED for account %s (%s):\n", acct.ID, acct.Name)
+	fmt.Printf("  replayed           %6d  moved back to pending; the writeback engine applies them on its next drain pass\n", res.Replayed)
+	fmt.Printf("  skipped-stale      %6d  left in the ledger: the message gained a live copy after the intent was created\n", res.SkippedStale)
+	fmt.Printf("  skipped-superseded %6d  left in the ledger: a later append of the same message exists\n", res.SkippedSuperseded)
+	if res.SkippedStale+res.SkippedSuperseded > 0 {
+		fmt.Println("The skipped rows are still `suppressed`: running the report again lists them, and --discard removes them.")
+	}
+}
+
+// printWritebackLedgerDiscarded states what --discard --apply moved, per source
+// and in total, for the named account, so the output answers "how many of the
+// user's own moves did I just throw away" without arithmetic. A source with no
+// rows is not listed; an empty ledger says so explicitly rather than printing an
+// empty table.
+func printWritebackLedgerDiscarded(acct store.Account, rows []store.SuppressedIntentRow) {
+	bySource := map[string]int64{}
+	var total int64
+	for _, r := range rows {
+		src := r.Source
+		if src == "" {
+			src = "unknown"
+		}
+		bySource[src] += r.Count
+		total += r.Count
+	}
+	fmt.Printf("\nDISCARDED for account %s (%s): %d intent(s) moved to 'discarded'. They will not be replayed.\n",
+		acct.ID, acct.Name, total)
+	if total == 0 {
+		fmt.Println("The ledger was empty; nothing was changed.")
+		return
+	}
+	fmt.Printf("%-10s %8s\n", "SOURCE", "COUNT")
+	fmt.Println(strings.Repeat("-", 19))
+	names := make([]string, 0, len(bySource))
+	for src := range bySource {
+		names = append(names, src)
+	}
+	sort.Strings(names)
+	for _, src := range names {
+		fmt.Printf("%-10s %8d\n", src, bySource[src])
+	}
+	fmt.Println(strings.Repeat("-", 19))
+	fmt.Printf("%-10s %8d  for account %s (%s)\n", "total", total, acct.ID, acct.Name)
 }
 
 // writebackShadowReason names which half of ADR-028 §2's writeback switch is
@@ -152,6 +234,13 @@ func runWritebackLedger(ctx context.Context, args []string) error {
 // which is about Account/get reporting the column instead of the effective
 // value; this fixes the CLI report only.)
 func writebackShadowReason(acct store.Account, instanceDisabled bool) string {
+	// The provider hold comes from store.EffectiveWriteback, the same
+	// evaluation Account/get, getHealth and the writeback drain use (ADR-028
+	// A5). Without it, --apply on a held Gmail account reported "replayed N"
+	// while the drain put every row straight back to suppressed.
+	if eff, heldBy := store.EffectiveWriteback(acct, instanceDisabled); !eff && heldBy == store.WritebackHeldByProvider {
+		return "the provider hold is set: writeback to Gmail OAuth accounts is not enabled in this version (ADR-047)"
+	}
 	switch {
 	case !acct.WritebackEnabled && instanceDisabled:
 		return "the account's writebackEnabled column is false AND the instance-level MAILROOM_WRITEBACK_DISABLED is set"
@@ -243,10 +332,12 @@ func printWritebackLedgerBySource(buckets []store.SuppressedIntentRow) {
 	if len(buckets) == 0 {
 		return
 	}
-	fmt.Printf("\n%-10s %-10s %8s\n", "OP", "SOURCE", "COUNT")
-	fmt.Println(strings.Repeat("-", 30))
-	var unknownSource int64
+	const width = 62
+	fmt.Printf("\n%-10s %-10s %8s %8s %11s\n", "OP", "SOURCE", "COUNT", "STALE", "SUPERSEDED")
+	fmt.Println(strings.Repeat("-", width))
+	var unknownSource, stale, superseded, total int64
 	for _, b := range buckets {
+		total += b.Count
 		src := b.Source
 		if src == "" {
 			// ⚠ NOT "user". Empty means the row predates migration 00057 and the
@@ -255,11 +346,36 @@ func printWritebackLedgerBySource(buckets []store.SuppressedIntentRow) {
 			src = "unknown"
 			unknownSource += b.Count
 		}
-		fmt.Printf("%-10s %-10s %8d\n", b.Op, src, b.Count)
+		stale += b.Stale
+		superseded += b.Superseded
+		fmt.Printf("%-10s %-10s %8d %8d %11d\n", b.Op, src, b.Count, b.Stale, b.Superseded)
 	}
-	fmt.Println(strings.Repeat("-", 30))
+	fmt.Println(strings.Repeat("-", width))
 	if unknownSource > 0 {
 		fmt.Printf("%d intent(s) predate the source column (migration 00057) and cannot be\n"+
 			"attributed. They are NOT counted as user actions.\n", unknownSource)
 	}
+	printWritebackLedgerFindings(total, stale, superseded)
+}
+
+// printWritebackLedgerFindings explains the two judgements the table's last
+// columns make (ADR-028 amendments A2 and A4). Both counts are always printed,
+// including as 0, because an absent line cannot be told from a check that did
+// not run (CLAUDE.md: "a bounded or empty result must report its bound").
+//
+// The definitions are printed rather than left to the ADR, because the number is
+// read by someone deciding whether to replay, at a prompt, with the ADR closed.
+func printWritebackLedgerFindings(total, stale, superseded int64) {
+	fmt.Printf("\nSTALE      %6d  intent(s) whose message gained a live copy in this account AFTER the\n"+
+		"                  intent was created (another client filed, copied or moved it, or the folder\n"+
+		"                  was recreated). Replay applies an intent to wherever the copy is NOW, so a\n"+
+		"                  stale move can undo filing done since. Judged for move, +flag, -flag, +kw\n"+
+		"                  and -kw only. It does not see a copy that merely changed flags.\n", stale)
+	fmt.Printf("SUPERSEDED %6d  append(s) with a LATER append of the same message into the same\n"+
+		"                  mailbox: they would file a version of the draft the user has since replaced.\n", superseded)
+	// What --apply will do with it, stated in the same numbers. Stale and
+	// superseded rows are NEVER replayed by --apply; they stay in the ledger and
+	// are listed again by every run until --discard removes them.
+	fmt.Printf("\n--apply would replay %d of %d, and leave %d stale and %d superseded in the ledger.\n",
+		total-stale-superseded, total, stale, superseded)
 }

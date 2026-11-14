@@ -24,7 +24,7 @@
 // permanently. The reaper is the missing half: on a slow, separately-configured
 // cadence (WithReapInterval, default hourly, persisted per mailbox in
 // app.mailboxes.last_reaped_at), it asks the server for a mailbox's whole live
-// UID set (sync.SyncSession.LiveUIDs — UID SEARCH ALL) and diffs it against the
+// UID set (sync.ReadSession.LiveUIDs — UID SEARCH ALL) and diffs it against the
 // provenance rows we hold for that (mailbox, uidvalidity). A UID we hold and the
 // server does not is a message that was expunged or moved away THERE; its
 // provenance row is dropped, an Email change_log row records the membership

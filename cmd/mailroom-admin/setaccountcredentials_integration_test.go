@@ -91,7 +91,7 @@ var _ imapsync.SyncSession = (*fakeCredentialCheckSession)(nil)
 // username/password (an IMAP LOGIN failure otherwise) — a real server's
 // behaviour, faked at the onboarding seam.
 func acceptingDialer(wantUsername, wantPassword string) onboarding.Dialer {
-	return func(_ context.Context, cfg imapsync.Config) (imapsync.SyncSession, error) {
+	return func(_ context.Context, cfg imapsync.Config) (imapsync.ReadSession, error) {
 		if cfg.Username != wantUsername || cfg.Password != wantPassword {
 			return nil, &imapsync.Error{Kind: imapsync.ErrorKindAuth, Op: "dial",
 				Err: errors.New("NO [AUTHENTICATIONFAILED] Authentication failed")}

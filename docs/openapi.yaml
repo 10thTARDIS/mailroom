@@ -2566,6 +2566,30 @@ components:
         smtpHost: { type: string }
         smtpPort: { type: integer }
         syncEnabled: { type: boolean }
+        writebackEnabled:
+          type: boolean
+          description: |
+            The account's own ingest-only switch, as stored (settable through
+            Account/set; false is ingest-only mode, ADR-028). It is ONE of three
+            conditions: it can read true while Mailroom is not writing to the
+            account. Read `writebackEffective` for what is actually happening.
+        writebackEffective:
+          type: boolean
+          description: |
+            Read-only. Whether Mailroom will write to this account's mailbox right
+            now: `writebackEnabled` AND the instance switch
+            (`MAILROOM_WRITEBACK_DISABLED`) is not set AND no provider hold
+            applies. Account/set refuses it.
+        writebackHeldBy:
+          type: [string, "null"]
+          enum: [account, instance, provider, null]
+          description: |
+            Read-only. null when `writebackEffective` is true, otherwise the switch
+            that is holding writeback off: `account` (writebackEnabled is false;
+            the user can change it), `instance` (a deployment setting no API call
+            can lift) or `provider` (a Gmail account whose write path is not
+            enabled yet). When more than one applies the first in that order is
+            reported.
         outboundDailyQuota: { type: integer, description: Read-only provider send cap. }
         color: { type: [string, "null"], description: "#RRGGBB or null." }
 

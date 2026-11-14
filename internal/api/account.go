@@ -89,7 +89,17 @@ const setValidationFailed = "validationFailed"
 // only inside the sealed secret in 0.x; the client set it and does not need it
 // echoed back). Endpoints and the sync flag are the manageable, non-secret
 // surface.
-func accountObject(a store.Account, g *store.OAuthGrant, props map[string]bool) map[string]any {
+func accountObject(a store.Account, g *store.OAuthGrant, instanceWritebackDisabled bool, props map[string]bool) map[string]any {
+	// ⚠ writebackEnabled IS THE COLUMN, writebackEffective IS THE ANSWER
+	// (ADR-028 amendment A5). Under MAILROOM_WRITEBACK_DISABLED, or a provider
+	// hold, an account whose column is true is shadowed all the same, and the
+	// column alone told a client it was writing back. writebackHeldBy names the
+	// switch (null when effective), so a client can say what to change.
+	writebackEffective, heldBy := store.EffectiveWriteback(a, instanceWritebackDisabled)
+	var writebackHeldBy any
+	if heldBy != "" {
+		writebackHeldBy = heldBy
+	}
 	full := map[string]any{
 		"id":               a.ID.String(),
 		"name":             a.Name,
@@ -100,6 +110,9 @@ func accountObject(a store.Account, g *store.OAuthGrant, props map[string]bool) 
 		"smtpPort":         a.SMTPPort,
 		"syncEnabled":      a.SyncEnabled,
 		"writebackEnabled": a.WritebackEnabled,
+		// Read-only, computed, never stored: Account/set refuses both.
+		"writebackEffective": writebackEffective,
+		"writebackHeldBy":    writebackHeldBy,
 		// notifyPush (#59): whether new mail in this account sends Web Push to
 		// the user's devices at all. Settable; default true.
 		"notifyPush": a.NotifyPush,
@@ -260,7 +273,7 @@ func (a *API) accountGet(ctx context.Context, userID ulid.ULID, rawArgs json.Raw
 		if gr, ok := grants[ac.ID]; ok {
 			g = &gr
 		}
-		list = append(list, accountObject(ac, g, props))
+		list = append(list, accountObject(ac, g, a.store.WritebackDisabled(), props))
 	}
 	return mustMarshal(getResult{
 		AccountID: userID.String(),
@@ -457,7 +470,7 @@ func (a *API) accountSet(ctx context.Context, userID ulid.ULID, rawArgs json.Raw
 				}
 			}
 			created[cid] = id
-			obj, oerr := accountObjectByID(ctx, tx, id)
+			obj, oerr := accountObjectByID(ctx, tx, id, a.store.WritebackDisabled())
 			if oerr != nil {
 				return oerr
 			}
@@ -929,7 +942,7 @@ func defaultIdentityAddr(username string) string {
 // accountObjectByID re-reads a just-written account so the created object carries
 // the server-applied defaults (ports, provider profile). It never exposes the
 // password.
-func accountObjectByID(ctx context.Context, tx *store.UserTx, id ulid.ULID) (map[string]any, error) {
+func accountObjectByID(ctx context.Context, tx *store.UserTx, id ulid.ULID, instanceWritebackDisabled bool) (map[string]any, error) {
 	accounts, err := tx.GetAccounts(ctx, []ulid.ULID{id})
 	if err != nil {
 		return nil, err
@@ -937,5 +950,5 @@ func accountObjectByID(ctx context.Context, tx *store.UserTx, id ulid.ULID) (map
 	if len(accounts) == 0 {
 		return map[string]any{"id": id.String()}, nil
 	}
-	return accountObject(accounts[0], nil, nil), nil
+	return accountObject(accounts[0], nil, instanceWritebackDisabled, nil), nil
 }

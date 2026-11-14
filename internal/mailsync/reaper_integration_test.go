@@ -502,7 +502,7 @@ func TestLiveFailedLiveUIDsReadReapsNothing(t *testing.T) {
 
 	// Break only the LiveUIDs call, and only for the inbox: the poll, the fetch,
 	// the ingest and the Archive reap all run against the real Dovecot.
-	broken := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs), func(ctx context.Context, cfg sync.Config) (sync.SyncSession, error) {
+	broken := New(NewStoreAdapter(f.st), ingest.New(f.st, f.blobs), func(ctx context.Context, cfg sync.Config) (sync.ReadSession, error) {
 		s, err := sync.Dial(ctx, cfg)
 		if err != nil {
 			return nil, err

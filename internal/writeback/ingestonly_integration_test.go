@@ -531,16 +531,11 @@ func TestLiftingTheModeDrainsNothing(t *testing.T) {
 
 	// The explicit replay IS allowed to, and must actually work — otherwise the
 	// assertion above is satisfied by a ledger nothing can ever act on.
-	var replayed int64
-	if err := f.st.UserTx(context.Background(), f.userID, func(tx *store.UserTx) error {
-		var err error
-		replayed, err = tx.ReplaySuppressedIntents(context.Background(), f.account)
-		return err
-	}); err != nil {
-		t.Fatalf("ReplaySuppressedIntents: %v", err)
-	}
-	if replayed != int64(len(ids)) {
-		t.Errorf("replayed = %d, want %d", replayed, len(ids))
+	res := f.replay(t)
+	if res.Replayed != int64(len(ids)) || res.SkippedStale != 0 || res.SkippedSuperseded != 0 {
+		t.Errorf("replay = %+v, want all %d replayed and none skipped: nothing in this ledger is stale or "+
+			"superseded, so a skip here is a false positive that would keep real changes out of a replay",
+			res, len(ids))
 	}
 	if got := f.countByState(t)["pending"]; got != len(ids) {
 		t.Errorf("pending after explicit replay = %d, want %d", got, len(ids))

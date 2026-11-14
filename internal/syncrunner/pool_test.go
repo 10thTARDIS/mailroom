@@ -24,7 +24,7 @@ import (
 // the pool touches a session only through the probe/close contract, never by
 // driving IMAP itself.
 type poolConn struct {
-	mrsync.SyncSession
+	mrsync.ReadSession
 	id      int
 	mu      sync.Mutex
 	noopErr error
@@ -65,7 +65,7 @@ type dialCounter struct {
 	conns []*poolConn
 }
 
-func (d *dialCounter) dial(context.Context, mrsync.Config) (mrsync.SyncSession, error) {
+func (d *dialCounter) dial(context.Context, mrsync.Config) (mrsync.ReadSession, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.count++
@@ -89,7 +89,7 @@ type poolSyncer struct {
 	withCalls  int
 	plainCalls int
 	failNext   int
-	sessions   []mrsync.SyncSession
+	sessions   []mrsync.ReadSession
 	active     int
 	peak       int
 	holdFor    time.Duration
@@ -102,7 +102,7 @@ func (s *poolSyncer) SyncAccount(context.Context, mailsync.AccountSync) (mailsyn
 	return mailsync.Summary{}, nil
 }
 
-func (s *poolSyncer) SyncAccountWith(_ context.Context, _ mailsync.AccountSync, sess mrsync.SyncSession) (mailsync.Summary, error) {
+func (s *poolSyncer) SyncAccountWith(_ context.Context, _ mailsync.AccountSync, sess mrsync.ReadSession) (mailsync.Summary, error) {
 	s.mu.Lock()
 	s.withCalls++
 	s.sessions = append(s.sessions, sess)
