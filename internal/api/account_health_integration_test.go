@@ -171,3 +171,68 @@ func TestAccountGetHealthSearchStaleness(t *testing.T) {
 		t.Errorf("searchStalenessSeconds = %v, want >= 0", staleness)
 	}
 }
+
+// Account/getHealth's pendingIntentCount is the backlog a paused account is
+// building (ADR-028 A10): intents pending or in flight, for THIS account of THIS
+// user, and nothing else. Every other state is a control, as is another user's
+// pending row, so the count cannot be right by counting everything or nothing.
+//
+// NEGATIVE CONTROL: count 'suppressed' as well in CountOutstandingIntents and
+// the total below goes from 3 to 4.
+func TestAccountGetHealthPendingIntentCount(t *testing.T) {
+	h := newAPIHarness(t)
+	ctx := context.Background()
+	f := seedAPIUser(t, h.super, "pendingq-"+store.NewULID().String())
+	other := seedAPIUser(t, h.super, "pendingq-other-"+store.NewULID().String())
+
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := h.super.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	add := func(u apiFixture, state string) {
+		t.Helper()
+		reason := any(nil)
+		if state == "dead" {
+			reason = "gave up"
+		}
+		exec(`INSERT INTO app.writeback_intents (id, user_id, message_id, account_id, op,
+		        payload, idempotency_key, state, dead_reason)
+		      VALUES ($1,$2,$3,$4,'move','{}'::jsonb,$5,$6::app.intent_state,$7)`,
+			store.NewULID().String(), u.UserID.String(), u.MessageID.String(), u.AccountID.String(),
+			"wb-"+store.NewULID().String(), state, reason)
+	}
+	pendingOf := func(u apiFixture) float64 {
+		t.Helper()
+		res := call(t, h.api.accountGetHealth, u.UserID, map[string]any{})
+		entry := res["list"].([]any)[0].(map[string]any)
+		v, ok := entry["pendingIntentCount"].(float64)
+		if !ok {
+			t.Fatalf("pendingIntentCount = %v, want a number", entry["pendingIntentCount"])
+		}
+		return v
+	}
+
+	// Sync paused, nothing queued: a real zero.
+	exec(`UPDATE app.accounts SET sync_enabled = false WHERE id = $1`, f.AccountID.String())
+	if got := pendingOf(f); got != 0 {
+		t.Fatalf("empty queue reports %v, want 0", got)
+	}
+
+	for _, s := range []string{"pending", "pending", "inflight"} {
+		add(f, s)
+	}
+	for _, s := range []string{"suppressed", "applied", "dead", "discarded"} {
+		add(f, s)
+	}
+	add(other, "pending") // another user's backlog, which RLS must keep out
+	add(other, "pending")
+
+	if got := pendingOf(f); got != 3 {
+		t.Errorf("pendingIntentCount = %v, want 3 (2 pending + 1 inflight; suppressed, applied, dead, discarded and the other user's rows excluded)", got)
+	}
+	if got := pendingOf(other); got != 2 {
+		t.Errorf("other user's pendingIntentCount = %v, want 2", got)
+	}
+}
