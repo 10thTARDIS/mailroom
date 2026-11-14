@@ -9,6 +9,15 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.103.0-beta.3] — 2026-11-14
+
+**The third beta of v1.103 completes the hardening milestone.** For the person running
+Mailroom, replaying an ingest-only account's ledger no longer undoes filing done elsewhere in
+the meantime, a ledger can now be discarded without writing anything, and account details say
+whether Mailroom is really writing to the mailbox. For everyone, a draft opened straight from
+its link no longer gets stuck without a sending address, and the note about a revoked earlier
+key is easier to read.
+
 ### Ingest-only mode: a safer replay, and a way to say "never"
 
 - **Replaying what an ingest-only account would have done skips the changes that went stale.**
