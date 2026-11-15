@@ -6,7 +6,7 @@ procedure. This document owns **the sequence you follow when the box is gone.**
 
 > **A backup that hasn't restored is a hypothesis.** (spec §11)
 > That is why `scripts/restore-drill.sh` exists and why it runs on a schedule.
-> If you are reading this during an outage, skip to [At 3am](#4-at-3am).
+> If you are reading this during an outage, skip to [At 3am](#4-at-3am-restoring).
 
 **When to use this:** to set up backups, or to rebuild after the host or its data is lost.
 
@@ -326,6 +326,10 @@ on encrypted storage** — the same requirement
 [the operator security guide](admin/security.md#encrypt-the-volumes) states
 for `pgdata`, `search` and `blobs`, extended to the one place outside a
 container this script ever writes plaintext.
+
+## 4. At 3am: restoring
+
+Follow these steps in order. Each ends with a check; do not move on until it passes.
 
 ### Step 1 — Open the artifact
 

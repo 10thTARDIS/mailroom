@@ -115,7 +115,7 @@ func TestCryptoProcessWithTheWrongRootNeverBecomesHealthy(t *testing.T) {
 	p.stop(t)
 
 	// 3. A different root — a restore paired with the wrong escrow envelope, or
-	//    with one freshly generated from deploy/README.md §2.
+	//    with one freshly generated from deploy/README.md step 3.
 	p = boot(t, appURL, rootB)
 	err = p.waitHealthy(t)
 	if err == nil {

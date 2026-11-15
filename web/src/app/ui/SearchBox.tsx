@@ -54,7 +54,7 @@ import { SearchOptions } from "./SearchOptions";
  * ONE NAMED CONSTANT, because it is the knob the operator turns: too short and every
  * keystroke is a search the server answers and the client throws away; too long and the
  * results feel like they wait for you. The server times every index read in
- * `mailroom_search_duration_seconds` (deploy/README.md) — read its p95 before moving this.
+ * `mailroom_search_duration_seconds` (docs/admin/monitoring.md) — read its p95 before moving this.
  */
 export const SEARCH_DEBOUNCE_MS = 250;
 

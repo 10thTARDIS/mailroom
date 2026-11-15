@@ -20,7 +20,7 @@ knowledge assumed.
 2. Use the [operator guide](admin/README.md) for everything after that:
    [configuration](admin/configuration.md), [accounts](admin/accounts.md),
    [sign-in](admin/authentication.md), [upgrading](admin/upgrading.md),
-   [admin commands](admin/admin-cli.md), [monitoring](admin/monitoring.md) and
+   [admin commands](admin/admin-cli.md), [PGP keys](admin/pgp-keys.md), [monitoring](admin/monitoring.md) and
    [troubleshooting](admin/troubleshooting.md).
 3. Connect [Gmail and Outlook](oauth-providers.md) and [AI tools over MCP](mcp.md).
 4. Keep it safe: [backups and restore](backup-restore-runbook.md),
