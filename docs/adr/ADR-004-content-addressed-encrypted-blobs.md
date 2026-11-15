@@ -41,7 +41,7 @@ master key, learns:
 
 **Accepted, not fixed.** The threat is someone reading the volume offline, and
 at-rest encryption of the data volumes is already a deployment requirement
-(`deploy/README.md` §0a), which covers it. Keying the file names (an HMAC of
+([operator guide, encrypt the volumes](../admin/security.md#encrypt-the-volumes)), which covers it. Keying the file names (an HMAC of
 the content hash under a key derived from the master key) would close it, but
 it renames every stored blob on every instance: a migration touching every
 file, with its own failure modes, for a leak the volume encryption already

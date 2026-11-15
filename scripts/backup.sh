@@ -461,7 +461,7 @@ echo "backup: preflight OK — the dump role bypasses RLS, so it can see the mai
 # script ever touched it. That layer is not necessarily on encrypted storage:
 # from Docker 29 on, the containerd image store is the default, and a writable
 # layer is then a containerd snapshot under /var/lib/containerd, a completely
-# different directory tree from Docker's data root (deploy/README.md §0a).
+# different directory tree from Docker's data root (docs/admin/security.md, "Encrypt the volumes").
 # `postgres` also cannot run read-only (needs its own scratch paths), so it
 # was the one service in the stack that could still do this.
 #
