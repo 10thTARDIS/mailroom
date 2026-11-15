@@ -31,7 +31,7 @@ Whatever it files does not teach Mailroom's own sorting; your habits stay yours.
 | **Custom** | Choose each permission, including **Send mail** and **Delete mail (to Trash)** |
 
 5. Optionally limit it to **Only these accounts**, and set **Calls per minute** and **Calls per 24 hours**.
-6. Tick **Suspend the key automatically if it misbehaves** for a safety net.
+6. Leave **Suspend the key automatically if it misbehaves** ticked (it is on by default) as a safety net.
 7. Choose **Create key**, then **Copy key**. It is shown only once; choose **Done, I've saved the key** afterwards.
 
 Give the key to your tool, which also needs your Mailroom's address. The same page has a **Connect an AI tool** guide with the address and the exact settings to copy. Technical setup is in the [MCP reference](../mcp.md).
@@ -40,7 +40,7 @@ Give the key to your tool, which also needs your Mailroom's address. The same pa
 
 ## Approve before it sends or deletes
 
-Keep **Ask me first** ticked for sending and deleting. The tool's request then waits for you:
+**Ask me first** is ticked for sending and deleting by default; keep it that way. The tool's request then waits for you:
 
 - A banner appears: "1 action waiting for your approval", with **Review**, and you also get a notification.
 - The request lists what would happen: recipients, subject and attachments for a send, or the messages for a delete.
