@@ -16,6 +16,18 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   sync back on."), so you can see the backlog before you resume. Nothing extra is shown while
   sync is on.
 
+### Documentation
+
+- **A user guide.** New pages explain everything in the app in plain English: getting started,
+  the desk and areas, sorting, search, reading safely, writing, encryption, contacts, AI
+  assistants, keyboard shortcuts, a map of Settings and answers to common questions.
+- **A shorter install guide and an operator guide.** Installing is now one page of numbered
+  steps. Everything after that has its own page: configuration (every setting in one table),
+  accounts, sign-in, security, upgrading, admin commands, PGP keys, monitoring and
+  troubleshooting.
+- **The front page and the documentation index** are organised by what you want to do, and the
+  roadmap is up to date.
+
 ## [1.103.0-beta.3] — 2026-11-14
 
 **The third beta of v1.103 completes the hardening milestone.** For the person running

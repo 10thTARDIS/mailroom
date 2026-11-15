@@ -6,7 +6,20 @@ procedure. This document owns **the sequence you follow when the box is gone.**
 
 > **A backup that hasn't restored is a hypothesis.** (spec §11)
 > That is why `scripts/restore-drill.sh` exists and why it runs on a schedule.
-> If you are reading this during an outage, skip to [At 3am](#4-at-3am).
+> If you are reading this during an outage, skip to [At 3am](#4-at-3am-restoring).
+
+**When to use this:** to set up backups, or to rebuild after the host or its data is lost.
+
+**At a glance:**
+
+1. Take a backup with `scripts/backup.sh` (section 3): one `age`-sealed artifact, sealed to a public
+   key whose private half lives off the host.
+2. Run it on a schedule with retention, and alert on `backup-freshness.sh` (section 3a).
+3. Escrow both root keys separately ([key escrow](key-escrow.md)).
+4. To restore (section 4): open the artifact, check the schema version, create the roles and restore
+   Postgres, restore the blobs, install **both** roots from escrow (never generate new ones), boot and
+   let the index rebuild, then prove it is alive before re-enabling sync.
+5. Prove the whole chain regularly with the drill (section 5).
 
 ---
 
@@ -131,7 +144,7 @@ age-keygen -y backup-identity.txt > backup-recipients.txt    # public — safe t
 on the Compose project.** Docker Compose names every container
 `<project>-<service>-1`. `deploy/compose.yml` sets `name: mailroom-deploy`, so
 the plain `docker compose -f deploy/compose.yml up -d` command
-`deploy/README.md` gives produces `mailroom-deploy-postgres-1`,
+[`deploy/README.md`](../deploy/README.md#6-bring-it-up) gives produces `mailroom-deploy-postgres-1`,
 `mailroom-deploy-mailroom-1`, and so on. Passing `-p <name>` overrides the
 project, and therefore every container name that follows from it — this used
 to send the two documents' examples to different container names entirely,
@@ -309,9 +322,14 @@ somewhere else entirely. Under it, `payload/` holds the unencrypted
 an unencrypted copy of every blob file, right up until step 7 seals them into
 the `.age` artifact; `cleanup()` removes `$WORK` on exit, success or failure.
 **Wherever this repository is checked out on the host must therefore also be
-on encrypted storage** — the same requirement `deploy/README.md` §0a states
+on encrypted storage** — the same requirement
+[the operator security guide](admin/security.md#encrypt-the-volumes) states
 for `pgdata`, `search` and `blobs`, extended to the one place outside a
 container this script ever writes plaintext.
+
+## 4. At 3am: restoring
+
+Follow these steps in order. Each ends with a check; do not move on until it passes.
 
 ### Step 1 — Open the artifact
 
@@ -428,8 +446,8 @@ ran against 00055 carries no record, so the first boot after restoring it
 recorded", not "a root that opens the stored keys". For a restore those
 coincide, but only the drill proves the second.
 
-⚠ **The deployment guide will offer to generate a new one.** `deploy/README.md`
-§2 hands you an `openssl rand` line for both roots, because it is written for a
+⚠ **The deployment guide will offer to generate a new one.** [`deploy/README.md`](../deploy/README.md#3-generate-the-secrets)
+step 3 hands you an `openssl rand` line for both roots, because it is written for a
 *first* install. **On a restore, do not run it.** Against a database with a
 recorded root, a generated one now stops the crypto service; against one without,
 it is still indistinguishable from the right one until the moment it matters.

@@ -8,6 +8,17 @@ with what checkpoints, and how to stop. Its sibling is
 data back; this one covers getting there in the first place. (The file keeps its
 original name, `production-cutover-runbook.md`, so existing links still work.)
 
+**When to use this:** before attaching a mailbox that holds real mail to an instance, and again if you
+need to back out.
+
+**At a glance:**
+
+1. Prepare (section 1): a provider-side backup, a census of the mailbox, a clean run on an empty
+   database, the right operator subject, host prerequisites, and send-as permission for aliases.
+2. Run a shadow period (section 2): attach the account ingest-only, so Mailroom reads and never writes.
+3. Check it is healthy and the counts converge, then switch writeback on in order (section 3).
+4. Know how to back out (section 4), and what stays irreversible.
+
 **The rule this document is written to:** every step either has an observable
 check, or says plainly that it has none. A step with neither is a wish.
 
@@ -142,7 +153,7 @@ it from the IdP's own admin view. Then set it and restart.
 
 **If it is already wrong and mail has synced,** do NOT just correct the variable:
 the next boot collides on the email and refuses to start. Follow
-`deploy/README.md` §4, *A wrong operator subject*, which moves the user that
+[*Recover from a wrong operator subject*](admin/authentication.md#recover-from-a-wrong-operator-subject), which moves the user that
 owns the mail with `deploy/rebind-operator-subject.sql` first.
 
 **Check:** after setting it, one login lands in a user that can see the declared
@@ -151,7 +162,7 @@ accounts in the accounts screen.
 ### 1.5 The host prerequisites
 
 At-rest volume encryption and TLS termination, each with a way to verify it —
-not "it was configured". If your deployment is managed by automation, this is
+not "it was configured" ([the checks](admin/security.md)). If your deployment is managed by automation, this is
 that automation's half.
 
 ### 1.6 The provider must let this mailbox SEND as its aliases

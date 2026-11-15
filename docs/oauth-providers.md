@@ -194,7 +194,7 @@ MAILROOM_OAUTH_MICROSOFT_CLIENT_SECRET_FILE=/run/secrets/mailroom_oauth_microsof
 ```
 
 Mount the two secret files into the container with a `secrets:` entry in a
-`compose.override.yml` (see [deploy/README.md](../deploy/README.md)). The plain
+`compose.override.yml` (see [configuration](admin/configuration.md#sign-in)). The plain
 form works too, for example
 `MAILROOM_OAUTH_GOOGLE_CLIENT_SECRET=your-google-client-secret`, but a file is
 better.

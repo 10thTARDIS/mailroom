@@ -39,7 +39,7 @@ import (
 // This is a REPORT, never a mutation: it changes nothing in the database or the
 // file. --fail-on-drift turns "the file and the database disagree in a way that
 // matters" into a non-zero exit, for a deploy pipeline or a pre-flight check —
-// see deploy/README.md.
+// see docs/admin/accounts.md.
 func runAccountsReport(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("accounts-report", flag.ContinueOnError)
 	var (

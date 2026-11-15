@@ -319,7 +319,7 @@ const (
 	// positive; defaults to DefaultIMAPIdleTimeout.
 	EnvIMAPIdleTimeout = "MAILROOM_IMAP_IDLE_TIMEOUT"
 	// EnvImageProxy toggles the image proxy (ADR-026, #55 increment 3). Default
-	// ON; set it to a negative value to disable. Disabling restores the previous
+	// ON; set it to 0, false, no or off to disable. Disabling restores the previous
 	// behaviour exactly: bodies park the sender's URL and the browser fetches it.
 	EnvImageProxy = "MAILROOM_IMAGE_PROXY"
 	// EnvImageProxyPrefetch toggles fetching allowed senders' images on arrival

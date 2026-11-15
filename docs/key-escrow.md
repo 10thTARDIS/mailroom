@@ -286,7 +286,7 @@ against a bad backup; it does nothing against a lost key.
 ⚠ **Install BOTH roots. This section once covered only the master key, and
 the omission is unrecoverable** — see the asymmetry at the top of this file.
 
-⚠ **Do not run `deploy/README.md` §2's generation commands on a restore.** They
+⚠ **Do not run the secret-generation commands in [`deploy/README.md`](../deploy/README.md#3-generate-the-secrets) (step 3) on a restore.** They
 mint new roots, which is correct for a first install and fatal here. A generated
 PGP root is indistinguishable from the right one until somebody signs or
 decrypts.

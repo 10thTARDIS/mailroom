@@ -5,7 +5,7 @@
 package store
 
 // deploy/rebind-operator-subject.sql is the one database step of the recovery
-// deploy/README.md §4 prescribes for a wrong MAILROOM_OPERATOR_SUBJECT (#574).
+// docs/admin/authentication.md prescribes for a wrong MAILROOM_OPERATOR_SUBJECT (#574).
 // These tests run THAT FILE — read from disk, not a copy of its SQL — so the
 // documented procedure is the tested one, and they pin the two claims the
 // README's ordering rests on: correcting the variable without moving the user

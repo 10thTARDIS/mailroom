@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 --
 -- Move the boot-provisioned operator to the subject your identity provider
--- really issues (#574). Read deploy/README.md §4, "A wrong operator subject",
+-- really issues (#574). Read docs/admin/authentication.md, "Recover from a wrong operator subject",
 -- before running it: it is the procedure, and this file is only its one step
 -- that touches the database.
 --

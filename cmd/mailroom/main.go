@@ -1550,7 +1550,7 @@ func provisioningResolver(st *store.Store, operatorSubject string, logger *slog.
 						"operator_subject, which is not the subject the provider issues. Do NOT just change " +
 						config.EnvOperatorSubject + ": the next boot would collide on this email and refuse " +
 						"to start. Confirm token_subject is your account in the provider's admin view, then " +
-						"follow deploy/README.md section 4, \"A wrong operator subject\""
+						"follow docs/admin/authentication.md, \"Recover from a wrong operator subject\""
 				}
 				logger.Error("login refused: this email already belongs to another user",
 					"token_subject", claims.Subject,
@@ -1582,7 +1582,7 @@ func provisioningResolver(st *store.Store, operatorSubject string, logger *slog.
 				"operator_subject", operatorSubject,
 				"user_id", id.String(),
 				"hint", "if this is the operator, the declared accounts are syncing into the user under "+
-					"operator_subject, not this one; see deploy/README.md section 4, \"A wrong operator subject\"")
+					"operator_subject, not this one; see docs/admin/authentication.md, \"Recover from a wrong operator subject\"")
 		}
 		return id, nil
 	}
