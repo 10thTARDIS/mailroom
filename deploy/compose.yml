@@ -119,7 +119,7 @@ services:
     #
     # track_io_timing adds read/write times to the same rows and to EXPLAIN
     # (BUFFERS); its cost is a clock read per I/O, negligible on current
-    # hardware. deploy/README.md §6d shows how to read it.
+    # hardware. docs/admin/monitoring.md ("Find slow queries") shows how to read it.
     command:
       - postgres
       - -c
@@ -164,7 +164,7 @@ services:
     # that forgets the lesson. A tmpfs never touches a container's writable
     # layer at all, so it is off whatever disk that layer resolves to —
     # which, with the containerd image store, is NOT necessarily under
-    # Docker's data root (deploy/README.md §0a). No `read_only: true` here,
+    # Docker's data root (docs/admin/security.md, "Encrypt the volumes"). No `read_only: true` here,
     # unlike mailroom/crypto/clamd: Postgres needs its own writable paths
     # under /var/lib/postgresql, which stay on the pgdata volume.
     #
@@ -339,7 +339,7 @@ services:
   # a misleading error — and you are left with a directory where the file goes,
   # so the obvious `openssl rand ... > secrets/…txt` fails until you rmdir it.
   #
-  # deploy/README.md §2 has the one-liner. And once it
+  # deploy/README.md step 3 has the one-liner. And once it
   # exists, it must be ESCROWED: see docs/key-escrow.md. Losing it loses every
   # message ever encrypted to these keys, irreversibly and silently — the
   # mailbox restores, opens and works, and only the encrypted mail is gone.
@@ -593,7 +593,7 @@ services:
     # clamd was left running but unresponsive, so `restart: unless-stopped` never
     # fires and fail-closed scanning keeps mail sync paused until a human
     # restarts this container. It surfaces at the next signature update, hours
-    # after the limit was set. Never below ~2.5 GiB; deploy/README.md §6c.
+    # after the limit was set. Never below ~2.5 GiB; docs/admin/configuration.md ("Container memory limits").
     mem_limit: ${MAILROOM_CLAMD_MEM_LIMIT:-3500m}
     healthcheck:
       # Speaks the protocol rather than checking the process exists — a clamd
@@ -641,7 +641,7 @@ services:
       # PARTIALLY filled OIDC block: a typo'd variable is a hard config error,
       # never a silent fall-through to the open escape hatch below.
       #
-      # See deploy/README.md §4.
+      # See docs/admin/authentication.md.
       # ⚠ THE TWO SECRETS IN THIS BLOCK ARE FILES, NOT ENVIRONMENT VARIABLES,
       # AND THAT IS THE POINT (#351). The issuer, client id and redirect URL
       # below are not secret and stay in .env; the client secret and the session
@@ -661,7 +661,7 @@ services:
       # is still fail-closed — resolveSecret's os.ReadFile returns "is a
       # directory" and config.Load refuses to boot — but the error names the
       # wrong problem, and you are left with a directory where the file goes.
-      # See deploy/README.md §2.
+      # See deploy/README.md step 3.
       #
       # ⚠ Upgrading from a deployment that had these in .env: move the values
       # into the two files. The variables are no longer read, and leaving them
@@ -675,8 +675,8 @@ services:
       MAILROOM_SESSION_KEY_FILE: /run/secrets/mailroom_session_key
 
       # --- Connect Gmail / Outlook by signing in (OAuth, optional) ---------
-      # Your OWN OAuth client at each provider (deploy/README.md, "Signing in
-      # to Gmail and Outlook"). A provider is offered only when BOTH its id
+      # Your OWN OAuth client at each provider (docs/oauth-providers.md, "Connecting
+      # Gmail and Outlook"). A provider is offered only when BOTH its id
       # and secret are set; one without the other refuses to boot. Leave all
       # of these empty to keep the feature off.
       #
@@ -726,7 +726,7 @@ services:
       # application binding plus the mailroom-admin group claim — any identity
       # that clears it is auto-provisioned on login regardless of this value.
       # Getting the subject wrong is worse than leaving it unset — see
-      # deploy/README.md §4 for what actually happens and how to find the
+      # docs/admin/authentication.md ("The operator subject") for what actually happens and how to find the
       # right value instead of guessing.
       MAILROOM_OPERATOR_SUBJECT: ${MAILROOM_OPERATOR_SUBJECT:-}
       MAILROOM_OPERATOR_EMAIL: ${MAILROOM_OPERATOR_EMAIL:-}
@@ -1025,7 +1025,7 @@ secrets:
   # The declared IMAP/SMTP accounts. A secret rather than environment
   # variables because it carries mail passwords: it lands at
   # /run/secrets/mailroom_accounts and never shows up in `docker inspect` or the
-  # process environment. deploy/README.md step 2 creates it (`{"accounts": []}`
+  # process environment. deploy/README.md step 3 creates it (`{"accounts": []}`
   # if you have none yet).
   #
   # ⚠ This said "mode 0444 inside the container" until #312. It is not: the file
