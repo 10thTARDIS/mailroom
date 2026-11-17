@@ -685,7 +685,7 @@ jobs:
       # `docker cp`s web/node_modules/axe-core/axe.min.js into the browser
       # container and FAILS if it is not there — a lint lane that skips when its
       # linter is absent goes green in exactly the situation it exists to catch
-      # (#263's rule, #159's reason). `npm audit --audit-level=high` in the `web`
+      # (#263's rule, #159's reason). The dependency gate in the `web`
       # job now covers axe-core too, since it runs the full tree.
       - uses: actions/setup-node@v7
         with:
