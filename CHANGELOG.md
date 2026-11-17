@@ -16,6 +16,12 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   sync back on."), so you can see the backlog before you resume. Nothing extra is shown while
   sync is on.
 
+### Under the hood
+
+- The dependency check in continuous integration now holds the code that ships to a strict
+  standard (no high or critical advisories, no exceptions) and lets a build or test tool carry
+  one only through a dated, explained exception that expires within 90 days.
+
 ### Documentation
 
 - **A user guide.** New pages explain everything in the app in plain English: getting started,
