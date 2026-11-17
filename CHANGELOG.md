@@ -16,6 +16,13 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   sync back on."), so you can see the backlog before you resume. Nothing extra is shown while
   sync is on.
 
+### Fixes
+
+- **A tab left open no longer gets stuck saying "Offline".** If your server puts a sign-in page
+  in front of Mailroom (a proxy that asks you to log in first), that sign-in eventually expires.
+  Mailroom used to read this as being offline, and only a hard refresh brought it back. It now
+  recognises it and takes you through sign-in again, as it does when its own session ends.
+
 ### Documentation
 
 - **A user guide.** New pages explain everything in the app in plain English: getting started,

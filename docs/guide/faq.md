@@ -3,7 +3,7 @@
 
 Short answers to the questions new users ask most.
 
-**Questions:** [Where is my mail?](#where-is-my-mail-stored) · [Can I use my phone's mail app?](#can-i-still-use-my-phones-mail-app) · [If Mailroom is down?](#what-happens-if-mailroom-is-down) · [Images blocked](#why-are-images-blocked) · [Attachment withheld](#why-was-an-attachment-withheld) · [Why this area?](#why-did-a-message-land-in-this-area) · [Undo](#how-do-i-undo-something) · [Learned sorting](#how-do-i-stop-mailroom-learning-where-i-file-things) · [Operator](#can-the-person-who-runs-mailroom-read-my-mail) · [Missing mail](#why-is-mail-missing-or-late) · [Notifications](#why-am-i-not-getting-notifications) · [Delete my data](#how-do-i-export-or-delete-my-data)
+**Questions:** [Where is my mail?](#where-is-my-mail-stored) · [Can I use my phone's mail app?](#can-i-still-use-my-phones-mail-app) · [If Mailroom is down?](#what-happens-if-mailroom-is-down) · [Images blocked](#why-are-images-blocked) · [Attachment withheld](#why-was-an-attachment-withheld) · [Why this area?](#why-did-a-message-land-in-this-area) · [Undo](#how-do-i-undo-something) · [Learned sorting](#how-do-i-stop-mailroom-learning-where-i-file-things) · [Operator](#can-the-person-who-runs-mailroom-read-my-mail) · [Missing mail](#why-is-mail-missing-or-late) · [Says offline](#why-does-mailroom-say-offline-when-my-connection-is-fine) · [Notifications](#why-am-i-not-getting-notifications) · [Delete my data](#how-do-i-export-or-delete-my-data)
 
 ## Where is my mail stored?
 
@@ -48,6 +48,11 @@ Technically, yes: whoever runs the server holds the stored copy and the keys tha
 ## Why is mail missing or late?
 
 Open **Account health** from the account switcher. It shows whether each account is syncing, and any stuck changes. A paused account stops receiving new mail until you choose **Resume sync**. If an account says it **needs reconnecting**, choose **Reconnect**: nothing is lost in the meantime.
+
+## Why does Mailroom say "Offline" when my connection is fine?
+
+It could not reach the server. If **Retry** does not help, reload the page. If you have to sign
+in again, your sign-in had expired; Mailroom takes you there by itself when it can tell.
 
 ## Why am I not getting notifications?
 
