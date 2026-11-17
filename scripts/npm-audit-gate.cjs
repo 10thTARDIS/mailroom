@@ -31,6 +31,25 @@ const path = require("node:path");
 const BLOCKING = new Set(["high", "critical"]);
 const MAX_DAYS = 90;
 
+/**
+ * Fail closed on a report that is not a report. `npm audit` answers a registry
+ * failure with {"error": ...} and no vulnerabilities at all, which would read as
+ * a clean tree. A report whose own totals count blocking advisories that the
+ * parser below cannot find means the format moved under us: also a failure.
+ */
+function checkReport(report, label) {
+  if (!report || typeof report !== "object") return `${label}: npm audit returned no JSON report`;
+  if (report.error) return `${label}: npm audit failed: ${JSON.stringify(report.error).slice(0, 300)}`;
+  if (!report.vulnerabilities || typeof report.vulnerabilities !== "object") return `${label}: report has no "vulnerabilities" object`;
+  const totals = report.metadata && report.metadata.vulnerabilities;
+  if (!totals || typeof totals !== "object") return `${label}: report has no "metadata.vulnerabilities" totals`;
+  const counted = (totals.high || 0) + (totals.critical || 0);
+  if (counted > 0 && advisories(report).size === 0) {
+    return `${label}: report counts ${counted} high/critical but none could be read; the format may have changed`;
+  }
+  return null;
+}
+
 /** Every high/critical advisory in an `npm audit --json` report, by GHSA id. */
 function advisories(report) {
   const out = new Map();
@@ -53,6 +72,11 @@ function daysBetween(a, b) {
 function evaluate(prodReport, fullReport, allow, today) {
   const errors = [];
   const notes = [];
+  for (const [r, label] of [[prodReport, "production audit"], [fullReport, "full audit"]]) {
+    const bad = checkReport(r, label);
+    if (bad) errors.push(bad);
+  }
+  if (errors.length) return { errors, notes };
   const prod = advisories(prodReport);
   const full = advisories(fullReport);
   const entries = new Map();
@@ -89,8 +113,15 @@ function audit(args) {
     return JSON.parse(execFileSync("npm", ["audit", "--json", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }));
   } catch (err) {
     // npm audit exits non-zero when it finds anything; its JSON is still on stdout.
-    if (err.stdout) return JSON.parse(err.stdout);
-    throw err;
+    // Anything unparseable becomes null, which checkReport turns into a failure.
+    if (err.stdout) {
+      try {
+        return JSON.parse(err.stdout);
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 }
 
@@ -100,8 +131,9 @@ function selfTest() {
       [pkg]: { severity, via: [{ source: 1, url: `https://github.com/advisories/${id}`, severity, title: "t" }] },
       dependent: { severity, via: [pkg] },
     },
+    metadata: { vulnerabilities: { [severity]: 2 } },
   });
-  const empty = { vulnerabilities: {} };
+  const empty = { vulnerabilities: {}, metadata: { vulnerabilities: { high: 0, critical: 0 } } };
   const ok = { id: "GHSA-aaaa-bbbb-cccc", reason: "build-time only; matches our own fixed globs", expires: "2026-12-01" };
   const today = "2026-11-17";
   const cases = [
@@ -115,6 +147,10 @@ function selfTest() {
     ["a listed id does not excuse a different one", empty, report("x", "GHSA-zzzz-zzzz-zzzz"), { advisories: [ok] }, 1],
     ["moderate is not blocking", empty, report("x", "GHSA-zzzz-zzzz-zzzz", "moderate"), { advisories: [] }, 0],
     ["stale entry is only a note", empty, empty, { advisories: [ok] }, 0],
+    ["an npm error report fails closed", empty, { error: { code: "ENOTFOUND" } }, { advisories: [] }, 1],
+    ["a report with no vulnerabilities object fails closed", { metadata: { vulnerabilities: {} } }, empty, { advisories: [] }, 1],
+    ["a report with no totals fails closed", empty, { vulnerabilities: {} }, { advisories: [] }, 1],
+    ["totals that the parser cannot find fail closed", empty, { vulnerabilities: { x: { severity: "high", via: ["y"] } }, metadata: { vulnerabilities: { high: 1 } } }, { advisories: [] }, 1],
   ];
   let failed = 0;
   for (const [name, prod, full, allow, wantErrors] of cases) {
