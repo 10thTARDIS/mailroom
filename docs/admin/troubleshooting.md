@@ -70,6 +70,16 @@ logs of the service that is unhealthy. Commands use `mradmin` from [admin CLI](a
 - **Fix:** follow [Recover from a wrong operator subject](authentication.md#recover-from-a-wrong-operator-subject).
   Setting the variable and restarting will stop the server booting.
 
+### A tab says "Offline" after a long idle, behind a forward-auth proxy
+
+**Cause:** a sign-in gate in front of Mailroom (forward authentication at the reverse proxy)
+expired its own session and answers API requests with a redirect to its sign-in page. Before
+v1.103 the web app read that as a network failure.
+
+**Fix:** from v1.103 the app treats the redirect as signed out and reloads through the gate. To
+make it rarer, give the gate's session a lifetime at least as long as a working day; Mailroom's
+own session renews itself while the tab is in use.
+
 ### Login refused for a disabled user
 
 - **Cause:** the token has no email, or the user is disabled or deleted.

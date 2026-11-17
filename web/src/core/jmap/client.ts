@@ -119,6 +119,24 @@ import type { BlobBlocked, BlobFetch, BlobProbe } from "./blobs";
 import { sameOriginSession, type JmapSession } from "../session";
 
 /** The session was rejected: the caller must re-authenticate (401/403). */
+/**
+ * A redirect where Mailroom itself never redirects: the session resource and the
+ * API answer directly, and an expired Mailroom session is a 401. A redirect on
+ * these requests therefore comes from a sign-in gate IN FRONT of Mailroom (a
+ * reverse proxy with forward authentication) whose own session has expired.
+ *
+ * With the default `redirect: "follow"`, the browser follows it to the gate's
+ * sign-in page on another origin, CORS refuses the response, and fetch rejects
+ * exactly as it does when the network is down: the app said "Offline" and
+ * Retry could never succeed. With `redirect: "manual"` the redirect arrives as
+ * an opaque response instead, so it can be read as what it is: signed out.
+ * The usual signed-out path (a full page load to sign in) then passes through
+ * the gate, which renews itself.
+ */
+function isGateRedirect(res: Response): boolean {
+  return res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400);
+}
+
 export class JmapAuthError extends Error {
   readonly status: number;
   constructor(status: number) {
@@ -301,11 +319,13 @@ export class JmapClient {
       res = await this.doFetch(this.sessionUrl, {
         method: "GET",
         credentials: "include",
+        redirect: "manual",
         headers: { Accept: "application/json" },
       });
     } catch (err) {
       throw new JmapTransportError(`session fetch failed: ${String(err)}`);
     }
+    if (isGateRedirect(res)) throw new JmapAuthError(0);
     if (res.status === 401 || res.status === 403) throw new JmapAuthError(res.status);
     if (!res.ok) throw new JmapTransportError(`session: HTTP ${res.status}`, res.status);
     let session: JmapSession;
@@ -344,6 +364,7 @@ export class JmapClient {
       res = await this.doFetch(s.apiUrl, {
         method: "POST",
         credentials: "include",
+        redirect: "manual",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(body),
         ...(signal ? { signal } : {}),
@@ -355,6 +376,7 @@ export class JmapClient {
       if (signal?.aborted) throw err;
       throw new JmapTransportError(`request failed: ${String(err)}`);
     }
+    if (isGateRedirect(res)) throw new JmapAuthError(0);
     if (res.status === 401 || res.status === 403) throw new JmapAuthError(res.status);
     if (!res.ok) throw new JmapTransportError(`request: HTTP ${res.status}`, res.status);
 
