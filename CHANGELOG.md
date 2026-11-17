@@ -23,6 +23,12 @@ version.) `[Unreleased]` accumulates changes since the last tag.
   Mailroom used to read this as being offline, and only a hard refresh brought it back. It now
   recognises it and takes you through sign-in again, as it does when its own session ends.
 
+### Under the hood
+
+- The dependency check in continuous integration now holds the code that ships to a strict
+  standard (no high or critical advisories, no exceptions) and lets a build or test tool carry
+  one only through a dated, explained exception that expires within 90 days.
+
 ### Documentation
 
 - **A user guide.** New pages explain everything in the app in plain English: getting started,
