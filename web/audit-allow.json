@@ -1,0 +1,11 @@
+{
+  "_comment": "Dated exceptions to the dependency gate (scripts/npm-audit-gate.cjs). Build and test tools only: an advisory reaching production code can never be listed. Each entry needs a GHSA id, a reason, and an expiry no more than 90 days away; past it, CI fails again.",
+  "advisories": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch (via vite, vitest, tinyglobby, fdir)",
+      "reason": "ReDoS in a glob matcher used only by the build and test tools, matching the repository's own fixed patterns; no fixed version exists (affects <= 4.0.7) and nothing in the shipped bundle includes it.",
+      "expires": "2026-12-17"
+    }
+  ]
+}

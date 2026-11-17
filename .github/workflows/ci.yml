@@ -188,8 +188,11 @@ jobs:
       - name: Dependency advisories (report)
         run: npm audit || true
         working-directory: web
+      # Production dependencies may carry no high or critical advisory; build and
+      # test tools may only through a dated, reasoned entry in web/audit-allow.json
+      # (scripts/npm-audit-gate.cjs). The self-test proves the rules first.
       - name: Dependency advisories (gate — high and critical)
-        run: npm audit --audit-level=high
+        run: node ../scripts/npm-audit-gate.cjs --self-test && node ../scripts/npm-audit-gate.cjs
         working-directory: web
       # #376: npm run build runs check:tokens first now, so token drift fails here too.
       - name: Typecheck + build
