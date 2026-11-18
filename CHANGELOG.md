@@ -9,37 +9,121 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-### What's new
+## [1.103.0] — 2026-11-18
 
-- When you pause sync on an account, the account's health panel now tells you how many of your
-  changes are waiting ("3 changes are waiting. They will be applied to this mailbox when you turn
-  sync back on."), so you can see the backlog before you resume. Nothing extra is shown while
-  sync is on.
+**v1.103 hardens how Mailroom handles incoming mail, and gives it documentation anyone can
+follow.** Attachments on old mail are checked again against today's virus database when you
+open them, and programs, scripts and other risky files ask before they download. Images that
+were missing from some newsletters now show when you allow remote content. A tab left open no
+longer gets stuck saying "Offline", and Escape closes only the question you are answering. For
+the person running Mailroom, replaying an ingest-only account's ledger no longer undoes filing
+done elsewhere, and a paused account shows how many changes are waiting. There is now a user
+guide, a one-page install guide and an operator guide.
+
+### What's new: for you
+
+- **Old attachments are checked again when you open them.** Mailroom used to stop re-checking
+  attachments on mail older than six months, so a file that looked fine years ago was judged by
+  an old virus database. Now opening an old message, or downloading or previewing one of its
+  attachments, checks it again against the current database. If something is found, the
+  attachment is withheld straight away. Mail you never open costs nothing, and sending is never
+  held up by this.
+- **If the check cannot finish, you still get your file.** When the virus scanner is slow or
+  unavailable, the file downloads under its earlier result (whose age is shown) and the check is
+  retried later. One slow attachment never stops the others in the same message being checked.
+- **Risky files ask before they download.** Programs, scripts, installers, documents that can
+  contain macros, shortcuts and disk images show a plain question first ("This is a program file.
+  Only open it if you expected it from someone you trust."), with **Download anyway** and
+  **Cancel** selected. Disguised files such as `invoice.pdf.exe`, or a program named `.pdf`, are
+  caught by looking at both the name and the file itself. Nothing is blocked: the file is still
+  yours when you ask, and previews of risky files are still refused. Compressed archives are not
+  opened, so a program inside a zip is not flagged.
+- **Newsletter images that were missing now show** when you allow remote content for the sender:
+  table and cell backgrounds, images written as `//example.com/…` without `http:` or `https:`,
+  images labelled with the wrong type, and pictures inside a `<picture>` block. What is protected
+  is unchanged: images load only through the image proxy, only for senders you allowed, and
+  tracking pixels and SVG files are still refused.
+- **Moving or deleting many messages at once is faster.**
+- **A paused account says how many changes are waiting.** When sync is paused, the account's
+  health panel shows, for example, "3 changes are waiting. They will be applied to this mailbox
+  when you turn sync back on."
+
+### For the person running Mailroom
+
+- **Replaying an ingest-only ledger skips what went stale.** `mailroom-admin writeback-ledger`
+  now reports changes whose message gained a new copy since (another app filed or moved it) and
+  draft saves that a later save replaced, and `--apply` leaves both in the ledger instead of
+  replaying them over the top of later filing. It replays a subset of what it did before, never
+  more, and says how many it replayed and how many it skipped.
+- **A ledger can be discarded.** `writeback-ledger --discard` shows what would go, and
+  `--discard --apply` closes the account's ledger without writing anything to the mailbox.
+- **Account details say whether Mailroom is really writing.** The new `writebackEffective` and
+  `writebackHeldBy` show whether Mailroom will write to the mailbox and which switch is holding
+  it off (the account, the server-wide setting, or a provider hold).
+- **A send scheduled before ingest-only mode was switched on** still fails when it comes due,
+  and now says plainly that it was not sent and how to send it again from Drafts.
+- **Behind a sign-in gate:** if your reverse proxy asks people to log in before they reach
+  Mailroom, an expired gate no longer looks like an outage; the app takes people back through it.
+
+### Safety and behaviour
+
+- **Names are checked when you save them.** Rule names, API key names and the names AI tools
+  register can no longer contain control characters, invisible formatting characters,
+  text-direction overrides or line separators; the save is refused and names the field. Names in
+  any script, with accents or emoji (including the joiners emoji and Persian need), are fine, and
+  names saved earlier are left alone.
+- **A disabled user's sign-in no longer uses up an AI tool's authorization code**, so connecting
+  again after the user is re-enabled works.
+- **A change made at the very moment ingest-only mode is switched on** is now held back like
+  every other change, instead of being applied when the mode is lifted.
+- **The write-back queue takes no more than one batch at a time.** A large backlog could be
+  claimed in a bigger lump than intended.
 
 ### Fixes
 
-- **A tab left open no longer gets stuck saying "Offline".** If your server puts a sign-in page
-  in front of Mailroom (a proxy that asks you to log in first), that sign-in eventually expires.
-  Mailroom used to read this as being offline, and only a hard refresh brought it back. It now
-  recognises it and takes you through sign-in again, as it does when its own session ends.
-
-### Under the hood
-
-- The dependency check in continuous integration now holds the code that ships to a strict
-  standard (no high or critical advisories, no exceptions) and lets a build or test tool carry
-  one only through a dated, explained exception that expires within 90 days.
+- **A tab left open no longer gets stuck saying "Offline".** If a sign-in page in front of
+  Mailroom expired, the app read it as being offline and only a hard refresh helped. It now
+  takes you through sign-in again.
+- **Escape closes only the question you are answering**: the risky-file question, the
+  confirmation for releasing a withheld attachment, the composer's snippet picker and send-later
+  chooser, and the add-account wizard used to close the message or draft behind them too.
+- **A draft opened straight from its link can send straight away.** It could stay on "no
+  sending address yet", with no key to sign or encrypt with, until reopened.
+- **The note about a revoked earlier key is easier to read**: it now matches the rest of its
+  warning instead of being paler.
+- **Activity's learned-placement entries load quickly**, however many messages have been moved.
 
 ### Documentation
 
-- **A user guide.** New pages explain everything in the app in plain English: getting started,
-  the desk and areas, sorting, search, reading safely, writing, encryption, contacts, AI
-  assistants, keyboard shortcuts, a map of Settings and answers to common questions.
-- **A shorter install guide and an operator guide.** Installing is now one page of numbered
-  steps. Everything after that has its own page: configuration (every setting in one table),
-  accounts, sign-in, security, upgrading, admin commands, PGP keys, monitoring and
-  troubleshooting.
-- **The front page and the documentation index** are organised by what you want to do, and the
-  roadmap is up to date.
+- **A user guide** explains everything in the app in plain English: getting started, the desk
+  and areas, sorting, search, reading safely, writing, encryption, contacts, AI assistants,
+  keyboard shortcuts, a map of Settings and common questions.
+- **Installing is one page of numbered steps**, and an **operator guide** covers everything
+  after that: configuration (every setting in one table), accounts, sign-in, security,
+  upgrading, admin commands, PGP keys, monitoring and troubleshooting.
+- **The front page and the documentation index** are organised by what you want to do.
+
+### Under the hood
+
+- The automated browser checks now prove this release's work end to end: the risky-file question
+  in a real browser, old attachments re-checked against a real virus scanner, newsletter images
+  through the real image proxy, and every key-change prompt in the reader and composer in light,
+  dark and system dark. They found three of the fixes above.
+- Code that only reads a mailbox can no longer call anything that changes it; the compiler
+  enforces it.
+- The dependency check holds the code that ships to a strict standard, and lets a build or test
+  tool carry an advisory only through a dated, explained exception that expires within 90 days.
+
+### Upgrading
+
+- **Three database migrations run on first start:** one replaces a single function, one adds an
+  index, and one adds a final state for discarded ledger entries. On a large instance the index
+  takes a few moments to build, and changes made in that moment wait for it. Rolling back to an
+  earlier version turns discarded ledger entries into failed ones.
+- **Run once after upgrading, for each user who has used learned placement:**
+  `mailroom-admin placement-backfill-summaries --user-id <id>`. It reports what it would write;
+  add `--apply` to write it. Until then, older learned-placement batches are missing from
+  Activity. Running it again does nothing.
 
 ## [1.103.0-beta.3] — 2026-11-14
 
