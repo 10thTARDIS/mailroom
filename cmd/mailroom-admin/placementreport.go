@@ -117,8 +117,12 @@ func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []stri
 			config.EnvAuthservIDs)
 	}
 	p("evidence: %d filing(s) by the user into an area's own label\n", rep.Filings)
-	p("rules: act on >= %d agreeing filings (a domain also needs >= %d addresses); kept after %s or on archive;\n",
-		placement.MinFilings, placement.MinDomainAddresses, placement.KeptAfter)
+	p("rules: an address acts on >= %d agreeing filing(s) (a single filing is reported apart, and a correction of one blocks\n"+
+		"       it until %d more agreeing filings); a domain on >= %d agreeing filings over >= %d addresses;\n"+
+		"       a mixed key acts on its newest run of %d filings into one area (recency, reported apart);\n"+
+		"       kept after %s or on archive;\n",
+		placement.MinAddressFilings, placement.SingleRelearnFilings, placement.MinFilings, placement.MinDomainAddresses,
+		placement.RecencyRun, placement.KeptAfter)
 	p("       gate stops an area with >= %d resolved and a 95%% Wilson lower bound < %.2f\n\n",
 		placement.GateMinResolved, placement.GateMinLCB)
 
@@ -154,6 +158,9 @@ func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []stri
 		p("  %-8s confident %d · thin %d · mixed %d · contradicted %d · domain fallback blocked (freemail/own) %d\n",
 			kind, r[placement.Confident], r[placement.Thin], r[placement.Mixed], r[placement.Contradicted],
 			r[placement.DomainBlocked])
+		b := rep.ConfidentBasis[kind]
+		p("  %-8s confident by evidence: %d ordinary · %d single filing · %d recency run\n", "",
+			b[placement.BasisEvidence], b[placement.BasisSingle], b[placement.BasisRecency])
 	}
 	p("\n")
 
@@ -165,6 +172,18 @@ func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []stri
 		p("  %-9s open %d · kept %d · corrected %d · withdrawn by a key %d\n", o.name,
 			o.m[store.PlacementOpen], o.m[store.PlacementKept], o.m[store.PlacementCorrected],
 			o.m[store.PlacementWithdrawn])
+	}
+	// The weaker rules, each read apart from the ordinary one (ADR-032
+	// amendment): a precision hiding inside a good aggregate is not a precision.
+	for _, b := range []struct {
+		basis placement.Basis
+		name  string
+	}{{placement.BasisEvidence, "  arrival: two or more agreeing filings"},
+		{placement.BasisSingle, "  arrival: SINGLE FILING (one filing of an address)"},
+		{placement.BasisRecency, "  arrival: RECENCY (newest run on a mixed key)"}} {
+		m := rep.Origins.ArrivalByBasis[b.basis]
+		p("%-52s open %d · kept %d · corrected %d · withdrawn by a key %d\n", b.name,
+			m[store.PlacementOpen], m[store.PlacementKept], m[store.PlacementCorrected], m[store.PlacementWithdrawn])
 	}
 	if len(rep.Batches) > 0 {
 		p("  backfill batches:\n")

@@ -408,8 +408,8 @@ func (tx *UserTx) measureAuth(ctx context.Context, filings []placementFiling, op
 			continue
 		}
 		addrEv, domainEv := byAddr[addrKey.Value], byDomain[domainKey.Value]
-		addrEv.LatestCorrection = corrections[addrKey]
-		domainEv.LatestCorrection = corrections[domainKey]
+		corrections[addrKey].applyTo(&addrEv)
+		corrections[domainKey].applyTo(&domainEv)
 		d := placement.Decide(addrKey, domainKey, addrEv, domainEv, own)
 		if !d.Act && d.Reason != placement.Thin {
 			continue

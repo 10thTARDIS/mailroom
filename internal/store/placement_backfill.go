@@ -148,7 +148,9 @@ type PlacementBackfillMove struct {
 	MessageID ulid.ULID
 	Key       placement.Key
 	AreaID    ulid.ULID
-	LabelID   ulid.ULID
+	// Basis is the evidence the decision rests on, recorded with the placement.
+	Basis   placement.Basis
+	LabelID ulid.ULID
 	// NowIn is the area the message resolves to now; zero is Needs sorting.
 	NowIn ulid.ULID
 	// Remove is the automation-applied area labels the swap takes off.
@@ -361,8 +363,8 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 			continue
 		}
 		addrEv, domainEv := byAddr[addrKey.Value], byDomain[domainKey.Value]
-		addrEv.LatestCorrection = corrections[addrKey]
-		domainEv.LatestCorrection = corrections[domainKey]
+		corrections[addrKey].applyTo(&addrEv)
+		corrections[domainKey].applyTo(&domainEv)
 		d := placement.Decide(addrKey, domainKey, addrEv, domainEv, own)
 		if !d.Act {
 			plan.Abstain[d.Reason]++
@@ -424,7 +426,7 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 			}
 		}
 		queue = append(queue, pending{
-			mv:   PlacementBackfillMove{MessageID: id, Key: d.Key, AreaID: d.Area, LabelID: label, NowIn: now},
+			mv:   PlacementBackfillMove{MessageID: id, Key: d.Key, AreaID: d.Area, Basis: d.Basis, LabelID: label, NowIn: now},
 			cand: PlacementCandidate{MessageID: id, ContentHash: hash, From: from, ReceivedAt: TrustTime(receivedAt, providerDated)},
 		})
 	}
@@ -761,9 +763,10 @@ func (tx *UserTx) applyPlacementBackfillMove(ctx context.Context, batchID ulid.U
 		return "", fmt.Errorf("store: placement backfill: message %s: learned label not written (applied_by %q, %v)", mv.MessageID, by, err)
 	}
 	if _, err := tx.tx.Exec(ctx, `
-		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		VALUES ($1, $2, $3, $4, $5)`,
-		tx.userID.String(), mv.MessageID.String(), string(mv.Key.Kind), mv.Key.Value, mv.AreaID.String()); err != nil {
+		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id, basis)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		tx.userID.String(), mv.MessageID.String(), string(mv.Key.Kind), mv.Key.Value, mv.AreaID.String(),
+		string(placementBasisOrDefault(mv.Basis))); err != nil {
 		return "", fmt.Errorf("store: placement backfill (log): %w", err)
 	}
 	if err := tx.writeBackfillAudit(ctx, batchID, backfillActionMove, j); err != nil {
@@ -1170,34 +1173,45 @@ func (tx *UserTx) undoPlacementBackfillMove(ctx context.Context, batchID ulid.UL
 // effective outcome, for placement-report.
 type PlacementOrigins struct {
 	Arrival, Backfill map[string]int
+	// ArrivalByBasis splits the ARRIVAL placements by the evidence they were
+	// made on (placement.Basis*), each by effective outcome, so the weaker
+	// rules' precision (single filing, recency) is read apart from the
+	// ordinary rule's. Arrival is their sum.
+	ArrivalByBasis map[placement.Basis]map[string]int
 }
 
 // placementOrigins splits the placement log by origin with the same
 // backfilledMessagesSQL the gate's counts use, so the two cannot disagree
 // about which placement is which.
 func (tx *UserTx) placementOrigins(ctx context.Context) (PlacementOrigins, error) {
-	out := PlacementOrigins{Arrival: map[string]int{}, Backfill: map[string]int{}}
+	out := PlacementOrigins{Arrival: map[string]int{}, Backfill: map[string]int{},
+		ArrivalByBasis: map[placement.Basis]map[string]int{}}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT bf.message_id IS NOT NULL, `+effectiveOutcomeSQL("$2")+`, count(*)
+		SELECT bf.message_id IS NOT NULL, `+effectiveOutcomeSQL("$2")+`, p.basis, count(*)
 		  FROM app.learned_placements p
 		  LEFT JOIN `+backfilledMessagesSQL("$1")+` bf ON bf.message_id = p.message_id
 		 WHERE p.user_id = $1
-		 GROUP BY 1, 2`, tx.userID.String(), keptAfterSeconds())
+		 GROUP BY 1, 2, 3`, tx.userID.String(), keptAfterSeconds())
 	if err != nil {
 		return out, fmt.Errorf("store: placement origins: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var back bool
-		var outcome string
+		var outcome, basis string
 		var n int
-		if err := rows.Scan(&back, &outcome, &n); err != nil {
+		if err := rows.Scan(&back, &outcome, &basis, &n); err != nil {
 			return out, fmt.Errorf("store: scan placement origin: %w", err)
 		}
 		if back {
 			out.Backfill[outcome] += n
 		} else {
 			out.Arrival[outcome] += n
+			b := placement.Basis(basis)
+			if out.ArrivalByBasis[b] == nil {
+				out.ArrivalByBasis[b] = map[string]int{}
+			}
+			out.ArrivalByBasis[b][outcome] += n
 		}
 	}
 	return out, rows.Err()

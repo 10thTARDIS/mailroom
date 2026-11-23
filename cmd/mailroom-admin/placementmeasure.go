@@ -223,6 +223,8 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 			p("     last %d filings agree: %4d key(s), %6d message(s) in the last %d days\n", row.N, row.Keys, row.Recent, m.RecentDays)
 		}
 	}
+	p("   LIVE NOW (ADR-032 amendment): the row \"last %d filings agree\" is a rule learned sorting ACTS on, for address keys and for domain keys that span >= %d addresses\n"+
+		"   (not freemail or own). Placements made on it are reported apart in placement-report (arrival: RECENCY); a single filing of an address acts too (arrival: SINGLE FILING).\n", placement.RecencyRun, placement.MinDomainAddresses)
 	p("   (filings that share one instant never lengthen a run: a bulk session cannot fake recency. Domain keys leave out freemail and own domains, and the domain\n" +
 		"    mail figure leaves out addresses with filings of their own: the address key decides those, not the domain.)\n\n")
 

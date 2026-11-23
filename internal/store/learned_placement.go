@@ -73,9 +73,21 @@ const (
 	PlacementWithdrawn = "withdrawn"
 )
 
+// placementBasisOrDefault is the basis recorded with a placement: the decision's,
+// else the ordinary one (an empty basis would break the column's CHECK).
+func placementBasisOrDefault(b placement.Basis) placement.Basis {
+	if b == "" {
+		return placement.BasisEvidence
+	}
+	return b
+}
+
 // LearnedPlacementResult says what learned placement did with one message.
 type LearnedPlacementResult struct {
 	Placed bool
+	// Basis is the evidence the decision rests on when a key was confident
+	// (placement.Basis*), and is what the placement log records.
+	Basis placement.Basis
 	// Reason is placement.Confident when Placed, otherwise why not.
 	Reason placement.Reason
 	Key    placement.Key
@@ -173,9 +185,10 @@ func (tx *UserTx) learnedPlacement(ctx context.Context, msgID ulid.ULID, sender 
 		return LearnedPlacementResult{}, fmt.Errorf("store: learned placement: area %s label already on message %s", area, msgID)
 	}
 	if _, err := tx.tx.Exec(ctx, `
-		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		VALUES ($1, $2, $3, $4, $5)`,
-		tx.userID.String(), msgID.String(), string(out.Key.Kind), out.Key.Value, area.String()); err != nil {
+		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id, basis)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		tx.userID.String(), msgID.String(), string(out.Key.Kind), out.Key.Value, area.String(),
+		string(placementBasisOrDefault(out.Basis))); err != nil {
 		return LearnedPlacementResult{}, fmt.Errorf("store: learned placement (log): %w", err)
 	}
 	out.Placed = true
@@ -219,6 +232,9 @@ type LearnedEvidence struct {
 	AddressVerdict, DomainVerdict placement.Verdict
 	// DomainFallbackBlocked: the domain is freemail or one of the user's own.
 	DomainFallbackBlocked bool
+	// AddressForgotten and DomainForgotten are the user's Forget marks on the
+	// two keys (zero: none): evidence older than a mark is ignored.
+	AddressForgotten, DomainForgotten time.Time
 }
 
 // decideLearnedEvidence is decideLearned's body. asOf, when not zero, counts
@@ -235,13 +251,18 @@ func (tx *UserTx) decideLearnedEvidence(ctx context.Context, addrKey, domainKey 
 		return placement.Decision{}, LearnedEvidence{}, err
 	}
 	addrEv, domainEv := byAddr[addrKey.Value], byDomain[domainKey.Value]
-	addrEv.LatestCorrection = corrections[addrKey]
-	domainEv.LatestCorrection = corrections[domainKey]
+	corrections[addrKey].applyTo(&addrEv)
+	corrections[domainKey].applyTo(&domainEv)
 	own, err := tx.ownIdentityDomains(ctx)
 	if err != nil {
 		return placement.Decision{}, LearnedEvidence{}, err
 	}
+	marks, err := tx.forgetMarks(ctx)
+	if err != nil {
+		return placement.Decision{}, LearnedEvidence{}, err
+	}
 	ev := LearnedEvidence{
+		AddressForgotten: marks[addrKey], DomainForgotten: marks[domainKey],
 		Address: addrEv, Domain: domainEv,
 		AddressVerdict:        placement.Judge(placement.KeyAddress, addrEv),
 		DomainVerdict:         placement.Judge(placement.KeyDomain, domainEv),
@@ -466,9 +487,21 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 	return byAddr, byDomain
 }
 
-// placementCorrections returns the newest correction time per key, for the
-// keys named (nil = every key with a correction).
-func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key, asOf time.Time) (map[placement.Key]time.Time, error) {
+// placementCorrection is a key's corrections: the newest of any placement, and
+// the newest of a placement made on a SINGLE filing (the stricter undo,
+// placement.SingleRelearnFilings). Zero when there is none.
+type placementCorrection struct {
+	Latest, LatestSingle time.Time
+}
+
+// applyTo puts the corrections on the key's evidence.
+func (c placementCorrection) applyTo(e *placement.Evidence) {
+	e.LatestCorrection, e.LatestSingleCorrection = c.Latest, c.LatestSingle
+}
+
+// placementCorrections returns the corrections per key, for the keys named
+// (nil = every key with a correction).
+func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key, asOf time.Time) (map[placement.Key]placementCorrection, error) {
 	args := []any{tx.userID.String()}
 	filter := ""
 	if keys != nil {
@@ -478,7 +511,7 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 			ors = append(ors, `(p.key_kind = $`+strconv.Itoa(len(args)-1)+` AND p.key_value = $`+strconv.Itoa(len(args))+`)`)
 		}
 		if len(ors) == 0 {
-			return map[placement.Key]time.Time{}, nil
+			return map[placement.Key]placementCorrection{}, nil
 		}
 		filter = ` AND (` + strings.Join(ors, " OR ") + `)`
 	}
@@ -487,7 +520,8 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 		filter += ` AND p.corrected_at < $` + strconv.Itoa(len(args))
 	}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT p.key_kind, p.key_value, max(p.corrected_at)
+		SELECT p.key_kind, p.key_value, max(p.corrected_at),
+		       max(p.corrected_at) FILTER (WHERE p.basis = 'single')
 		  FROM app.learned_placements p
 		  LEFT JOIN app.learned_sender_forgotten f
 		         ON f.user_id = p.user_id AND f.key_kind = p.key_kind AND f.key_value = p.key_value
@@ -498,14 +532,19 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 		return nil, fmt.Errorf("store: learned placement (corrections): %w", err)
 	}
 	defer rows.Close()
-	out := map[placement.Key]time.Time{}
+	out := map[placement.Key]placementCorrection{}
 	for rows.Next() {
 		var kind, value string
 		var at time.Time
-		if err := rows.Scan(&kind, &value, &at); err != nil {
+		var single *time.Time
+		if err := rows.Scan(&kind, &value, &at, &single); err != nil {
 			return nil, fmt.Errorf("store: learned placement (scan corrections): %w", err)
 		}
-		out[placement.Key{Kind: placement.KeyKind(kind), Value: value}] = at
+		c := placementCorrection{Latest: at}
+		if single != nil {
+			c.LatestSingle = *single
+		}
+		out[placement.Key{Kind: placement.KeyKind(kind), Value: value}] = c
 	}
 	return out, rows.Err()
 }

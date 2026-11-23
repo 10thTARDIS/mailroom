@@ -225,6 +225,14 @@ func printExplanation(w io.Writer, ex ingest.LearnedExplanation, names map[ulid.
 	p("\n3. EVIDENCE (the user's own filings into an area's own label)\n")
 	printKeyEvidence(w, "address", mq(tr.Address.Value), tr.Evidence.Address, tr.Evidence.AddressVerdict, names)
 	printKeyEvidence(w, "domain ", mq(tr.Domain.Value), tr.Evidence.Domain, tr.Evidence.DomainVerdict, names)
+	for _, m := range []struct {
+		kind string
+		at   time.Time
+	}{{"address", tr.Evidence.AddressForgotten}, {"domain", tr.Evidence.DomainForgotten}} {
+		if !m.at.IsZero() {
+			p("  the user asked learned sorting to forget this %s at %s: filings and corrections older than that are not counted\n", m.kind, m.at.UTC().Format("2006-01-02 15:04Z"))
+		}
+	}
 	if tr.Evidence.DomainFallbackBlocked {
 		p("  the domain fallback is blocked for this domain (freemail or one of the user's own)\n")
 	}
@@ -234,7 +242,7 @@ func printExplanation(w io.Writer, ex ingest.LearnedExplanation, names map[ulid.
 		d := tr.Decision
 		p("\n4. DECISION\n")
 		if d.Act {
-			p("  act: %s key %s -> area %s (reason: %s)\n", d.Key.Kind, mq(d.Key.Value), areaLabel(names, d.Area), d.Reason)
+			p("  act: %s key %s -> area %s (reason: %s; evidence: %s)\n", d.Key.Kind, mq(d.Key.Value), areaLabel(names, d.Area), d.Reason, basisWords(d.Basis))
 		} else {
 			p("  abstain: %s key %s (reason: %s)\n", d.Key.Kind, mq(d.Key.Value), d.Reason)
 		}
@@ -263,14 +271,29 @@ func printExplanation(w io.Writer, ex ingest.LearnedExplanation, names map[ulid.
 		if refusal == "" {
 			refusal = "none"
 		}
+		p("  d. trusted sender (the user trusts this exact address; waives only the missing DMARC pass): %s · trusted header reports a failure (dmarc=fail, or spf and dkim fail): %s · waiver applied: %s\n",
+			yesNo(c.Trusted), yesNo(c.Auth.TrustedFail), yesNo(c.TrustApplied))
 		p("  first sender-check refusal: %s\n", refusal)
 	}
 	if tr.Decided && tr.Decision.Act {
 		learned := areaLabel(names, tr.Decision.Area)
-		p("  d. tab verdict agrees with the learned area (%s): %s\n", learned, yesNo(tr.AgreesWithDesk))
+		p("  e. tab verdict agrees with the learned area (%s): %s\n", learned, yesNo(tr.AgreesWithDesk))
 	}
 
 	printExplainOutcome(w, tr, names)
+}
+
+// basisWords says which rule a decision rests on, so a placement made on the
+// weaker evidence is never mistaken for the ordinary one.
+func basisWords(b placement.Basis) string {
+	switch b {
+	case placement.BasisSingle:
+		return "SINGLE FILING (one filing of this address; a correction blocks it until 2 more agreeing filings)"
+	case placement.BasisRecency:
+		return "RECENCY (the newest filings on this key all went to this area)"
+	default:
+		return "two or more agreeing filings"
+	}
 }
 
 func printKeyEvidence(w io.Writer, kind, value string, ev placement.Evidence, v placement.Verdict, names map[ulid.ULID]string) {
@@ -286,6 +309,12 @@ func printKeyEvidence(w io.Writer, kind, value string, ev placement.Evidence, v 
 	_, _ = fmt.Fprintf(w, "  %s %s: %s · addresses %d · key verdict alone: %s", kind, value, filings, ev.Addresses, v.Reason)
 	if !ev.LatestCorrection.IsZero() {
 		_, _ = fmt.Fprintf(w, " · latest correction %s", ev.LatestCorrection.UTC().Format("2006-01-02 15:04Z"))
+	}
+	if !ev.LatestSingleCorrection.IsZero() {
+		_, _ = fmt.Fprintf(w, " · a single-filing placement was corrected %s (blocked until 2 newer agreeing filings)", ev.LatestSingleCorrection.UTC().Format("2006-01-02 15:04Z"))
+	}
+	if v.Basis != "" {
+		_, _ = fmt.Fprintf(w, " · evidence: %s", basisWords(v.Basis))
 	}
 	_, _ = fmt.Fprintln(w)
 }

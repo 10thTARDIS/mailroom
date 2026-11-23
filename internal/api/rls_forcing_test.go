@@ -214,6 +214,10 @@ var crossUserProbedMethods = map[string]bool{
 	"Area/dismissRuleSuggestion": true,
 	// Learned placement's status: counts and sender list are the caller's own.
 	"LearnedPlacement/getStatus": true,
+	"LearnedSender/get":          true,
+	"LearnedSender/forget":       true,
+	"LearnedSender/trust":        true,
+	"LearnedSorting/status":      true,
 
 	"DeskPreferences/get":     true,
 	"DeskPreferences/changes": true,
