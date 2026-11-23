@@ -4289,6 +4289,25 @@ CREATE POLICY rule_suggestion_dismissals_isolation ON app.rule_suggestion_dismis
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
+-- WHY LEARNED PLACEMENT HELD BACK, PER DAY (migration 00100): one row per
+-- (user, UTC day, reason) with a running count, bumped at ingest for every new
+-- message learned placement considered and did not place. reason is the
+-- counter's closed vocabulary (store.LearnedPlacementLabels, minus "placed").
+-- Not a JMAP-visible object: no change_log row.
+CREATE TABLE app.learned_placement_abstentions (
+  user_id app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  day     date NOT NULL,
+  reason  text NOT NULL CHECK (length(reason) BETWEEN 1 AND 32),
+  n       integer NOT NULL CHECK (n > 0),
+  PRIMARY KEY (user_id, day, reason)
+);
+ALTER TABLE app.learned_placement_abstentions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_placement_abstentions FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_placement_abstentions_isolation ON app.learned_placement_abstentions
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
 -- OUT OF OFFICE (#50, migration 00065): the vacation responder Mailroom writes
 -- to the provider as a ManageSieve script (internal/outofoffice). One row per
 -- mail account; JMAP-visible as 'OutOfOffice' with the account id as its id.
@@ -4609,6 +4628,10 @@ GRANT SELECT, INSERT, DELETE ON app.nudge_dismissals TO mailroom_app;
 -- Rule-suggestion dismissals (migration 00085): a re-dismissal refreshes the
 -- time, so an upsert needs UPDATE.
 GRANT SELECT, INSERT, UPDATE ON app.rule_suggestion_dismissals TO mailroom_app;
+
+-- Learned placement's per-day abstention tally (migration 00100): an upsert per
+-- arrival, so UPDATE; never deleted by the app.
+GRANT SELECT, INSERT, UPDATE ON app.learned_placement_abstentions TO mailroom_app;
 
 -- Local DKIM verdicts (#776): written once with the message, gone with it; no UPDATE.
 GRANT SELECT, INSERT, DELETE ON app.message_local_auth TO mailroom_app;

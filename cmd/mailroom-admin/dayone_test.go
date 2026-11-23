@@ -127,8 +127,8 @@ func TestDefaultDayOnePlan(t *testing.T) {
 	}
 
 	receipts := plan.Folders[0]
-	if receipts.LabelName != "Receipts" {
-		t.Errorf("the label defaults to the folder's own name, got %q", receipts.LabelName)
+	if receipts.LabelName != "" {
+		t.Errorf("a blank labelName is how the store derives (and sanitises) the folder's own name, got %q", receipts.LabelName)
 	}
 	if receipts.AreaName != "Receipts" || receipts.AreaID != nil {
 		t.Errorf("a folder with no matching area gets a NEW area of its own name, got %+v", receipts)
@@ -233,5 +233,20 @@ func TestCommaDayOne(t *testing.T) {
 		if got := commaDayOne(in); got != want {
 			t.Errorf("commaDayOne(%d) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A provider's folder name is not the user's typing and may carry control or
+// bidi characters: the plan never copies it raw into a label or area name.
+func TestDayOnePlansDoNotCopyUnsafeFolderNames(t *testing.T) {
+	dirty := "Bills\u001b[2J\u202eevil"
+	census := []store.FolderCensus{{MailboxID: store.NewULID(), Name: dirty}}
+	plan := defaultDayOnePlan(census, 30)
+	f := plan.Folders[0]
+	if f.LabelName != "" {
+		t.Errorf("label name = %q, want blank so the store derives and sanitises it", f.LabelName)
+	}
+	if f.AreaName != "Bills[2Jevil" {
+		t.Errorf("area name = %q, want the sanitised %q", f.AreaName, "Bills[2Jevil")
 	}
 }

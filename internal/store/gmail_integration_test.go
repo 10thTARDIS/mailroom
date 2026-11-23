@@ -436,3 +436,126 @@ func TestApplyGmailObservationIsolated(t *testing.T) {
 		t.Errorf("another user's reading reached the message: %+v", r)
 	}
 }
+
+// A Gmail label whose name carries control or bidi characters maps to its clean
+// local copy by that name (found again, not duplicated), is removed by the same
+// name, and a name with nothing usable left is skipped and counted without
+// failing the observation. The local copy is LOCAL-ONLY: the mapping stores no
+// provider name, so a mirrored label would write the sanitised name back to
+// Gmail as a different label; a plain label is mirrored as before (control).
+//
+// NEGATIVE CONTROL: with the lookup comparing raw names again, the second
+// observation creates a duplicate or fails, and this test goes red.
+func TestApplyGmailObservationSanitisedLabelNames(t *testing.T) {
+	f := newGmailFixture(t)
+	m1, m2 := f.message(t, "one", "<one@example.com>"), f.message(t, "two", "<two@example.com>")
+	f.prov(t, m1, f.gmail, f.inbox, 1)
+	f.prov(t, m2, f.gmail, f.inbox, 2)
+
+	r := f.observe(t, m1, f.inbox, 1, "Work\x1b[2J\u202eevil", "\u202e\x07", "Plain")
+	if r.LabelsCreated != 2 || r.LabelsSkipped != 1 {
+		t.Errorf("first observation: created %d skipped %d, want 2 and 1", r.LabelsCreated, r.LabelsSkipped)
+	}
+	r = f.observe(t, m2, f.inbox, 2, "Work\x1b[2J\u202eevil")
+	if r.LabelsCreated != 0 || r.LabelsSkipped != 0 || r.LabelsAdded != 1 {
+		t.Errorf("second observation: %+v, want the existing clean label reused (0 created, 1 added)", r)
+	}
+	if got := f.count(t, `SELECT count(*) FROM app.labels WHERE user_id = $1 AND name = 'Work[2Jevil'`, f.user.String()); got != 1 {
+		t.Errorf("clean label count = %d, want 1", got)
+	}
+	if got := f.count(t, `SELECT count(*) FROM app.labels WHERE user_id = $1`, f.user.String()); got != 2 {
+		t.Errorf("labels = %d, want 2 (the clean one and Plain; nothing for the only-unsafe name)", got)
+	}
+	if _, ok := f.labelsOf(t, m2)["Work[2Jevil"]; !ok {
+		t.Errorf("message two lacks the clean label: %v", f.labelsOf(t, m2))
+	}
+	// Writeback identity: only the label whose saved name IS the provider's is mirrored.
+	mirrored := func(name string) int {
+		return f.count(t, `SELECT count(*) FROM app.label_keyword_map k JOIN app.labels l ON l.id = k.label_id
+		                    WHERE l.user_id = $1 AND l.name = $2`, f.user.String(), name)
+	}
+	if mirrored("Work[2Jevil") != 0 {
+		t.Errorf("the sanitised label has a keyword atom: it would be written back to Gmail under a name the provider never had")
+	}
+	if mirrored("Plain") != 1 {
+		t.Errorf("a plain Gmail label must still be mirrored (positive control)")
+	}
+	// Removal by the provider's raw name removes the clean copy.
+	f.observe(t, m2, f.inbox, 2)
+	if _, ok := f.labelsOf(t, m2)["Work[2Jevil"]; ok {
+		t.Errorf("the label was not removed when Gmail dropped it")
+	}
+}
+
+// Two provider labels that differ only in characters the store drops share ONE
+// local label. Gmail dropping one of them must not take the shared label off the
+// message while the other is still there; dropping the last one does.
+//
+// NEGATIVE CONTROL: with the removal comparing only the removed names (ignoring
+// what remains), the middle step takes the label off and this test goes red.
+func TestApplyGmailObservationSharedCanonicalLabel(t *testing.T) {
+	f := newGmailFixture(t)
+	m := f.message(t, "shared", "<shared@example.com>")
+	f.prov(t, m, f.gmail, f.inbox, 1)
+	both := []string{"Tag\u202e", "Tag\u200b"}
+	r := f.observe(t, m, f.inbox, 1, both...)
+	if r.LabelsCreated != 1 {
+		t.Errorf("two spellings created %d labels, want 1 shared", r.LabelsCreated)
+	}
+	if _, ok := f.labelsOf(t, m)["Tag"]; !ok {
+		t.Fatalf("the shared label is missing: %v", f.labelsOf(t, m))
+	}
+	f.observe(t, m, f.inbox, 1, "Tag\u200b") // Gmail drops ONE spelling
+	if _, ok := f.labelsOf(t, m)["Tag"]; !ok {
+		t.Errorf("the shared label was removed while a provider label that maps to it remains")
+	}
+	f.observe(t, m, f.inbox, 1) // and now the last
+	if _, ok := f.labelsOf(t, m)["Tag"]; ok {
+		t.Errorf("the shared label stayed after no provider label maps to it")
+	}
+}
+
+// A provider label is mirrored back to Gmail (X-GM-LABELS, by the LOCAL name)
+// only when the local name is the provider's, byte for byte. An invalid byte
+// (replaced by U+FFFD) or a control character (dropped) means the saved name
+// is NOT the provider's, and writing it back would create a different provider
+// label: those are created LOCAL-ONLY, with no keyword atom. A plain label
+// still mirrors (positive control).
+//
+// NEGATIVE CONTROLS, run and recorded in the PR: dropping the RuneError
+// condition turns the "already sanitised upstream" case red; dropping the
+// altered-labels check turns the raw-byte cases red.
+func TestGmailLabelMirrorsOnlyWhenTheProviderNameSurvives(t *testing.T) {
+	f := newGmailFixture(t)
+	m := f.message(t, "mirror", "<mirror@example.com>")
+	f.prov(t, m, f.gmail, f.inbox, 1)
+	// Through the real entry point, with the RAW provider bytes.
+	f.observe(t, m, f.inbox, 1, "Plain", "Bad\xffname", "Ctl\x01x")
+	mirrored := func(name string) int {
+		return f.count(t, `SELECT count(*) FROM app.label_keyword_map k JOIN app.labels l ON l.id = k.label_id
+		                    WHERE l.user_id = $1 AND l.name = $2`, f.user.String(), name)
+	}
+	if mirrored("Plain") != 1 {
+		t.Errorf("a plain provider label must mirror (positive control)")
+	}
+	if got := f.labelsOf(t, m); got["Bad\ufffdname"] == "" || got["Ctlx"] == "" {
+		t.Fatalf("labels = %v, want the sanitised Bad\\ufffdname and Ctlx on the message", got)
+	}
+	if mirrored("Bad\ufffdname") != 0 {
+		t.Errorf("a label whose provider name had an invalid byte has a keyword atom: it would be written back as a different Gmail label")
+	}
+	if mirrored("Ctlx") != 0 {
+		t.Errorf("a label whose provider name had a control character has a keyword atom")
+	}
+	// The same name arriving ALREADY sanitised (a caller that sanitised upstream,
+	// so `altered` cannot know): U+FFFD alone must keep it local-only.
+	if err := f.st.UserTx(context.Background(), f.user, func(tx *UserTx) error {
+		_, _, _, err := tx.ensureLabelsByName(context.Background(), []string{"Pre\ufffdsanitised"}, nil)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if mirrored("Pre\ufffdsanitised") != 0 {
+		t.Errorf("a name holding U+FFFD was mirrored")
+	}
+}

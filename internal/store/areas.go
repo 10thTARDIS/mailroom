@@ -282,6 +282,11 @@ func scanAreas(rows interface {
 // label goes through CreateLabel first, which appends its own Label created
 // row — two objects, two rows, both required by the load-bearing invariant.
 func (tx *UserTx) CreateArea(ctx context.Context, row AreaRow) (ulid.ULID, error) {
+	name, err := cleanName(row.Name)
+	if err != nil {
+		return ulid.ULID{}, err
+	}
+	row.Name = name
 	for _, f := range row.Feeds {
 		if err := validateAreaFeed(f); err != nil {
 			return ulid.ULID{}, err
@@ -461,6 +466,13 @@ func (tx *UserTx) areaFeedOwner(ctx context.Context, f AreaFeed) (ulid.ULID, str
 // survives) could commit half of one AreaPatch — a rename with no feed
 // change, say — with no change_log row to show for it.
 func (tx *UserTx) UpdateArea(ctx context.Context, id ulid.ULID, patch AreaPatch) (found bool, err error) {
+	if patch.Name != nil {
+		n, err := cleanName(*patch.Name)
+		if err != nil {
+			return false, err
+		}
+		patch.Name = &n
+	}
 	if patch.SetFeeds {
 		for _, f := range patch.Feeds {
 			if err := validateAreaFeed(f); err != nil {

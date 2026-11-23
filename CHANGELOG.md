@@ -9,6 +9,66 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**This release adds no new behaviour to where mail is sorted.** It adds a way to measure what
+learned sorting could do on your own mailbox, so the next changes are chosen from your numbers
+rather than from a guess. Nothing is moved, filed or learned differently.
+
+### What's new: for you
+
+- **Mailroom now remembers why it did not file a new message for you.** Each day it keeps a
+  small count, per reason: no earlier filings from that sender, too few, filed into more than
+  one area, refused because the sender could not be verified, an area switched off after
+  corrections, and so on. Nothing about a message is kept, only the counts. Recording starts
+  with this release, so the figures grow from the day you upgrade.
+
+### What's new: for the person running Mailroom
+
+- **A new read-only command, `mailroom-admin placement-measure`, answers six questions about a
+  real mailbox.** It prints counts and your area names only (no addresses, senders or subjects; review the names before pasting the output anywhere public) and writes nothing:
+  - why new mail was not filed, over the last thirty days, beside how much it did file
+    (mail synced from Sent or Drafts is not counted as an arrival);
+  - how much filed-sender mail is refused only because the sender never passes authentication,
+    and how much of that a rule already covers;
+  - how many senders you file into more than one area end on a clear recent run of filings into
+    one of them;
+  - what would happen if "you opened it and left it where it was placed" counted as a hint,
+    and what if "you archived it without opening it" did: how many senders each would teach, and
+    what you later did with their mail. Each is scored on mail that arrived after the evidence,
+    with the split day printed. Mail the desk would have put in the same place anyway is counted
+    apart and never as a success, the number of messages a hint would really have moved is
+    printed, and the same classes are shown for senders the hint would not teach, so a hint is
+    only worth acting on if it differs from that base rate;
+  - how many senders send under more than one mailing list, and how many of your mixed senders
+    a list-based key could separate (a pessimistic count: senders whose mailing list is not yet
+    recorded are set aside as undetermined, and "mailing list versus none" does not count).
+  Every figure says when it is a lower or upper bound.
+
+### Fixes
+
+- **Area and label names are now checked when you save them, including in the day-one setup.** A name containing a control or invisible
+  formatting character is refused, as rule and API key names already are. Names with accents,
+  other scripts or emoji are fine, and names you already have are untouched.
+- **Day-one setup no longer saves folder names with hidden control characters as labels.** When you
+  leave a folder's label name blank, the folder's own name is used with any such characters removed;
+  a folder whose name is only such characters asks you to type a label name.
+- **Labels with hidden control characters in their names no longer cause trouble on import or
+  Gmail sync.** They are saved, found again and re-used under their clean name (no duplicates on
+  the next run); a label with nothing left once those characters are removed is skipped and
+  counted instead of stopping the import. A Gmail label renamed this way is kept local, so Mailroom
+  never writes a changed name back to Gmail.
+- **The admin reports no longer print raw control characters from area names** to the terminal.
+
+### Under the hood
+
+- A new table records the daily per-reason counts described above. It is private to each user
+  and is not part of an export.
+
+### Upgrading
+
+- This release includes one database migration (a new table). It is applied automatically when
+  Mailroom starts and changes no existing data. Run `mailroom-admin placement-measure --user-id
+  ...` after upgrading to read the report; the first section fills in as new mail arrives.
+
 ## [1.103.0] — 2026-11-18
 
 **v1.103 hardens how Mailroom handles incoming mail, and gives it documentation anyone can

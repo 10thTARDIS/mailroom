@@ -95,6 +95,10 @@ type GmailReading struct {
 	MsgID  uint64
 	ThrID  uint64
 	Labels []string // decoded X-GM-LABELS; never nil for a real reading
+	// Altered names the labels (sanitised form) the sync layer's sanitiser
+	// already changed, so the store can keep them local-only (see
+	// store.GmailObservation.Altered).
+	Altered []string
 }
 
 // Archive describes a message ingested from a LOCAL ARCHIVE — an mbox, a
@@ -660,7 +664,7 @@ func (in *Ingestor) applyGmail(ctx context.Context, tx *store.UserTx, msgID ulid
 	}
 	r, err := tx.ApplyGmailObservation(ctx, msgID, store.GmailObservation{
 		MailboxID: prov.MailboxID, UIDValidity: prov.UIDValidity, UID: prov.UID,
-		MsgID: prov.Gmail.MsgID, ThrID: prov.Gmail.ThrID, Labels: prov.Gmail.Labels,
+		MsgID: prov.Gmail.MsgID, ThrID: prov.Gmail.ThrID, Labels: prov.Gmail.Labels, Altered: prov.Gmail.Altered,
 	})
 	if err != nil {
 		// STRICTLY FAIL-SOFT, like applyRules (#52 review H2): the labels
@@ -671,6 +675,10 @@ func (in *Ingestor) applyGmail(ctx context.Context, tx *store.UserTx, msgID ulid
 		slog.WarnContext(ctx, "ingest: applying Gmail labels failed; the message is stored without them",
 			"message_id", msgID.String(), "err", err)
 		return nil
+	}
+	if r.LabelsSkipped > 0 {
+		slog.WarnContext(ctx, "ingest: Gmail labels with no usable name were skipped",
+			"message_id", msgID.String(), "labels_skipped", r.LabelsSkipped)
 	}
 	*out = r
 	return nil
@@ -1006,7 +1014,7 @@ func (in *Ingestor) ingestNew(ctx context.Context, tx *store.UserTx, userID ulid
 		// path only, for applyAreaLabelAtIngest's reason. Same store write as
 		// the desk (store.insertAreaOwnLabel), same change_log story (it rides
 		// the Email `created` row below), and STRICTLY FAIL-SOFT.
-		in.applyLearnedPlacementAtIngest(ctx, tx, msgID, in.learnedSender(proj, parsed, trustTime))
+		in.applyLearnedPlacementAtIngest(ctx, tx, msgID, prov.MailboxID, in.learnedSender(proj, parsed, trustTime))
 		// THE AREA'S OWN LABEL (#442 increment 3, "areas are labels"). Runs AFTER
 		// classifyMessage — and after applyRules before it — because
 		// areas_resolve.go's ResolveAreas checks the message's LABELS FIRST and
@@ -1303,13 +1311,24 @@ func (in *Ingestor) applyAreaLabelAtIngest(ctx context.Context, tx *store.UserTx
 // A GATED decision is logged at WARN on every message it holds back: an area
 // whose correction rate has switched learned placement off is a state the
 // operator must be able to see without running the report.
-func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store.UserTx, msgID ulid.ULID, sender placement.Sender) {
+func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store.UserTx, msgID, mailboxID ulid.ULID, sender placement.Sender) {
 	res, err := tx.LearnedPlacementForNewMessage(ctx, msgID, sender)
 	if in.learnedObserve != nil {
 		if err != nil {
 			in.learnedObserve(store.LearnedLabelError)
 		} else {
 			in.learnedObserve(res.Label())
+		}
+	}
+	// THE DURABLE TALLY (migration 00100): why learned placement held back, per
+	// user and day, so the last thirty days can be read back without the
+	// process-lifetime counter. A failure to record is logged and nothing more:
+	// the message is already placed or held back, and the tally never decides
+	// anything.
+	if err == nil {
+		if _, rerr := tx.RecordLearnedAbstention(ctx, res, mailboxID); rerr != nil {
+			slog.WarnContext(ctx, "ingest: could not record why learned placement held back",
+				"message_id", msgID.String(), "err", rerr)
 		}
 	}
 	switch {

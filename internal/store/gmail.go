@@ -6,13 +6,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/gmaillabel"
+	"mailroom/internal/textcheck"
 )
 
 // THE GMAIL READ PATH'S STORE SURFACE (#52, ADR-047, increment 5a).
@@ -95,6 +99,13 @@ type GmailObservation struct {
 	ThrID       uint64
 	// Labels is the decoded X-GM-LABELS list; never nil for a real reading.
 	Labels []string
+	// Altered names the labels (in their sanitised form) whose provider spelling
+	// gmaillabel.Sanitize already changed UPSTREAM (the sync layer sanitises
+	// before it hands the list on): invalid bytes replaced, control characters
+	// dropped. ApplyGmailObservation adds the ones its own pass changes. Such a
+	// label is created local-only, never written back under a changed name.
+	Altered []string
+	altered map[string]bool
 }
 
 // GmailApplyResult says what one observation changed.
@@ -104,6 +115,10 @@ type GmailApplyResult struct {
 	LabelsAdded   int  // message_labels rows inserted
 	LabelsRemoved int  // message_labels rows deleted
 	LabelsCreated int  // Mailroom labels created for a Gmail label first seen
+	// LabelsSkipped counts Gmail labels left out because nothing usable remained
+	// of the name after textcheck.SanitizeName (only control or invisible
+	// characters). Counted and logged by the ingest path; never an error.
+	LabelsSkipped int
 	FolderChanged bool // moved_mailbox_id changed
 	Changed       bool // something JMAP-visible changed (an Email change_log row was appended)
 }
@@ -139,6 +154,10 @@ var ErrGmailNoReading = errors.New("store: a Gmail observation without an X-GM-L
 func (tx *UserTx) ApplyGmailObservation(ctx context.Context, msgID ulid.ULID, obs GmailObservation) (GmailApplyResult, error) {
 	if obs.Labels == nil {
 		return GmailApplyResult{}, ErrGmailNoReading
+	}
+	obs.altered = map[string]bool{}
+	for _, n := range append(gmaillabel.Altered(obs.Labels), obs.Altered...) {
+		obs.altered[n] = true
 	}
 	obs.Labels = gmaillabel.Sanitize(obs.Labels)
 	sp, err := tx.tx.Begin(ctx) // SAVEPOINT
@@ -202,11 +221,12 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 	// --- user labels: apply the difference --------------------------------
 	added, removed := gmaillabel.Diff(prior, labels)
 	if len(added) > 0 {
-		ids, created, err := tx.ensureLabelsByName(ctx, added)
+		ids, created, skipped, err := tx.ensureLabelsByName(ctx, added, obs.altered)
 		if err != nil {
 			return res, err
 		}
 		res.LabelsCreated = created
+		res.LabelsSkipped = skipped
 		appliedBy, _ := LabelSource{Kind: LabelByUser}.columns()
 		tag, err := tx.tx.Exec(ctx, `
 			INSERT INTO app.message_labels (user_id, message_id, label_id, applied_by)
@@ -224,7 +244,7 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 			 USING app.labels l
 			 WHERE ml.user_id = $1 AND ml.message_id = $2
 			   AND l.user_id = ml.user_id AND l.id = ml.label_id AND l.name = ANY($3)`,
-			tx.userID.String(), msgID.String(), removed)
+			tx.userID.String(), msgID.String(), removedCanonical(removed, labels))
 		if err != nil {
 			return res, fmt.Errorf("store: gmail observation (remove labels): %w", err)
 		}
@@ -401,56 +421,145 @@ func (tx *UserTx) gmailFolderMailbox(ctx context.Context, accountID, folder stri
 	return id, nil
 }
 
-// ensureLabelsByName returns the ids of the user's labels with these exact
-// names, creating each missing one (mirrored to IMAP, as the Takeout importer
-// creates them: ADR-047 writes a mirrored label back as X-GM-LABELS in 5b).
-// Labels are user-wide: a Gmail label named like an existing Mailroom label
-// IS that label (ADR-047 §2).
-func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string) ([]string, int, error) {
+func distinctStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// canonicalNames is the labels' SAVED names: each through
+// textcheck.SanitizeName, the store's backstop (labels.go cleanName), with the
+// ones that leave nothing dropped. Every by-name lookup of a provider's label
+// compares in this form, since the saved name is the sanitised one.
+func canonicalNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if c := textcheck.SanitizeName(n); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// removedCanonical is the SAVED names to take off a message when Gmail dropped
+// `removed` and still holds `remaining`. Two provider labels can canonicalise to
+// ONE local label (they differ only in characters the store drops), and the
+// local label is then shared: it stays while ANY remaining provider label maps
+// to it, and goes only when none does.
+func removedCanonical(removed, remaining []string) []string {
+	keep := map[string]bool{}
+	for _, c := range canonicalNames(remaining) {
+		keep[c] = true
+	}
+	var out []string
+	for _, c := range canonicalNames(removed) {
+		if !keep[c] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// mirrorsToProvider reports whether a label created for the provider label n
+// may be mirrored back to the provider (X-GM-LABELS by the LOCAL name). It may
+// only when the local name IS the provider's, byte for byte: n unchanged by the
+// store's sanitiser (c == n), not altered by gmaillabel.Sanitize before it, valid
+// UTF-8, and holding no U+FFFD (what Sanitize puts in place of an invalid byte,
+// so a name that has one may not be the provider's bytes). Otherwise writeback
+// would create or write a DIFFERENT provider label.
+func mirrorsToProvider(n, canonical string, altered map[string]bool) bool {
+	return n == canonical && !altered[n] && utf8.ValidString(n) && !strings.ContainsRune(canonical, utf8.RuneError)
+}
+
+// ensureLabelsByName returns the ids of the user's labels with these names
+// (compared in their saved, sanitised form), creating each missing one
+// (mirrored to IMAP, as the Takeout importer creates them: ADR-047 writes a
+// mirrored label back as X-GM-LABELS in 5b). Labels are user-wide: a Gmail
+// label named like an existing Mailroom label IS that label (ADR-047 §2).
+//
+// A name with nothing usable left is SKIPPED and counted, never an error: one
+// odd label must not stop a sync.
+//
+// WRITEBACK IDENTITY. The mapping stores no provider name beside the local
+// label, and writeback sends the LOCAL name as X-GM-LABELS. So a label whose
+// saved name differs from the provider's (sanitising changed it) is created
+// LOCAL-ONLY (MirrorToIMAP false): it has no keyword atom, so nothing is ever
+// written back, and a sanitised name can never create or rename a label at the
+// provider. The provider's own name stays the identity in
+// message_provenance.gm_labels.
+func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string, altered map[string]bool) (ids []string, created, skipped int, err error) {
 	have, err := tx.LabelIDsByName(ctx, names)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	created := 0
-	ids := make([]string, 0, len(names))
+	ids = make([]string, 0, len(names))
 	for _, n := range names {
+		c := textcheck.SanitizeName(n)
+		if c == "" {
+			skipped++
+			continue
+		}
 		if id, ok := have[n]; ok {
 			ids = append(ids, id.String())
 			continue
 		}
-		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: true})
+		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: mirrorsToProvider(n, c, altered)})
 		if errors.Is(err, ErrLabelNameTaken) {
 			// Created concurrently (another account's sync, a client): re-read.
 			again, rerr := tx.LabelIDsByName(ctx, []string{n})
 			if rerr != nil {
-				return nil, 0, rerr
+				return nil, 0, 0, rerr
 			}
 			got, ok := again[n]
 			if !ok {
-				return nil, 0, fmt.Errorf("store: label %q exists but cannot be found", n)
+				return nil, 0, 0, fmt.Errorf("store: label %q exists but cannot be found", c)
 			}
 			ids = append(ids, got.String())
 			continue
 		}
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		created++
 		ids = append(ids, id.String())
 	}
-	return ids, created, nil
+	return ids, created, skipped, nil
 }
 
 // LabelIDsByName maps each of names that is an existing label of the user to
 // its id (exact, case-sensitive match: app.labels' UNIQUE (user_id, name)).
+//
+// The match is on the SAVED name: each requested name goes through
+// textcheck.SanitizeName first, and the result is keyed by the name as asked,
+// so a provider's label with a control character finds its clean local copy.
+// A name with nothing usable left is absent from the result.
 func (tx *UserTx) LabelIDsByName(ctx context.Context, names []string) (map[string]ulid.ULID, error) {
 	out := map[string]ulid.ULID{}
 	if len(names) == 0 {
 		return out, nil
 	}
+	asked := map[string][]string{} // canonical -> the names that canonicalise to it
+	for _, n := range names {
+		if c := textcheck.SanitizeName(n); c != "" {
+			asked[c] = append(asked[c], n)
+		}
+	}
+	for c, raws := range asked {
+		if distinct := distinctStrings(raws); len(distinct) > 1 {
+			// Counted, never fatal: they share one local label (see removedCanonical).
+			slog.Warn("store: provider labels with different names share one saved label name",
+				"names_merged", len(distinct), "saved_name_len", len(c))
+		}
+	}
 	rows, err := tx.tx.Query(ctx, `
 		SELECT id, name FROM app.labels WHERE user_id = $1 AND name = ANY($2)`,
-		tx.userID.String(), names)
+		tx.userID.String(), canonicalNames(names))
 	if err != nil {
 		return nil, fmt.Errorf("store: labels by name: %w", err)
 	}
@@ -464,7 +573,9 @@ func (tx *UserTx) LabelIDsByName(ctx context.Context, names []string) (map[strin
 		if err != nil {
 			return nil, fmt.Errorf("store: parse label id %q: %w", id, err)
 		}
-		out[name] = u
+		for _, raw := range asked[name] {
+			out[raw] = u
+		}
 	}
 	return out, rows.Err()
 }

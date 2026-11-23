@@ -185,7 +185,7 @@ func mqAll(in []string) string {
 
 func areaLabel(names map[ulid.ULID]string, id ulid.ULID) string {
 	if n, ok := names[id]; ok {
-		return n
+		return safeText(n) // a user-typed name never reaches the terminal raw
 	}
 	return id.String()
 }

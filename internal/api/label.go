@@ -12,6 +12,7 @@ import (
 
 	"mailroom/internal/store"
 	"mailroom/internal/tabs"
+	"mailroom/internal/textcheck"
 )
 
 // Label method handlers for the `urn:mailroom:labels` extension (spec §6/§13).
@@ -357,6 +358,10 @@ func createLabel(ctx context.Context, tx *store.UserTx, raw json.RawMessage) (ma
 		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
 			Description: "label name is required", Properties: []string{"name"}}
 	}
+	if err := textcheck.CheckName(*c.Name); err != nil {
+		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
+			Description: "label name " + err.Error(), Properties: []string{"name"}}
+	}
 	row := store.LabelRow{Name: *c.Name, MirrorToIMAP: true}
 	if c.MirrorToIMAP != nil {
 		row.MirrorToIMAP = *c.MirrorToIMAP
@@ -417,6 +422,10 @@ func updateLabel(ctx context.Context, tx *store.UserTx, id ulid.ULID, patch json
 			if err := json.Unmarshal(val, &s); err != nil || s == "" {
 				return &SetError{Type: setInvalidProps,
 					Description: "name must be a non-empty string", Properties: []string{"name"}}
+			}
+			if err := textcheck.CheckName(s); err != nil {
+				return &SetError{Type: setInvalidProps,
+					Description: "label name " + err.Error(), Properties: []string{"name"}}
 			}
 			p.Name = &s
 		case "color":
