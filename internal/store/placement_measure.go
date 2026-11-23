@@ -533,8 +533,10 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 			continue
 		}
 		tf := placement.TimedFiling{Area: f.AreaID, At: f.At}
-		byAddr[a.Value] = append(byAddr[a.Value], tf)
-		if !placement.DomainFallbackBlocked(d.Value, own) {
+		if !f.HideAddr { // a forgotten filing is not evidence (learned_sender_forget.go)
+			byAddr[a.Value] = append(byAddr[a.Value], tf)
+		}
+		if !f.HideDomain && !placement.DomainFallbackBlocked(d.Value, own) {
 			byDom[d.Value] = append(byDom[d.Value], tf)
 		}
 	}

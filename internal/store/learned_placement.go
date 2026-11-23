@@ -324,6 +324,10 @@ type placementFiling struct {
 	AreaID ulid.ULID
 	From   string
 	At     time.Time
+	// HideAddr and HideDomain: the filing is older than a forget mark that
+	// hides it from the address key's / the domain key's evidence
+	// (learned_sender_forget.go). A filing hidden from both is not returned.
+	HideAddr, HideDomain bool
 }
 
 // placementFilings reads the user's own area filings: app.message_labels rows
@@ -367,7 +371,7 @@ func (tx *UserTx) placementFilings(ctx context.Context, domain string, asOf time
 		return nil, fmt.Errorf("store: learned placement (evidence): %w", err)
 	}
 	defer rows.Close()
-	var out []placementFiling
+	var all []placementFiling
 	for rows.Next() {
 		var areaStr string
 		var f placementFiling
@@ -379,9 +383,31 @@ func (tx *UserTx) placementFilings(ctx context.Context, domain string, asOf time
 			return nil, fmt.Errorf("store: learned placement: parse area id %q: %w", areaStr, err)
 		}
 		f.AreaID = id
+		all = append(all, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	marks, err := tx.forgetMarks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(marks) == 0 {
+		return all, nil
+	}
+	out := all[:0]
+	for _, f := range all {
+		if a, d, ok := placement.KeysFor(f.From); ok {
+			f.HideAddr = f.At.Before(marks[a]) // a zero mark is the year 1: hides nothing
+			f.HideDomain = f.At.Before(marks[d]) || f.HideAddr
+		}
+		if f.HideAddr && f.HideDomain {
+			continue
+		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // aggregatePlacementEvidence folds filings into per-address and per-domain
@@ -407,12 +433,16 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 		if !ok {
 			continue
 		}
-		add(byAddr, a.Value, f)
-		add(byDomain, d.Value, f)
-		if domainAddrs[d.Value] == nil {
-			domainAddrs[d.Value] = map[string]bool{}
+		if !f.HideAddr {
+			add(byAddr, a.Value, f)
 		}
-		domainAddrs[d.Value][a.Value] = true
+		if !f.HideDomain {
+			add(byDomain, d.Value, f)
+			if domainAddrs[d.Value] == nil {
+				domainAddrs[d.Value] = map[string]bool{}
+			}
+			domainAddrs[d.Value][a.Value] = true
+		}
 	}
 	for k, e := range byAddr {
 		e.Addresses = 1
@@ -434,7 +464,7 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 		var ors []string
 		for _, k := range keys {
 			args = append(args, string(k.Kind), k.Value)
-			ors = append(ors, `(key_kind = $`+strconv.Itoa(len(args)-1)+` AND key_value = $`+strconv.Itoa(len(args))+`)`)
+			ors = append(ors, `(p.key_kind = $`+strconv.Itoa(len(args)-1)+` AND p.key_value = $`+strconv.Itoa(len(args))+`)`)
 		}
 		if len(ors) == 0 {
 			return map[placement.Key]time.Time{}, nil
@@ -443,13 +473,16 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 	}
 	if !asOf.IsZero() {
 		args = append(args, asOf)
-		filter += ` AND corrected_at < $` + strconv.Itoa(len(args))
+		filter += ` AND p.corrected_at < $` + strconv.Itoa(len(args))
 	}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT key_kind, key_value, max(corrected_at)
-		  FROM app.learned_placements
-		 WHERE user_id = $1 AND outcome = 'corrected'`+filter+`
-		 GROUP BY key_kind, key_value`, args...)
+		SELECT p.key_kind, p.key_value, max(p.corrected_at)
+		  FROM app.learned_placements p
+		  LEFT JOIN app.learned_sender_forgotten f
+		         ON f.user_id = p.user_id AND f.key_kind = p.key_kind AND f.key_value = p.key_value
+		 WHERE p.user_id = $1 AND p.outcome = 'corrected'
+		   AND (f.forgotten_at IS NULL OR p.corrected_at >= f.forgotten_at)`+filter+`
+		 GROUP BY p.key_kind, p.key_value`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: learned placement (corrections): %w", err)
 	}

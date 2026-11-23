@@ -4325,6 +4325,24 @@ CREATE POLICY learned_sender_trust_isolation ON app.learned_sender_trust
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
+-- FORGET WHAT LEARNED SORTING KNOWS ABOUT A SENDER (migration 00102): one mark
+-- per (user, key kind, key); the evidence reads ignore filings and corrections
+-- older than forgotten_at. Nothing is deleted. Not a JMAP-visible object: no
+-- change_log row.
+CREATE TABLE app.learned_sender_forgotten (
+  user_id      app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  key_kind     text NOT NULL CHECK (key_kind IN ('address', 'domain')),
+  key_value    text NOT NULL CHECK (length(key_value) BETWEEN 1 AND 320 AND key_value = lower(btrim(key_value))),
+  forgotten_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key_kind, key_value)
+);
+ALTER TABLE app.learned_sender_forgotten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_sender_forgotten FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_sender_forgotten_isolation ON app.learned_sender_forgotten
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
 -- OUT OF OFFICE (#50, migration 00065): the vacation responder Mailroom writes
 -- to the provider as a ManageSieve script (internal/outofoffice). One row per
 -- mail account; JMAP-visible as 'OutOfOffice' with the account id as its id.
@@ -4652,6 +4670,9 @@ GRANT SELECT, INSERT, UPDATE ON app.learned_placement_abstentions TO mailroom_ap
 
 -- Trusted senders for learned sorting (migration 00101): untrusting deletes the row.
 GRANT SELECT, INSERT, DELETE ON app.learned_sender_trust TO mailroom_app;
+
+-- Forget marks (migration 00102): a second Forget moves the mark forward, so UPDATE.
+GRANT SELECT, INSERT, UPDATE ON app.learned_sender_forgotten TO mailroom_app;
 
 -- Local DKIM verdicts (#776): written once with the message, gone with it; no UPDATE.
 GRANT SELECT, INSERT, DELETE ON app.message_local_auth TO mailroom_app;

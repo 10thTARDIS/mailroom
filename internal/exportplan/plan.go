@@ -264,6 +264,15 @@ var plan = map[string]Entry{
 	"learned_sender_trust": {Exported, "learned_sender_trust.json (the addresses the user marked as trusted)",
 		"a deliberate act of the user about one exact From address; not derivable from the mail"},
 
+	// Forget marks for learned sorting (#167, migration 00102). DROPPED: a mark is
+	// a moment on THIS instance's clock that tells the evidence reads to ignore
+	// older label rows; an import writes fresh label rows with fresh times, so the
+	// mark would hide nothing, and the filings it was about are not exported with
+	// their original times.
+	"learned_sender_forgotten": {Dropped, "",
+		"a point in time on this instance's clock that hides older filings from learned sorting; " +
+			"an import creates new filing times, so it would hide nothing"},
+
 	// Stored-area readiness (ADR-049, migration 00086). DROPPED: whether THIS
 	// instance's stored area column is complete for the user; an import writes
 	// messages through the triggers and the flag is earned by `area-index`.
