@@ -131,6 +131,7 @@ Keys, backup and DNS: [PGP keys](pgp-keys.md).
 | `day-one --user-id U [--account-id A --window N --plan F --apply --undo RUN --runs]` | Turn a folder-sorted mailbox into a desk: census and preview first, `--undo` reverses a run. |
 | `day-one-server-archive --user-id U [--apply --limit N]` | Move day-one archives still in INBOX on the server to Archive. |
 | `placement-report --user-id U [--reset-gate AREA]` | Learned placement outcomes and correction gates. Read-only. |
+| `placement-measure --user-id U [--split-days N --window-days N --recent-days N --auth-scan-max N --no-headers]` | Measure learned sorting before changing it. Read-only counts: why arrivals were not placed (30 days), filed senders refused only for authentication, recency for mixed senders, the "opened and left alone" and "archived unread" signals scored on a time split, and the List-Id ceiling. |
 | `placement-backfill --user-id U [--exclude A] [--apply] [--undo BATCH]` | Apply learned placement to mail already on the desk. |
 | `placement-explain --user-id U (--message-id M \| --sender A)` | Why placement did or did not move a message. |
 | `drawer-report --user-id U [--apply] [--enable\|--disable]` | Preview the drawer auto-archive sweep; flip its switch. |
@@ -138,6 +139,31 @@ Keys, backup and DNS: [PGP keys](pgp-keys.md).
 | `delete-label --user-id U --name N [--apply]` | Delete a label. |
 | `untangle-labels --user-id U --plan F [--apply]` | Batch label clean-up from a plan. |
 | `classify-tabs`, `map-label-tabs --user-id U [--apply]` | Fill stored tab verdicts; point labels at tabs. |
+
+### `placement-measure`
+
+Read-only, counts only, and it changes nothing about where mail goes. Its six sections:
+
+1. **Why arrivals were not placed.** The last 30 days, per reason, from a per-day tally kept at
+   arrival. It records going forward, so the section says how many of the 30 days it covers.
+2. **Authentication-only refusals.** Messages from senders you have filed (confident or thin
+   evidence, not already placed by a label) that are refused for authentication and nothing
+   else, how many senders that is, and how many an enabled rule already covers. It reads each
+   message's raw headers like `placement-backfill`; `--no-headers` uses the stored failure flag
+   instead, which is a lower bound. `--auth-scan-max` caps the headers read and the report says
+   when it bit.
+3. **Recency.** For senders you file into more than one area, how many end in a run of the last
+   2, 3 or 5 filings into one area, and how much mail they received lately.
+4. **"Left alone."** Desk placements you opened and did not move within 7 days, as a candidate
+   signal: events before the split day teach, later mail scores. Shown beside the same signal
+   with "opened" dropped and the rate at which you move mail anyway.
+5. **"Archived unread."** Senders whose mail you archive unopened, and what you later did with
+   their mail in Primary, per area of origin.
+6. **List-Id.** How many addresses send under more than one List-Id, and the ceiling on mixed
+   senders a List-Id key could separate.
+
+`--split-days` (default 45) sets the split day D, printed in the report, and `--window-days`
+(default 365) how far back sections 4 and 5 read.
 
 ## Other commands
 

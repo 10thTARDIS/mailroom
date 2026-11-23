@@ -228,6 +228,14 @@
 //	                   backfill of existing mail WOULD move (an upper bound), and
 //	                   arrival vs backfill outcomes. Counts only, read-only;
 //	                   --reset-gate re-enables an area the gate stopped. No --apply.)
+//	placement-measure  --user-id [--window-days N] [--split-days N] [--recent-days N]
+//	                   [--auth-scan-max N] [--no-headers]
+//	                   (mailroom#28/#169: what learned sorting COULD do, measured before it
+//	                   is changed. Why arrivals were not placed (last 30 days), filed
+//	                   senders refused for authentication alone, recency for mixed
+//	                   keys, the "opened and left alone" and "archived unread" signals
+//	                   scored on a time split, and the List-Id ceiling. Counts only,
+//	                   read-only; changes nothing.)
 //	placement-explain  --user-id (--message-id M | --sender ADDRESS [--limit N]) [--as-of]
 //	                   (mailroom#840: why learned placement did or did not place a
 //	                   message. Re-runs the arrival decision read-only with the very
@@ -479,6 +487,7 @@ var subcommands = map[string]func(context.Context, []string) error{
 	"drawer-report":                runDrawerReport,
 	"placement-report":             runPlacementReport,
 	"placement-explain":            runPlacementExplain,
+	"placement-measure":            runPlacementMeasure,
 	"plan-check":                   runPlanCheck,
 	"plaintext-report":             runPlaintextReport,
 	"nudge-report":                 runNudgeReport,
