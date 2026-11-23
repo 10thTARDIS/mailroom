@@ -42,6 +42,11 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 - Trust skips one check only, the missing confirmation of the sender. It never overrides a failure reported by your mail server, a sender warning or an unclear From header, and it only ever applies to plain ASCII addresses matched exactly.
 - Sender addresses behind the Activity lines are stored with your account data and removed with it; they are never written to the audit log.
 
+### Fixes
+
+- **The attachment viewer's "loading" and "showing the first part" notes are easier to read.**
+  They now use the normal text colour instead of a paler grey.
+
 ### Upgrading
 
 - Three new database tables and one new column are added by the migrations that run on start (no data is rewritten).
