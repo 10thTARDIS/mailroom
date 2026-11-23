@@ -54,3 +54,30 @@ func TestAreaSetRefusesUnsafeNames(t *testing.T) {
 		t.Errorf("update %q was refused by validation", good)
 	}
 }
+
+// A day-one plan naming an area or label with an ESC sequence or a bidi
+// override is refused when the plan is parsed, which is what both the preview
+// and the apply do. A plain international name passes (positive control).
+//
+// NEGATIVE CONTROL: with the areaName check removed from parseSetupPlan the
+// area cases go red (run and recorded in the PR).
+func TestSetupPlanRefusesUnsafeNames(t *testing.T) {
+	mailbox := ulid.Make().String()
+	plan := func(area, label string) setupPlanArgs {
+		return setupPlanArgs{Folders: []setupFolderChoiceArgs{{MailboxID: mailbox, Action: "bringToDesk", AreaName: area, LabelName: label}}}
+	}
+	for _, bad := range []string{"Work\u001b[2J", "A‮B"} {
+		if _, merr := parseSetupPlan(plan(bad, "")); merr == nil {
+			t.Errorf("area name %q was accepted", bad)
+		}
+		if _, merr := parseSetupPlan(plan("", bad)); merr == nil {
+			t.Errorf("label name %q was accepted", bad)
+		}
+	}
+	if _, merr := parseSetupPlan(plan("Café 日本 ✉️", "Заметки")); merr != nil {
+		t.Errorf("a plain international name was refused: %v", merr.Description)
+	}
+	if _, merr := parseSetupPlan(plan("", "")); merr != nil {
+		t.Errorf("no names at all is a legitimate plan: %v", merr.Description)
+	}
+}

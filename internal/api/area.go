@@ -262,6 +262,24 @@ func areaStoreSetError(err error) *SetError {
 	return &SetError{Type: setInvalidProps, Description: err.Error(), Properties: []string{"name", "labelId"}}
 }
 
+// validateAreaName is THE check on an area name, shared by Area/set and the
+// day-one setup plan: trimmed, non-empty, at most areaMaxNameRunes, and free of
+// control and invisible formatting characters (textcheck.CheckName). It returns
+// the trimmed name, or a description of why it is refused ("" when accepted).
+func validateAreaName(raw string) (string, string) {
+	name := strings.TrimSpace(raw)
+	switch {
+	case name == "":
+		return "", "name must not be empty"
+	case utf8.RuneCountInString(name) > areaMaxNameRunes:
+		return name, fmt.Sprintf("name must be at most %d characters", areaMaxNameRunes)
+	}
+	if err := textcheck.CheckName(name); err != nil {
+		return name, "name " + err.Error()
+	}
+	return name, ""
+}
+
 // createArea parses one Area/set create patch and inserts it. nextPos is the
 // batch's running "one past the current max position" counter: the first
 // create without an explicit `position` in a call takes it, and every
@@ -384,19 +402,9 @@ func updateArea(ctx context.Context, tx *store.UserTx, id ulid.ULID, raw json.Ra
 				return &SetError{Type: setInvalidProps,
 					Description: "name must be a string", Properties: []string{"name"}}
 			}
-			s = strings.TrimSpace(s)
-			if s == "" {
-				return &SetError{Type: setInvalidProps,
-					Description: "name must not be empty", Properties: []string{"name"}}
-			}
-			if utf8.RuneCountInString(s) > areaMaxNameRunes {
-				return &SetError{Type: setInvalidProps,
-					Description: fmt.Sprintf("name must be at most %d characters", areaMaxNameRunes),
-					Properties:  []string{"name"}}
-			}
-			if err := textcheck.CheckName(s); err != nil {
-				return &SetError{Type: setInvalidProps,
-					Description: "name " + err.Error(), Properties: []string{"name"}}
+			s, nerr := validateAreaName(s)
+			if nerr != "" {
+				return &SetError{Type: setInvalidProps, Description: nerr, Properties: []string{"name"}}
 			}
 			p.Name = &s
 		case "position":

@@ -41,7 +41,7 @@ rather than from a guess. Nothing is moved, filed or learned differently.
 
 ### Fixes
 
-- **Area names are now checked when you save them.** A name containing a control or invisible
+- **Area and label names are now checked when you save them, including in the day-one setup.** A name containing a control or invisible
   formatting character is refused, as rule and API key names already are. Names with accents,
   other scripts or emoji are fine, and names you already have are untouched.
 - **The admin reports no longer print raw control characters from area names** to the terminal.

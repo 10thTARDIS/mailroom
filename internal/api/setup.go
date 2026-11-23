@@ -11,6 +11,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // Setup/* — DAY-ONE SETUP (#446): the four steps that turn a folder-sorted
@@ -191,6 +192,22 @@ func parseSetupPlan(args setupPlanArgs) (store.SetupPlan, *MethodError) {
 			MailboxID: mid, Action: f.Action,
 			LabelName: strings.TrimSpace(f.LabelName),
 			AreaName:  strings.TrimSpace(f.AreaName),
+		}
+		// A name typed into the wizard is checked at preview and at apply, the
+		// same way Area/set and Label/set check theirs.
+		if choice.AreaName != "" {
+			n, why := validateAreaName(choice.AreaName)
+			if why != "" {
+				return store.SetupPlan{}, &MethodError{Type: errInvalidArguments,
+					Description: "plan.folders[].areaName: " + why}
+			}
+			choice.AreaName = n
+		}
+		if choice.LabelName != "" {
+			if err := textcheck.CheckName(choice.LabelName); err != nil {
+				return store.SetupPlan{}, &MethodError{Type: errInvalidArguments,
+					Description: "plan.folders[].labelName " + err.Error()}
+			}
 		}
 		if f.AreaID != nil {
 			aid, aerr := ulid.Parse(strings.TrimSpace(*f.AreaID))
