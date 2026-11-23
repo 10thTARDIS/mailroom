@@ -370,7 +370,7 @@ func TestLearnedPlacementCounterReportsAnError(t *testing.T) {
 	cancel()
 	_ = f.st.UserTx(context.Background(), f.userID, func(tx *store.UserTx) error {
 		// A cancelled context makes every read inside the decision fail.
-		f.ing.applyLearnedPlacementAtIngest(ctx, tx, msg, placement.Sender{})
+		f.ing.applyLearnedPlacementAtIngest(ctx, tx, msg, ulid.ULID{}, placement.Sender{})
 		return nil
 	})
 	if got := rec.all(); len(got) != 1 || got[0] != "error" {

@@ -67,8 +67,9 @@ func (w *mmWorld) ingest(t *testing.T, from string, createdAgo float64, extra ..
 }
 
 // place makes the message carry exactly one area own-label: area, applied by
-// `by`, dated at. It first asserts the message arrived with a desk placement,
-// the shape every message this fixture re-labels is built from.
+// `by`, dated at. It deletes whatever area own-labels the message arrived with
+// (the desk's, from real ingest) and writes the one asked for; it asserts
+// nothing about the label it replaced.
 func (w *mmWorld) place(t *testing.T, id ulid.ULID, area, by string, at time.Time) {
 	t.Helper()
 	var all []string
@@ -170,6 +171,10 @@ func (w *mmWorld) wantFilings(t *testing.T, from, area string, n int) {
 //	            7 days, so the desk label that named its area is gone
 //	  h@early   1 message (-60) filed into U at -59: moved at once
 //	  i@recent  1 desk U (-48) opened: placed < 7 days before D, so not judged
+//	  k@mid     1 message (-60) filed into U at -50: moved late but BEFORE D
+//	  lrn, rule 1 message each, placed by LEARNED placement and by a RULE (-69,
+//	            -68), both opened: not desk placements, so never events
+//	  m@bulk    1 message received 3 days before it was created (an import)
 //
 //	outcomes, on or after D, 7+ days old
 //	  o1  a desk U            o2  a user-filed R      o3  a user-filed U
@@ -178,12 +183,21 @@ func (w *mmWorld) wantFilings(t *testing.T, from, area string, n int) {
 //	  o8  e desk U            o9  z desk P            o10 z user-filed U
 //	  o11 a rule's label      o12 a learned placement's label
 //	  o13 a, 3 days old       o14 a, trashed          (neither is an outcome)
+//	  o15 a, filed into R by an API KEY (agent)       a filing
+//	  o16 a, no area label at all                    label removed
+//	  o17 a, desk label R (the desk put it elsewhere)
+//	  o18 day-one setup's label                       excluded
 //
 // Hand count, "opened and not moved": the keys taught are a (U), b (R) and e (U,
 // but the user already covers e); c is thin, d mixed. New reach is a and b.
-// Later mail from a: kept o1, o3 (filed into the TAUGHT area), corrected o2;
-// from b: kept o4, corrected o5. j is untaught (never opened), so o6 and o7
-// are base rate, as are z's o9 and o10; o8 is covered by the user's evidence.
+// Later mail from a (taught U): o1 AGREE (desk U, untouched), o3 KEPT (filed
+// into the TAUGHT area), o2 and o15 CORRECTED (filed elsewhere, one by a key),
+// o16 CORRECTED by label removal, o17 UNRESOLVED (desk put it in R). So U: kept
+// 1, corrected 3, agree 1, unresolved 1, precision 1/4.
+// From b (taught R): o4 AGREE, o5 CORRECTED. R: kept 0, corrected 1, agree 1.
+// j is untaught (never opened), so o6 and o7 are base rate, as are z's o9 and
+// o10; o8 is covered by the user's evidence. Totals: kept 1, corrected 4 (1 label
+// removed), agree 2, unresolved 1, precision 1/5.
 //
 // NEGATIVE CONTROLS, run and recorded in the PR: with the split made to leak
 // (outcomes read from before D) the precision rows go red; with the "opened"
@@ -216,28 +230,48 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 	h := w.ingest(t, "h@early.example", 60)
 	w.place(t, h, "Updates", store.LabelByUser, w.ago(59))
 	deskOpened("i@recent.example", "Updates", 48)
+	k := w.ingest(t, "k@mid.example", 60)
+	w.place(t, k, "Updates", store.LabelByUser, w.ago(50))
+	// Not desk placements, whatever else is true of them: a learned placement and
+	// a rule's label, both opened, before D. They must never become events.
+	lrn := w.ingest(t, "lrn@learned.example", 69)
+	w.place(t, lrn, "Updates", store.LabelByLearned, w.ago(69))
+	w.opened(t, lrn, w.ago(69))
+	rl := w.ingest(t, "rl@rule.example", 68)
+	w.place(t, rl, "Forums", store.LabelByRule, w.ago(68))
+	w.opened(t, rl, w.ago(68))
+	bulk := w.ingest(t, "m@bulk.example", 100)
+	w.place(t, bulk, "Forums", store.LabelByRule, w.ago(100))
+	w.exec(t, `UPDATE app.messages SET received_at = created_at - interval '3 days' WHERE id = $1`, bulk.String())
 
-	w.desk(t, "a@shop.example", "Updates", 31)                  // o1
-	o2 := w.ingest(t, "a@shop.example", 29)                     // o2
-	w.place(t, o2, "Promotions", store.LabelByUser, w.ago(28))  //
-	o3 := w.ingest(t, "a@shop.example", 28)                     // o3
-	w.place(t, o3, "Updates", store.LabelByUser, w.ago(27))     //
-	w.desk(t, "b@news.example", "Promotions", 25)               // o4
-	o5 := w.ingest(t, "b@news.example", 24)                     // o5
-	w.place(t, o5, "Primary", store.LabelByUser, w.ago(23))     //
-	w.desk(t, "j@quiet.example", "Updates", 20)                 // o6
-	o7 := w.ingest(t, "j@quiet.example", 19)                    // o7
-	w.place(t, o7, "Promotions", store.LabelByUser, w.ago(18))  //
-	w.desk(t, "e@known.example", "Updates", 18)                 // o8
-	w.desk(t, "z@other.example", "Primary", 17)                 // o9
-	o10 := w.ingest(t, "z@other.example", 16)                   // o10
-	w.place(t, o10, "Updates", store.LabelByUser, w.ago(15))    //
-	o11 := w.ingest(t, "r@rule.example", 15)                    // o11
-	w.place(t, o11, "Forums", store.LabelByRule, w.ago(15))     //
-	o12 := w.ingest(t, "l@learned.example", 14)                 // o12
-	w.place(t, o12, "Updates", store.LabelByLearned, w.ago(14)) //
-	w.desk(t, "a@shop.example", "Updates", 3)                   // o13
-	o14 := w.desk(t, "a@shop.example", "Updates", 22)           // o14
+	w.desk(t, "a@shop.example", "Updates", 31)                   // o1
+	o2 := w.ingest(t, "a@shop.example", 29)                      // o2
+	w.place(t, o2, "Promotions", store.LabelByUser, w.ago(28))   //
+	o3 := w.ingest(t, "a@shop.example", 28)                      // o3
+	w.place(t, o3, "Updates", store.LabelByUser, w.ago(27))      //
+	w.desk(t, "b@news.example", "Promotions", 25)                // o4
+	o5 := w.ingest(t, "b@news.example", 24)                      // o5
+	w.place(t, o5, "Primary", store.LabelByUser, w.ago(23))      //
+	w.desk(t, "j@quiet.example", "Updates", 20)                  // o6
+	o7 := w.ingest(t, "j@quiet.example", 19)                     // o7
+	w.place(t, o7, "Promotions", store.LabelByUser, w.ago(18))   //
+	w.desk(t, "e@known.example", "Updates", 18)                  // o8
+	w.desk(t, "z@other.example", "Primary", 17)                  // o9
+	o10 := w.ingest(t, "z@other.example", 16)                    // o10
+	w.place(t, o10, "Updates", store.LabelByUser, w.ago(15))     //
+	o11 := w.ingest(t, "r@rule.example", 15)                     // o11
+	w.place(t, o11, "Forums", store.LabelByRule, w.ago(15))      //
+	o12 := w.ingest(t, "l@learned.example", 14)                  // o12
+	w.place(t, o12, "Updates", store.LabelByLearned, w.ago(14))  //
+	o15 := w.ingest(t, "a@shop.example", 21)                     // o15
+	w.place(t, o15, "Promotions", store.LabelByAgent, w.ago(20)) //
+	o16 := w.ingest(t, "a@shop.example", 19)                     // o16
+	w.unlabel(t, o16)                                            //
+	w.desk(t, "a@shop.example", "Promotions", 18)                // o17
+	o18 := w.ingest(t, "s@setup.example", 17)                    // o18
+	w.place(t, o18, "Updates", store.LabelBySetup, w.ago(17))    //
+	w.desk(t, "a@shop.example", "Updates", 3)                    // o13
+	o14 := w.desk(t, "a@shop.example", "Updates", 22)            // o14
 	w.exec(t, `UPDATE app.messages SET trashed_at = $2::timestamptz, purge_after = $2::timestamptz + interval '30 days' WHERE id = $1`, o14.String(), w.ago(21))
 
 	// The fixture's own filings, through the evidence query the decision uses.
@@ -251,20 +285,25 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 		t.Errorf("split day D = %s, want %s", m.Split, want)
 	}
 	c := m.LeftAloneCover
+	// 13 desk placements, 10 opened. The learned-placed and rule-placed messages
+	// are in neither: a learned or rule label is not the desk's own verdict.
 	if c.DeskPlaced != 13 || c.Opened != 10 {
-		t.Errorf("desk-placed/opened = %d/%d, want 13/10 (a3 and j1, j2 unopened; i1 too young to judge)", c.DeskPlaced, c.Opened)
+		t.Errorf("desk-placed/opened = %d/%d, want 13/10 (a3 and j1, j2 unopened; i1 too young; the learned and rule messages are not desk placements)", c.DeskPlaced, c.Opened)
 	}
-	if c.UnobservableMoved != 1 {
-		t.Errorf("unobservable moved = %d, want 1 (g: filed 20 days after arrival; h was filed at once)", c.UnobservableMoved)
+	if c.UnobservableMoved != 2 || c.UnobservableAfterD != 1 {
+		t.Errorf("unobservable moved/after D = %d/%d, want 2/1 (g filed at -40, after D; k at -50, before it; h was filed at once)", c.UnobservableMoved, c.UnobservableAfterD)
 	}
-	if c.Outcomes != 10 || c.ExcludedRule != 1 || c.ExcludedLearned != 1 {
-		t.Errorf("outcomes/rule/learned = %d/%d/%d, want 10/1/1 (o13 is too young, o14 is trashed)", c.Outcomes, c.ExcludedRule, c.ExcludedLearned)
+	if c.Outcomes != 13 || c.ExcludedRule != 1 || c.ExcludedLearned != 1 || c.ExcludedOther != 1 {
+		t.Errorf("outcomes/rule/learned/other = %d/%d/%d/%d, want 13/1/1/1 (o13 is too young, o14 is trashed)", c.Outcomes, c.ExcludedRule, c.ExcludedLearned, c.ExcludedOther)
 	}
-	if m.UserEvidence != 3 {
-		t.Errorf("user evidence before D = %d, want 3 (e's two and h's one; g's was after D)", m.UserEvidence)
+	if m.UserEvidence != 4 {
+		t.Errorf("user evidence before D = %d, want 4 (e's two, h's one, k's one; g's was after D)", m.UserEvidence)
 	}
 	if want := w.ago(70).Add(time.Hour); !c.EarliestOpen.Equal(want) {
 		t.Errorf("earliest open = %s, want %s", c.EarliestOpen, want)
+	}
+	if total := w.f.scalar(t, `SELECT count(*) FROM app.messages WHERE user_id = $1`, w.f.userID.String()); m.WindowMessages != total || m.BulkImported != 1 {
+		t.Errorf("window messages/bulk imported = %d/%d, want %d/1 (m@bulk was received 3 days before it was created)", m.WindowMessages, m.BulkImported, total)
 	}
 
 	op := m.LeftAlone
@@ -280,18 +319,22 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 	if v := op.Keys.Reasons[placement.KeyAddress]; v[placement.Confident] != 3 || v[placement.Thin] != 1 || v[placement.Mixed] != 1 {
 		t.Errorf("opened: address verdicts = %v, want confident 3 thin 1 mixed 1", v)
 	}
-	if got := op.Areas[u]; got.Kept != 2 || got.Corrected != 1 {
-		t.Errorf("opened: Updates = %+v, want kept 2, corrected 1", got)
+	if got := op.Areas[u]; got.Kept != 1 || got.Corrected != 3 || got.LabelRemoved != 1 || got.Agreement != 1 || got.Unresolved != 1 {
+		t.Errorf("opened: Updates = %+v, want kept 1, corrected 3 (1 label removed), agree 1, unresolved 1", got)
 	}
-	if got := op.Areas[r]; got.Kept != 1 || got.Corrected != 1 {
-		t.Errorf("opened: Promotions = %+v, want kept 1, corrected 1", got)
+	if got := op.Areas[r]; got.Kept != 0 || got.Corrected != 1 || got.Agreement != 1 || got.Unresolved != 0 {
+		t.Errorf("opened: Promotions = %+v, want kept 0, corrected 1, agree 1", got)
 	}
-	mmNear(t, "opened: Updates LCB95", op.Areas[u].Gate.LCB, 0.2077)
-	mmNear(t, "opened: Promotions LCB95", op.Areas[r].Gate.LCB, 0.0945)
-	mmNear(t, "opened: total LCB95", op.Total.Gate.LCB, 0.2307)
-	if op.Served != 1 || op.Untaught != 4 || op.MovedAnyTaught != 3 || op.MovedAnyUntaught != 2 {
-		t.Errorf("opened: served/untaught/moved taught/moved untaught = %d/%d/%d/%d, want 1/4/3/2",
-			op.Served, op.Untaught, op.MovedAnyTaught, op.MovedAnyUntaught)
+	mmNear(t, "opened: Updates LCB95", op.Areas[u].Gate.LCB, 0.0456)
+	mmNear(t, "opened: Promotions LCB95", op.Areas[r].Gate.LCB, 0)
+	mmNear(t, "opened: total precision", op.Total.Gate.Precision, 0.2)
+	mmNear(t, "opened: total LCB95", op.Total.Gate.LCB, 0.0362)
+	if op.Total.WouldChange() != 1 {
+		t.Errorf("opened: would change = %d, want 1 (o17: taught U, the desk put it in R)", op.Total.WouldChange())
+	}
+	if op.Served != 1 || op.Untaught != 4 || op.MovedAnyTaught != 4 || op.MovedAnyUntaught() != 2 {
+		t.Errorf("opened: served/untaught/moved taught/moved untaught = %d/%d/%d/%d, want 1/4/4/2",
+			op.Served, op.Untaught, op.MovedAnyTaught, op.MovedAnyUntaught())
 	}
 
 	nm := m.LeftAloneAny
@@ -301,13 +344,14 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 	if got := nm.Keys.New[u]; got != (placement.KeyCounts{Addresses: 2}) {
 		t.Errorf("not moved: new U keys = %+v, want a and j", got)
 	}
-	if got := nm.Areas[u]; got.Kept != 3 || got.Corrected != 2 {
-		t.Errorf("not moved: Updates = %+v, want kept 3, corrected 2 (j's o6, o7 now count)", got)
+	// j is taught here: o6 AGREE (desk U), o7 CORRECTED (filed into R).
+	if got := nm.Areas[u]; got.Kept != 1 || got.Corrected != 4 || got.LabelRemoved != 1 || got.Agreement != 2 || got.Unresolved != 1 {
+		t.Errorf("not moved: Updates = %+v, want kept 1, corrected 4, agree 2, unresolved 1 (j's o6 agrees, o7 is corrected)", got)
 	}
-	mmNear(t, "not moved: total LCB95", nm.Total.Gate.LCB, 0.2505)
-	if nm.Served != 1 || nm.Untaught != 2 || nm.MovedAnyTaught != 4 || nm.MovedAnyUntaught != 1 {
-		t.Errorf("not moved: served/untaught/moved taught/moved untaught = %d/%d/%d/%d, want 1/2/4/1",
-			nm.Served, nm.Untaught, nm.MovedAnyTaught, nm.MovedAnyUntaught)
+	mmNear(t, "not moved: total LCB95", nm.Total.Gate.LCB, 0.0301)
+	if nm.Served != 1 || nm.Untaught != 2 || nm.MovedAnyTaught != 5 || nm.MovedAnyUntaught() != 1 {
+		t.Errorf("not moved: served/untaught/moved taught/moved untaught = %d/%d/%d/%d, want 1/2/5/1",
+			nm.Served, nm.Untaught, nm.MovedAnyTaught, nm.MovedAnyUntaught())
 	}
 }
 
@@ -339,6 +383,11 @@ func TestPlacementMeasureRecency(t *testing.T) {
 	w.file(t, "a@shop.example", "Updates", 27)
 	w.desk(t, "a@shop.example", "Updates", 3)
 	w.desk(t, "k@flip.example", "Updates", 2)
+	// Mail from addresses with NO filings of their own: the only mail a DOMAIN key
+	// decides (the address key decides the rest).
+	w.desk(t, "new@flip.example", "Updates", 4)
+	w.desk(t, "new@flip.example", "Updates", 5)
+	w.desk(t, "new@shop.example", "Updates", 6)
 	w.wantFilings(t, "k@flip.example", "Promotions", 5)
 
 	m := w.measure(t, nil)
@@ -356,8 +405,10 @@ func TestPlacementMeasureRecency(t *testing.T) {
 	// mail a 3 + k 1 = 4. Runs: k 5, m 2, n 0, a 1.
 	check("address", m.RecencyAddress, 6, 4, 4, []placement.RecencyRow{{N: 2, Keys: 2, Recent: 1}, {N: 3, Keys: 1, Recent: 1}, {N: 5, Keys: 1, Recent: 1}})
 	// Domains: flip flop tie multi shop = 5, every one mixed (multi's two
-	// addresses disagree); runs flip 5, flop 2, tie 0, multi 1, shop 1.
-	check("domain", m.RecencyDomain, 5, 5, 4, []placement.RecencyRow{{N: 2, Keys: 2, Recent: 1}, {N: 3, Keys: 1, Recent: 1}, {N: 5, Keys: 1, Recent: 1}})
+	// addresses disagree); runs flip 5, flop 2, tie 0, multi 1, shop 1. Recent
+	// mail counts only addresses with no filings of their own: new@flip 2 and
+	// new@shop 1 (k@flip's and a@shop's mail belongs to their address keys).
+	check("domain", m.RecencyDomain, 5, 5, 3, []placement.RecencyRow{{N: 2, Keys: 2, Recent: 2}, {N: 3, Keys: 1, Recent: 2}, {N: 5, Keys: 1, Recent: 2}})
 }
 
 // ── section 5 ────────────────────────────────────────────────────────────────
@@ -405,8 +456,14 @@ func TestPlacementMeasureArchivedUnread(t *testing.T) {
 	w.desk(t, "y@news2.example", "Primary", 19)
 	w.desk(t, "v@one.example", "Primary", 18)
 	w.desk(t, "q@q.example", "Primary", 17)
-	w.desk(t, "x@promo.example", "Updates", 16)
-	w.desk(t, "x@promo.example", "Primary", 3)
+	w.desk(t, "x@promo.example", "Updates", 16) // desk-placed outside Primary: not an outcome at all
+	w.desk(t, "x@promo.example", "Primary", 3)  // too young to judge
+	s10 := w.ingest(t, "x@promo.example", 15)   // the user filed it out of Primary
+	w.place(t, s10, "Updates", store.LabelByUser, w.ago(14))
+	s12 := w.desk(t, "y@news2.example", "Primary", 12) // base rate: an untaught sender's mail, opened
+	w.opened(t, s12, w.ago(12))
+	q2 := w.ingest(t, "q2@q.example", 13) // base rate: an untaught sender's mail, filed out
+	w.place(t, q2, "Updates", store.LabelByUser, w.ago(12))
 
 	m := w.measure(t, nil)
 	r, p := w.areas["Promotions"].ID, w.areas["Primary"].ID
@@ -414,23 +471,31 @@ func TestPlacementMeasureArchivedUnread(t *testing.T) {
 		t.Fatalf("primary = %s %v, want the area named Primary", m.PrimaryName, m.Primary)
 	}
 	ar := m.Archived
-	if ar.Events != 7 || m.ArchivedCover.EventsNoArea != 1 || ar.Untaught != 3 || m.ArchivedCover.PrimaryOutcomes != 9 {
-		t.Errorf("events/no-area/untaught/outcomes = %d/%d/%d/%d, want 7/1/3/9", ar.Events, m.ArchivedCover.EventsNoArea, ar.Untaught, m.ArchivedCover.PrimaryOutcomes)
+	if ar.Events != 7 || m.ArchivedCover.EventsNoArea != 1 || m.ArchivedCover.PrimaryOutcomes != 12 {
+		t.Errorf("events/no-area/outcomes = %d/%d/%d, want 7/1/12", ar.Events, m.ArchivedCover.EventsNoArea, m.ArchivedCover.PrimaryOutcomes)
 	}
+	// The BASE-RATE row: y (mixed origin), v (thin) and q are untaught: s7, s8, s9
+	// kept, s12 opened, q2 filed out of Primary = 5 messages.
+	if b := ar.Untaught; b.Messages != 5 || b.KeptUnopened != 3 || b.Opened != 1 || b.RefiledOut != 1 {
+		t.Errorf("base-rate row = %+v, want 5: kept 3, opened 1, refiled 1", b)
+	}
+	mmNear(t, "base-rate strict precision", ar.Untaught.Strict.Precision, 0.2)
 	if got := ar.Keys.Reasons[placement.KeyAddress]; got[placement.Confident] != 2 || got[placement.Mixed] != 1 || got[placement.Thin] != 1 {
 		t.Errorf("address verdicts = %v, want confident 2 (x, w), mixed 1 (y), thin 1 (v)", got)
 	}
 	if ar.Keys.Confident[r] != (placement.KeyCounts{Addresses: 1}) || ar.Keys.Confident[p] != (placement.KeyCounts{Addresses: 1}) {
 		t.Errorf("confident keys = %+v, want one address of origin R and one of origin P", ar.Keys.Confident)
 	}
+	// x's later mail: s1 archived unread, s2 opened (event), s3 seen with NO event,
+	// s4 kept, s5 archived with no sign of reading, s10 re-filed out of Primary.
 	pr := ar.Areas[r]
-	if pr.Messages != 5 || pr.ArchivedUnread != 1 || pr.Opened != 2 || pr.KeptUnopened != 1 || pr.ArchivedOther != 1 {
-		t.Errorf("origin Promotions = %+v, want 5 later: 1 archived unread, 2 opened, 1 kept, 1 other", pr)
+	if pr.Messages != 6 || pr.ArchivedUnread != 1 || pr.Opened != 1 || pr.SeenNoOpen != 1 || pr.KeptUnopened != 1 || pr.ArchivedOther != 1 || pr.RefiledOut != 1 {
+		t.Errorf("origin Promotions = %+v, want 6 later: 1 archived unread, 1 opened, 1 seen, 1 kept, 1 other, 1 refiled", pr)
 	}
-	mmNear(t, "Promotions strict precision", pr.Strict.Precision, 0.2)
-	mmNear(t, "Promotions strict LCB95", pr.Strict.LCB, 0.0362)
-	mmNear(t, "Promotions engaged precision", pr.Engaged.Precision, 1.0/3)
-	mmNear(t, "Promotions engaged LCB95", pr.Engaged.LCB, 0.0615)
+	mmNear(t, "Promotions strict precision", pr.Strict.Precision, 1.0/3) // (1 unread + 1 refiled) of 6
+	mmNear(t, "Promotions strict LCB95", pr.Strict.LCB, 0.0968)
+	mmNear(t, "Promotions engaged precision", pr.Engaged.Precision, 2.0/3) // 2 of (2 + 1 opened); seen-without-open is not a reading
+	mmNear(t, "Promotions engaged LCB95", pr.Engaged.LCB, 0.2077)
 	pp := ar.Areas[p]
 	if pp.Messages != 1 || pp.Opened != 1 || pp.ArchivedUnread != 0 {
 		t.Errorf("origin Primary = %+v, want 1 later, opened", pp)
@@ -480,15 +545,22 @@ func TestPlacementMeasureListID(t *testing.T) {
 	w.ingest(t, "s6@news.example", 9, list("b.news.example"))
 	nul := w.file(t, "s6@news.example", "Promotions", 10, list("c.news.example"))
 	w.exec(t, `UPDATE app.messages SET list_id_key = NULL WHERE id = $1`, nul.String())
+	fileList("s7@news.example", "Updates", "a.news.example", 2)
+	w.file(t, "s7@news.example", "Promotions", 10) // filed, and carries no List-Id at all
+	w.ingest(t, "s7@news.example", 9, list("b.news.example"))
 
 	m := w.measure(t, nil)
-	want := placement.ListIDCeiling{Filings: 17, Unfilled: 1, MixedAddresses: 5, MultiList: 4,
-		Separated: 2, Partial: 1, NotHelped: 1, SubKeysConfident: 4}
+	// s1 separated; s2 partial; s3 not helped; s6 UNDETERMINED (one filing's
+	// list_id_key is NULL, so it is in none of the others, and its two a-filings
+	// are not counted as a sub-key); s7 partial (a list-versus-no-list split is
+	// not counted as separating). Sub-keys: s1 two, s2's b, s7's a.
+	want := placement.ListIDCeiling{Filings: 20, Unfilled: 1, MixedAddresses: 6, MultiList: 5, Undetermined: 1,
+		Separated: 1, Partial: 2, NotHelped: 1, SubKeysConfident: 4}
 	if m.ListID != want {
 		t.Errorf("ceiling = %+v\nwant      %+v", m.ListID, want)
 	}
-	if m.ListIDAddresses != 5 {
-		t.Errorf("addresses carrying more than one List-Id = %d, want 5 (s1, s2, s3, s5, s6; s4 has none)", m.ListIDAddresses)
+	if m.ListIDAddresses != 6 {
+		t.Errorf("addresses carrying more than one List-Id = %d, want 6 (s1, s2, s3, s5, s6, s7; s4 has none)", m.ListIDAddresses)
 	}
 }
 

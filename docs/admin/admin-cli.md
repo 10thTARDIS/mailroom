@@ -155,12 +155,22 @@ Read-only, and it changes nothing about where mail goes. It prints counts and yo
 3. **Recency.** For senders you file into more than one area, how many end in a run of the last
    2, 3 or 5 filings into one area, and how much mail they received lately.
 4. **"Left alone."** Desk placements you opened and did not move within 7 days, as a candidate
-   signal: events before the split day teach, later mail scores. Shown beside the same signal
-   with "opened" dropped and the rate at which you move mail anyway.
+   signal: events from mail placed before the split day teach, later mail scores. Later mail
+   from a taught sender falls into four classes: filed by you into the taught area (kept), filed
+   elsewhere or its label taken off (corrected), untouched with the desk already in the taught
+   area (agree: no change, left out of precision), and untouched with the desk elsewhere
+   (unresolved). Precision and its lower bound use kept and corrected only, and WOULD CHANGE
+   prints how many messages the signal would really have moved. An event needs its desk label
+   to be present now, so mail you moved after the split is missing; the report prints that
+   count. Shown beside the same signal with "opened" dropped and the rate at which you move
+   mail anyway.
 5. **"Archived unread."** Senders whose mail you archive unopened, and what you later did with
-   their mail in Primary, per area of origin.
+   their mail in Primary (or filed out of it), per area of origin, beside a base-rate row for
+   senders the signal does not teach. "Opened" is an `open` event; "seen" is the seen flag
+   alone, which a bulk mark-read or another client can set.
 6. **List-Id.** How many addresses send under more than one List-Id, and the ceiling on mixed
-   senders a List-Id key could separate.
+   senders a List-Id key could separate. Pessimistic: addresses with a filing whose List-Id is
+   not recorded yet are undetermined, and "list versus no list" is not counted as separating.
 
 `--split-days` (default 45) sets the split day D, printed in the report, and `--window-days`
 (default 365) how far back sections 4 and 5 read.

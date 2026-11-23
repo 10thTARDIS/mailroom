@@ -147,8 +147,10 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	p("REPORT ONLY: counts and your area names only (no addresses, senders or subjects). Area names are yours: review them before pasting the output anywhere public.\nNothing here changes where mail goes.\n")
 	p("as of %s · split day D = %s (evidence judged before D, outcomes from D on, so no signal is scored on its own decisions)\n",
 		m.Now.UTC().Format("2006-01-02 15:04Z"), day(m.Split))
-	p("messages read for sections 4 and 5: created since %s (%d days); a message is judged once it is %d days old\n\n",
+	p("messages read for sections 4 and 5: created since %s (%d days); a message is judged once it is %d days old\n",
 		day(m.WindowStart), m.Options.WindowDays, store.MeasureLeftAloneDays)
+	p("   %d message(s) read; %d of them reached Mailroom more than a day after they were received (an import or a late first sync): for those, \"arrival\" is the time\n"+
+		"   they were LOADED, which distorts their age and order here.\n\n", m.WindowMessages, m.BulkImported)
 
 	// 1.
 	t := m.Abstentions
@@ -177,7 +179,10 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	for _, r := range extra {
 		p("   %-16s %7d   (not in this report's vocabulary)\n", r, t.ByReason[r])
 	}
-	p("   %-16s %7d\n\n", "held back, total", t.Total())
+	p("   %-16s %7d\n", "held back, total", t.Total())
+	p("   placed by learned placement in the same %d days: %d  ->  held back %s of the %d it considered\n", t.Days, m.PlacedRecent,
+		measurePct(t.Total(), t.Total()+m.PlacedRecent), t.Total()+m.PlacedRecent)
+	p("   (mail synced from Sent or Drafts is not counted as an arrival: learned placement runs on it, and has no evidence about the user's own address.)\n\n")
 
 	// 2.
 	a := m.Auth
@@ -218,21 +223,24 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 			p("     last %d filings agree: %4d key(s), %6d message(s) in the last %d days\n", row.N, row.Keys, row.Recent, m.RecentDays)
 		}
 	}
-	p("   (filings that share one instant never lengthen a run: a bulk session cannot fake recency. Domain keys leave out freemail and own domains.)\n\n")
+	p("   (filings that share one instant never lengthen a run: a bulk session cannot fake recency. Domain keys leave out freemail and own domains, and the domain\n" +
+		"    mail figure leaves out addresses with filings of their own: the address key decides those, not the domain.)\n\n")
 
 	// 4.
 	c := m.LeftAloneCover
 	p("4. THE \"LEFT ALONE\" SIGNAL (measured, never acted on): the desk placed it, the user opened it, and did not move it within %d days\n", store.MeasureLeftAloneDays)
-	p("   events before D: %d desk-placed message(s) old enough to judge, %d of them opened in the window\n", c.DeskPlaced, c.Opened)
+	p("   events judged from mail placed at least %d days before D: %d desk-placed message(s), %d of them opened in the window\n", store.MeasureLeftAloneDays, c.DeskPlaced, c.Opened)
+	p("   ⚠ an event needs its desk label to be present NOW, which is information from after D: %d message(s) the user moved on or after D would have been events\n"+
+		"   as of D and are missing (label history is not kept), so the events are survivors and the signal is flattered.\n", c.UnobservableAfterD)
 	if c.EarliestOpen.IsZero() {
 		p("   no `open` event exists at all: the opened signal cannot have fired for any message\n")
 	} else {
 		p("   the first `open` event on record is %s: nothing opened before then can count\n", day(c.EarliestOpen))
 	}
-	p("   not observable: %d message(s) the user filed more than %d days after they arrived (the desk's label, which named the original area, was\n"+
+	p("   not observable: %d message(s) the user filed more than %d days after they arrived, before or after D (the desk's label, which named the original area, was\n"+
 		"   deleted by the move), so the events lack the failures that happened late; that can only flatter the signal.\n", c.UnobservableMoved, store.MeasureLeftAloneDays)
-	p("   outcomes: %d message(s) arrived since D and old enough to judge; left out because a rule decided them %d, learned placement decided them %d\n",
-		c.Outcomes, c.ExcludedRule, c.ExcludedLearned)
+	p("   outcomes: %d message(s) arrived since D and old enough to judge; left out because a rule decided them %d, learned placement %d, day-one setup or the classifier %d\n",
+		c.Outcomes, c.ExcludedRule, c.ExcludedLearned, c.ExcludedOther)
 	p("   existing evidence before D: %d filing(s) by the user; a key they already cover is not new reach\n", m.UserEvidence)
 	for _, v := range []struct {
 		title string
@@ -249,28 +257,42 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 		for id := range v.r.Areas {
 			ids[id] = struct{}{}
 		}
-		p("      %-18s %6s %11s %11s %7s %6s %9s %10s %7s  %s\n", "AREA", "EVENTS", "KEYS ADDR/DOM", "NEW ADDR/DOM", "LATER", "KEPT", "CORRECTED", "PRECISION", "LCB95", "AGAINST THE LIVE GATE")
-		for _, id := range areas(ids) {
-			k, nk, ap := v.r.Keys.Confident[id], v.r.Keys.New[id], v.r.Areas[id]
-			p("      %-18s %6d %6d/%-4d %6d/%-4d %7d %6d %9d %10s %7s  %s\n", name(id), v.r.EventsByArea[id], k.Addresses, k.Domains,
-				nk.Addresses, nk.Domains, ap.Messages, ap.Kept, ap.Corrected, placementRatio(ap.Gate.Precision), placementRatio(ap.Gate.LCB), gateVerdict(ap.Gate))
+		p("      %-18s %6s %13s %13s %6s %6s %9s %6s %9s %10s %7s  %s\n", "AREA", "EVENTS", "KEYS ADDR/DOM", "NEW ADDR/DOM", "LATER", "KEPT", "CORRECTED", "AGREE", "UNRESOLVED", "PRECISION", "LCB95", "AGAINST THE LIVE GATE")
+		row := func(label string, ev string, k, nk placement.KeyCounts, ap placement.AreaPrecision, keys bool) {
+			kk, nn := "", ""
+			if keys {
+				kk, nn = fmt.Sprintf("%d/%d", k.Addresses, k.Domains), fmt.Sprintf("%d/%d", nk.Addresses, nk.Domains)
+			}
+			p("      %-18s %6s %13s %13s %6d %6d %9d %6d %9d %10s %7s  %s\n", label, ev, kk, nn, ap.Later(), ap.Kept, ap.Corrected,
+				ap.Agreement, ap.Unresolved, placementRatio(ap.Gate.Precision), placementRatio(ap.Gate.LCB), gateVerdict(ap.Gate))
 		}
+		for _, id := range areas(ids) {
+			row(name(id), fmt.Sprint(v.r.EventsByArea[id]), v.r.Keys.Confident[id], v.r.Keys.New[id], v.r.Areas[id], true)
+		}
+		row("all areas", "", placement.KeyCounts{}, placement.KeyCounts{}, v.r.Total, false)
 		tot := v.r.Total
-		p("      %-18s %6s %11s %11s %7d %6d %9d %10s %7s  %s\n", "all areas", "", "", "", tot.Messages, tot.Kept, tot.Corrected,
-			placementRatio(tot.Gate.Precision), placementRatio(tot.Gate.LCB), gateVerdict(tot.Gate))
-		p("      later mail already covered by the user's own evidence %d; from keys this signal did not teach %d\n", v.r.Served, v.r.Untaught)
-		p("      filed by hand into ANY area: taught keys %d of %d later message(s), untaught keys %d of %d (the base rate: a signal that does not beat it says nothing)\n",
-			v.r.MovedAnyTaught, v.r.Total.Messages, v.r.MovedAnyUntaught, v.r.Untaught)
+		p("      WOULD CHANGE: %d later message(s) where the taught area differs from the area the desk's own label still has them in (a LOWER BOUND: a moved message\n"+
+			"      has lost that label). Of the %d taught later message(s), %d the desk put in the taught area anyway (AGREE: no change, kept out of precision) and %d\n"+
+			"      are UNRESOLVED (untouched, desk elsewhere). %d were corrected by taking the area label off without re-filing, counted in CORRECTED (the desk may simply\n"+
+			"      never have labelled them).\n", tot.WouldChange(), tot.Later(), tot.Agreement, tot.Unresolved, tot.LabelRemoved)
+		p("      later mail from senders the user's own filings already cover (address or domain) %d; from senders this signal did not teach %d\n", v.r.Served, v.r.Untaught)
+		p("      filed by hand into ANY area: taught senders %d of %d later message(s), untaught senders %d of %d (the base rate: a signal that does not beat it says nothing)\n",
+			v.r.MovedAnyTaught, tot.Later(), v.r.MovedAnyUntaught(), v.r.Untaught)
 		p("      key verdicts: address %s · domain %s\n", reasonCounts(v.r.Keys.Reasons[placement.KeyAddress]), reasonCounts(v.r.Keys.Reasons[placement.KeyDomain]))
 	}
-	p("   (PRECISION is kept / (kept + corrected) over later mail from NEW keys; corrected = the user filed it into a DIFFERENT area than the one taught.\n"+
-		"    A later move of any age counts, so this is stricter than the live gate's %d days.)\n\n", int(placement.KeptAfter.Hours()/24))
+	p("   (KEPT: the user (or an API key for them) filed it INTO the taught area. CORRECTED: filed elsewhere, or its area label taken off. PRECISION is kept /\n"+
+		"    (kept + corrected) and nothing else: AGREE and UNRESOLVED are untouched mail and say nothing about the signal. NEW KEYS count keys the user has no filings on;\n"+
+		"    LATER counts only senders the user has no filings for at address or domain. A later move of any age counts, stricter than the live gate's %d days.)\n\n", int(placement.KeptAfter.Hours()/24))
 
 	// 5.
 	ar, ac := m.Archived, m.ArchivedCover
 	p("5. THE \"ARCHIVED UNREAD\" SIGNAL (measured, never acted on): later mail in %s from senders whose mail the user archives unopened\n", safeText(m.PrimaryName))
 	p("   events before D: %d archive-unread event(s) on a message with an area (%d more had no area and were dropped)\n", ar.Events, ac.EventsNoArea)
-	p("   outcomes: %d later message(s) in %s from taught senders and %d from senders the signal did not teach\n", sumArchive(ar), safeText(m.PrimaryName), ar.Untaught)
+	taught := 0
+	for _, a := range ar.Areas {
+		taught += a.Messages
+	}
+	p("   outcomes: %d later message(s) in %s (or filed out of it) from taught senders and %d from senders the signal did not teach\n", taught, safeText(m.PrimaryName), ar.Untaught.Messages)
 	ids := map[ulid.ULID]struct{}{}
 	for id := range ar.Keys.Confident {
 		ids[id] = struct{}{}
@@ -278,43 +300,54 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	for id := range ar.Areas {
 		ids[id] = struct{}{}
 	}
-	p("   %-18s %10s %7s %7s %7s %6s %7s  %-18s  %s\n", "AREA OF ORIGIN", "KEYS ADDR/DOM", "LATER", "UNREAD", "OPENED", "KEPT", "OTHER", "STRICT (prec / LCB95)", "ENGAGED (prec / LCB95)")
-	for _, id := range areas(ids) {
-		k, r := ar.Keys.Confident[id], ar.Areas[id]
+	p("   %-18s %10s %6s %7s %7s %6s %6s %7s %8s  %-18s  %s\n", "AREA OF ORIGIN", "KEYS ADDR/DOM", "LATER", "UNREAD", "OPENED", "SEEN", "KEPT", "OTHER", "REFILED", "STRICT (prec / LCB95)", "ENGAGED (prec / LCB95)")
+	arow := func(label string, kk string, r placement.ArchiveAreaRow) {
+		sg, eg := r.Strict, r.Engaged
 		if r.Messages == 0 {
-			// Keys taught, but no later mail to score: nothing measured, so "-".
-			r.Strict, r.Engaged = placement.GateStatus{Precision: nan(), LCB: nan()}, placement.GateStatus{Precision: nan(), LCB: nan()}
+			// Nothing to score: nothing measured, so "-".
+			sg, eg = placement.GateStatus{Precision: nan(), LCB: nan()}, placement.GateStatus{Precision: nan(), LCB: nan()}
 		}
-		p("   %-18s %5d/%-4d %7d %7d %7d %6d %7d  %7s / %-7s     %7s / %-7s\n", name(id), k.Addresses, k.Domains, r.Messages,
-			r.ArchivedUnread, r.Opened, r.KeptUnopened, r.ArchivedOther,
-			placementRatio(r.Strict.Precision), placementRatio(r.Strict.LCB), placementRatio(r.Engaged.Precision), placementRatio(r.Engaged.LCB))
+		p("   %-18s %10s %6d %7d %7d %6d %6d %7d %8d  %7s / %-7s     %7s / %-7s\n", label, kk, r.Messages,
+			r.ArchivedUnread, r.Opened, r.SeenNoOpen, r.KeptUnopened, r.ArchivedOther, r.RefiledOut,
+			placementRatio(sg.Precision), placementRatio(sg.LCB), placementRatio(eg.Precision), placementRatio(eg.LCB))
 	}
+	for _, id := range areas(ids) {
+		k := ar.Keys.Confident[id]
+		arow(name(id), fmt.Sprintf("%d/%d", k.Addresses, k.Domains), ar.Areas[id])
+	}
+	arow("(base rate)", "", ar.Untaught)
 	p("   key verdicts: address %s · domain %s\n", reasonCounts(ar.Keys.Reasons[placement.KeyAddress]), reasonCounts(ar.Keys.Reasons[placement.KeyDomain]))
-	p("   (STRICT: of later mail in %s from these senders, how much was archived unread again, so the rest was opened or kept. ENGAGED: archived unread\n"+
-		"    against opened only. UNREAD/OPENED/KEPT/OTHER partition LATER: other = archived or trashed with no sign it was read.)\n\n", safeText(m.PrimaryName))
+	p("   (STRICT: of later mail from these senders, how much was archived unread again or re-filed out of %s, so the rest was opened, seen or kept. ENGAGED: archived\n"+
+		"    unread or re-filed against OPENED only. OPENED is an `open` event, a person's reading; SEEN is the seen flag with no `open` event, which a bulk mark-read or\n"+
+		"    another mail client can set, so it is shown apart and left out of ENGAGED. OTHER: archived or trashed with no sign it was read. REFILED: the user filed it\n"+
+		"    into another area (a confirmation; its origin may not have been %s). The (base rate) row is the same classes over senders the signal did NOT teach: the\n"+
+		"    taught rows only mean something if they differ from it.)\n\n", safeText(m.PrimaryName), safeText(m.PrimaryName))
 
 	// 6.
 	l := m.ListID
 	p("6. LIST-ID IN THE KEY: the ceiling (a key of address + List-Id)\n")
 	p("   sending addresses whose mail carries more than one List-Id: %d\n", m.ListIDAddresses)
-	p("   the user's filings read: %d (%d with the List-Id column not filled yet, read as \"none\"; %d of %d messages are filled, so this is a lower bound until the recipients backfill has run)\n",
+	p("   the user's filings read: %d (%d with the List-Id column not filled yet; %d of %d messages are filled)\n",
 		l.Filings, l.Unfilled, m.ListIDCensus.Filled, m.ListIDCensus.Total)
 	p("   addresses filed into more than one area (mixed): %d, of which carry more than one List-Id: %d\n", l.MixedAddresses, l.MultiList)
 	p("     a List-Id key would make the address clean (every list in one area): %d\n", l.Separated)
 	p("     would clean some lists and not others: %d\n", l.Partial)
 	p("     would not help (every list still mixed): %d\n", l.NotHelped)
+	p("     UNDETERMINED (a filing's List-Id is not filled in yet, so nothing can be said; in none of the counts above): %d\n", l.Undetermined)
+	p("   PESSIMISTIC: a split of \"has a List-Id\" against \"has none\" is not counted as separating (the key (address, no List-Id) is the address key again), and\n" +
+		"   undetermined addresses count for nothing, so the true ceiling is at least this.\n")
 	p("   (address + List-Id) keys that would reach %d agreeing filings: %d  <- the ceiling on keys List-Id keying adds\n", placement.MinFilings, l.SubKeysConfident)
 	p("\nREPORT ONLY: nothing was written.\n")
 }
 
 func nan() float64 { return math.NaN() }
 
-func sumArchive(r placement.ArchiveResult) int {
-	n := 0
-	for _, a := range r.Areas {
-		n += a.Messages
+// measurePct is n/d as a percentage, "-" with nothing to divide.
+func measurePct(n, d int) string {
+	if d == 0 {
+		return "-"
 	}
-	return n
+	return fmt.Sprintf("%.1f%%", 100*float64(n)/float64(d))
 }
 
 // gateVerdict says what the live correction gate would make of a would-have-been

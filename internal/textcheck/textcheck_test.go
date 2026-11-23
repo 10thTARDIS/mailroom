@@ -55,6 +55,7 @@ func TestSanitizeName(t *testing.T) {
 		{"Café 日本 ✉️", "Café 日本 ✉️"},
 		{"fam\u200d\u200cily", "fam\u200d\u200cily"}, // the two allowed joiners stay
 		{"bad\xffbyte", "badbyte"},
+		{"keep\uFFFDthis", "keep\uFFFDthis"}, // a real U+FFFD is valid text CheckName accepts
 		{"\u202e\u0007  ", ""},
 	} {
 		got := SanitizeName(tc.in)

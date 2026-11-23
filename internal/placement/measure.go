@@ -300,25 +300,58 @@ func (t Teacher) Tally(other *Teacher) KeyTally {
 // ── "the user opened it and left it alone" ───────────────────────────────────
 
 // LeftAloneOutcome is one LATER message (arrived on or after the split day,
-// old enough for its outcome to be known): who sent it and where the user filed
-// it by hand, if they did.
+// old enough for its outcome to be known): who sent it and what became of its
+// area.
 type LeftAloneOutcome struct {
-	From    string
+	From string
+	// FiledTo is the area the user (or an API key acting for them) filed it into
+	// by hand, nil when nobody did.
 	FiledTo *ulid.ULID
+	// DeskArea is the area the desk's OWN label still puts it in, nil when the
+	// message has no desk label (a moved message's desk label is deleted by the
+	// move, so FiledTo and DeskArea are not both set).
+	DeskArea *ulid.ULID
+	// NoAreaLabel: the message carries no area own-label at all. With nobody's
+	// filing on it, that is the user taking the label off without re-filing
+	// (ADR-032 section 6 counts that as a correction), or a message the desk
+	// never labelled: the two cannot be told apart.
+	NoAreaLabel bool
 }
 
-// AreaPrecision is a would-have-been precision for one area: of the later
-// messages the signal's keys would have placed there, how many the user left
-// (kept) and how many they filed into a different area (corrected). Gate is the
-// live correction gate's own arithmetic over the pair.
+// AreaPrecision is one area's would-have-been outcome over the later mail its
+// taught keys would have placed there. The four-way partition:
+//
+//	Kept        the user filed it INTO the taught area
+//	Corrected   the user filed it elsewhere, or took its label off (LabelRemoved,
+//	            counted inside Corrected and shown on its own)
+//	Agreement   untouched, and the desk put it in the taught area anyway: the
+//	            signal would have changed nothing
+//	Unresolved  untouched, and the desk put it somewhere else: the signal would
+//	            have moved it and nobody has said whether that was right
+//
+// PRECISION IS OVER Kept AND Corrected ONLY (Gate is the live correction
+// gate's own arithmetic): an agreement is the desk agreeing with itself, and
+// counting it as kept would reward a signal for doing nothing.
 type AreaPrecision struct {
-	Messages, Kept, Corrected int
-	Gate                      GateStatus
+	Kept, Corrected, LabelRemoved int
+	Agreement, Unresolved         int
+	Gate                          GateStatus
 }
 
-func precisionOf(kept, corrected int) AreaPrecision {
-	return AreaPrecision{Messages: kept + corrected, Kept: kept, Corrected: corrected,
-		Gate: Gate(GateCounts{Kept: kept, Corrected: corrected})}
+// Resolved is Kept + Corrected: the messages precision is computed over.
+func (a AreaPrecision) Resolved() int { return a.Kept + a.Corrected }
+
+// Later is every taught later message, whatever became of it.
+func (a AreaPrecision) Later() int { return a.Kept + a.Corrected + a.Agreement + a.Unresolved }
+
+// WouldChange is how many of them the signal would have put somewhere other
+// than where the desk's own label still has them (Unresolved): the signal's
+// real reach. A LOWER BOUND, because a message the user moved has lost the desk
+// label that said where the desk put it.
+func (a AreaPrecision) WouldChange() int { return a.Unresolved }
+
+func (a *AreaPrecision) finish() {
+	a.Gate = Gate(GateCounts{Kept: a.Kept, Corrected: a.Corrected})
 }
 
 // LeftAloneResult is the whole left-alone measurement for one event set.
@@ -328,22 +361,29 @@ type LeftAloneResult struct {
 	Events       int
 	EventsByArea map[ulid.ULID]int
 	Keys         KeyTally
-	// Areas is the would-have-been precision per taught area, over later mail
-	// from NEW keys only (keys the user's own filings, before the split, had
-	// nothing on): reach the live feature does not already have.
+	// Areas is the would-have-been outcome per taught area, over later mail
+	// from NEW senders only (senders the user's own filings, before the split,
+	// had nothing on, at address or domain): reach the live feature does not
+	// already have. KEY counts in Keys.New are by KEY, so a key whose domain the
+	// user has filed but whose address they have not reads as new there and as
+	// served here.
 	Areas map[ulid.ULID]AreaPrecision
 	// Total is Areas summed: the one figure per variant.
 	Total AreaPrecision
 	// Served counts later messages whose sender the user's own filings already
-	// decide or have evidence on: excluded from precision, not from view.
+	// decide or have evidence on: excluded from the outcome, not from view.
 	Served int
-	// Untaught is every other later message: the base rate.
-	Untaught int
-	// MovedAnyTaught / MovedAnyUntaught: how many later messages of each group
-	// the user filed into ANY area by hand. The base rate of moving at all:
-	// a signal that does not beat it has told us nothing.
-	MovedAnyTaught, MovedAnyUntaught int
+	// Untaught is every other later message: the base rate. UntaughtMoved is how
+	// many of those the user filed by hand into any area.
+	Untaught, UntaughtMoved int
+	// MovedAnyTaught: how many taught later messages the user filed into ANY area.
+	// The base rate of moving at all: a signal that does not beat it has told us
+	// nothing.
+	MovedAnyTaught int
 }
+
+// MovedAnyUntaught is kept for the printer's wording.
+func (r LeftAloneResult) MovedAnyUntaught() int { return r.UntaughtMoved }
 
 // EvaluateLeftAlone scores a left-alone event set.
 //
@@ -358,7 +398,6 @@ func EvaluateLeftAlone(events, userFilings []Event, outcomes []LeftAloneOutcome,
 	for _, e := range events {
 		res.EventsByArea[e.Area]++
 	}
-	kept, corrected := map[ulid.ULID]int{}, map[ulid.ULID]int{}
 	for _, o := range outcomes {
 		sd, ok := sig.Decide(o.From)
 		if usr.HasEvidence(o.From) {
@@ -368,66 +407,114 @@ func EvaluateLeftAlone(events, userFilings []Event, outcomes []LeftAloneOutcome,
 		if !ok || !sd.Act {
 			res.Untaught++
 			if o.FiledTo != nil {
-				res.MovedAnyUntaught++
+				res.UntaughtMoved++
 			}
 			continue
 		}
 		if o.FiledTo != nil {
 			res.MovedAnyTaught++
 		}
-		if o.FiledTo != nil && *o.FiledTo != sd.Area {
-			corrected[sd.Area]++
-		} else {
-			kept[sd.Area]++
+		a := res.Areas[sd.Area]
+		switch {
+		case o.FiledTo != nil && *o.FiledTo == sd.Area:
+			a.Kept++
+		case o.FiledTo != nil:
+			a.Corrected++
+		case o.NoAreaLabel:
+			a.Corrected++
+			a.LabelRemoved++
+		case o.DeskArea != nil && *o.DeskArea == sd.Area:
+			a.Agreement++
+		case o.DeskArea != nil:
+			a.Unresolved++
+		default:
+			// Not filed, not labelled-less, no desk label: nothing decides it.
+			a.Unresolved++
 		}
+		res.Areas[sd.Area] = a
 	}
-	totalK, totalC := 0, 0
-	for a := range kept {
-		res.Areas[a] = precisionOf(kept[a], corrected[a])
+	for id, a := range res.Areas {
+		a.finish()
+		res.Areas[id] = a
+		res.Total.Kept += a.Kept
+		res.Total.Corrected += a.Corrected
+		res.Total.LabelRemoved += a.LabelRemoved
+		res.Total.Agreement += a.Agreement
+		res.Total.Unresolved += a.Unresolved
 	}
-	for a := range corrected {
-		res.Areas[a] = precisionOf(kept[a], corrected[a])
-	}
-	for a := range res.Areas {
-		totalK += res.Areas[a].Kept
-		totalC += res.Areas[a].Corrected
-	}
-	res.Total = precisionOf(totalK, totalC)
+	res.Total.finish()
 	return res
 }
 
 // ── "the user archived it unread" ────────────────────────────────────────────
 
-// ArchiveClass is what became of a LATER message from a key the signal taught.
+// ArchiveClass is what became of a LATER message in Primary (or filed out of it).
 type ArchiveClass int
 
 const (
 	// ArchivedUnread: the user archived it without opening it again.
 	ArchivedUnread ArchiveClass = iota
-	// Opened: the user opened it (an open event, or it is marked seen).
+	// Opened: the user opened it (an `open` feedback event: the web client's
+	// reading-pane dwell, a person's act).
 	Opened
+	// SeenNoOpen: marked seen, but with no `open` event. That can be a bulk
+	// mark-read, another mail client, or a message read before open events
+	// existed: the flag cannot say which, so it is shown apart and never mixed
+	// into Opened.
+	SeenNoOpen
 	// KeptUnopened: still where the desk put it, unopened, not archived.
 	KeptUnopened
 	// ArchivedOther: archived or trashed with no archive-unread event and no
 	// sign it was opened (another client, an API key, a rule).
 	ArchivedOther
+	// RefiledOut: the user filed it into another area, so their own act says it
+	// does not belong in Primary: a confirmation. Its origin was not necessarily
+	// Primary (the label that said so was replaced by the move).
+	RefiledOut
 )
 
-// ArchiveOutcome is one later message in the area that matters (Primary).
+// ArchiveOutcome is one later message.
 type ArchiveOutcome struct {
 	From  string
 	Class ArchiveClass
 }
 
-// ArchiveAreaRow is one area of origin's line.
+// ArchiveAreaRow is one area of origin's line (or the base-rate row of the
+// senders the signal did not teach).
 type ArchiveAreaRow struct {
-	Messages                                            int
-	ArchivedUnread, Opened, KeptUnopened, ArchivedOther int
+	Messages                                                                    int
+	ArchivedUnread, Opened, SeenNoOpen, KeptUnopened, ArchivedOther, RefiledOut int
 	// Strict reads "how often the user later opened or kept a message from the
-	// key in Primary": ArchivedUnread / Messages. Engaged reads only the
-	// messages the user showed a decision about: ArchivedUnread / (ArchivedUnread
-	// + Opened). Both through the gate's Wilson arithmetic.
+	// key in Primary": (ArchivedUnread + RefiledOut) / Messages. Engaged reads
+	// only messages the user showed a decision about: (ArchivedUnread +
+	// RefiledOut) / (ArchivedUnread + RefiledOut + Opened). Both through the
+	// gate's Wilson arithmetic. SeenNoOpen is in Strict's denominator and not in
+	// Engaged's, because the flag is not a person's reading.
 	Strict, Engaged GateStatus
+}
+
+func (r *ArchiveAreaRow) add(c ArchiveClass) {
+	r.Messages++
+	switch c {
+	case ArchivedUnread:
+		r.ArchivedUnread++
+	case Opened:
+		r.Opened++
+	case SeenNoOpen:
+		r.SeenNoOpen++
+	case KeptUnopened:
+		r.KeptUnopened++
+	case RefiledOut:
+		r.RefiledOut++
+	default:
+		r.ArchivedOther++
+	}
+}
+
+func (r *ArchiveAreaRow) finish() {
+	agree := r.ArchivedUnread + r.RefiledOut
+	r.Strict = Gate(GateCounts{Kept: agree, Corrected: r.Messages - agree})
+	r.Engaged = Gate(GateCounts{Kept: agree, Corrected: r.Opened})
 }
 
 // ArchiveResult is the whole archived-unread measurement.
@@ -438,8 +525,10 @@ type ArchiveResult struct {
 	Keys KeyTally
 	// Areas is the later-mail outcome per area of origin.
 	Areas map[ulid.ULID]ArchiveAreaRow
-	// Untaught counts later messages from keys the signal did not teach.
-	Untaught int
+	// Untaught is the BASE RATE: the same classes over later mail from senders the
+	// signal did not teach. A signal is only worth acting on if the taught rows
+	// differ from this one.
+	Untaught ArchiveAreaRow
 }
 
 // EvaluateArchivedUnread scores an archived-unread event set. Each event's Area
@@ -450,28 +539,18 @@ func EvaluateArchivedUnread(events []Event, outcomes []ArchiveOutcome, own map[s
 	for _, o := range outcomes {
 		d, ok := sig.Decide(o.From)
 		if !ok || !d.Act {
-			res.Untaught++
+			res.Untaught.add(o.Class)
 			continue
 		}
 		r := res.Areas[d.Area]
-		r.Messages++
-		switch o.Class {
-		case ArchivedUnread:
-			r.ArchivedUnread++
-		case Opened:
-			r.Opened++
-		case KeptUnopened:
-			r.KeptUnopened++
-		default:
-			r.ArchivedOther++
-		}
+		r.add(o.Class)
 		res.Areas[d.Area] = r
 	}
 	for a, r := range res.Areas {
-		r.Strict = Gate(GateCounts{Kept: r.ArchivedUnread, Corrected: r.Messages - r.ArchivedUnread})
-		r.Engaged = Gate(GateCounts{Kept: r.ArchivedUnread, Corrected: r.Opened})
+		r.finish()
 		res.Areas[a] = r
 	}
+	res.Untaught.finish()
 	return res
 }
 
@@ -486,24 +565,36 @@ type ListFiling struct {
 	ListID  *string
 }
 
-// ListIDCeiling is the most keying by List-Id could do, from filings alone.
+// ListIDCeiling is the most keying by List-Id could do, from filings alone. It
+// is PESSIMISTIC, and says so: an unfilled column and a list-versus-no-list
+// split are both left out of every "would help" count.
 type ListIDCeiling struct {
 	// Filings is every filing read; Unfilled those whose list_id_key is not
-	// filled yet, which this measurement can only treat as "no List-Id" (so the
-	// ceiling below is a LOWER bound when Unfilled > 0).
+	// filled yet.
 	Filings, Unfilled int
 	// MixedAddresses are addresses filed into more than one area.
 	MixedAddresses int
 	// MultiList is how many of them carry more than one List-Id on their mail
 	// (the caller supplies the set: it reads all mail, not only filed mail).
 	MultiList int
-	// Separated: every (address, List-Id) group is filed into a single area, so
-	// a List-Id key would make the address clean. Partial: some groups would be
-	// clean and some not. NotHelped: no group is clean.
+	// Undetermined: a multi-list mixed address with at least one filing whose
+	// List-Id is not filled yet. Nothing can be said of it, so it is in none of
+	// the next three and none of SubKeysConfident. Separated + Partial +
+	// NotHelped + Undetermined = MultiList.
+	Undetermined int
+	// Separated: every List-Id's filings go into a single area, and no filing is
+	// listless, so a List-Id key would make the address clean. Partial: some
+	// List-Ids would be clean and the address is not wholly separated. NotHelped:
+	// no List-Id is clean.
+	//
+	// "List versus no list" is NOT counted as separating: an address whose
+	// listless filings go one way and whose list filings go another stays
+	// Partial at best, because a key of (address, no List-Id) is the address key
+	// again. That undercounts.
 	Separated, Partial, NotHelped int
-	// SubKeysConfident counts the (address, List-Id) groups, among the
-	// Separated and Partial addresses, with a List-Id, one area and at least
-	// MinFilings filings: the keys List-Id keying would act on.
+	// SubKeysConfident counts the (address, List-Id) groups, among the Separated
+	// and Partial addresses, with a List-Id, one area and at least MinFilings
+	// filings: the keys List-Id keying would act on.
 	SubKeysConfident int
 }
 
@@ -516,10 +607,12 @@ func MeasureListID(filings []ListFiling, multiList map[string]bool) ListIDCeilin
 	}
 	byAddr := map[string]map[string]*group{} // address -> list id -> group
 	addrAreas := map[string]map[ulid.ULID]bool{}
+	unfilled := map[string]bool{}
 	for _, f := range filings {
 		id := ""
 		if f.ListID == nil {
 			out.Unfilled++
+			unfilled[f.Address] = true
 		} else {
 			id = *f.ListID
 		}
@@ -549,16 +642,21 @@ func MeasureListID(filings []ListFiling, multiList map[string]bool) ListIDCeilin
 			continue
 		}
 		out.MultiList++
-		pure, total := 0, 0
+		if unfilled[a] {
+			out.Undetermined++
+			continue
+		}
+		pure, lists, listless := 0, 0, false
 		for id, g := range byAddr[a] {
-			total++
+			if id == "" {
+				listless = true
+				continue
+			}
+			lists++
 			if len(g.areas) != 1 {
 				continue
 			}
 			pure++
-			if id == "" {
-				continue
-			}
 			n := 0
 			for _, c := range g.areas {
 				n = c
@@ -568,12 +666,12 @@ func MeasureListID(filings []ListFiling, multiList map[string]bool) ListIDCeilin
 			}
 		}
 		switch {
-		case pure == total:
-			out.Separated++
-		case pure > 0:
-			out.Partial++
-		default:
+		case pure == 0:
 			out.NotHelped++
+		case pure == lists && !listless:
+			out.Separated++
+		default:
+			out.Partial++
 		}
 	}
 	return out

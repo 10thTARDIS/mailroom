@@ -108,6 +108,12 @@ type LeftAloneCoverage struct {
 	// The signal does not exist before it: older mail can never count as
 	// opened, whatever the user did.
 	EarliestOpen time.Time
+	// UnobservableAfterD is the part of UnobservableMoved the user moved on or
+	// after D: judged AS OF D these were left alone and would have been events,
+	// but an event needs its desk label to be present NOW, and the move deleted
+	// it. This is the post-D information the evidence quietly uses: the events
+	// are survivors of the time after D. The count is how much that excludes.
+	UnobservableAfterD int
 	// UnobservableMoved counts messages the user filed more than the window
 	// after they arrived, before the split. Each WAS left alone for the window
 	// and then moved, but the desk's label (which named the original area) was
@@ -115,6 +121,9 @@ type LeftAloneCoverage struct {
 	// missing the failures that happened late, which can only flatter the
 	// signal.
 	UnobservableMoved int
+	// ExcludedOther counts later messages left out because day-one setup or the
+	// label classifier decided their area (no more the user's act than a rule's).
+	ExcludedOther int
 	// ExcludedRule and ExcludedLearned count later messages left out of the
 	// outcome because a rule or learned placement had decided their area.
 	ExcludedRule, ExcludedLearned int
@@ -142,7 +151,11 @@ type PlacementMeasure struct {
 	PrimaryName string
 
 	Abstentions AbstentionTally
-	Auth        AuthRefusals
+	// PlacedRecent is how many ARRIVAL placements (a backfill's are left out)
+	// learned placement made in the same window as Abstentions, so "held back"
+	// reads against what it did place.
+	PlacedRecent int
+	Auth         AuthRefusals
 
 	RecencyAddress, RecencyDomain placement.Recency
 	RecentDays                    int
@@ -157,6 +170,13 @@ type PlacementMeasure struct {
 
 	Archived      placement.ArchiveResult
 	ArchivedCover ArchivedCoverage
+
+	// WindowMessages is how many messages sections 4 and 5 read, and
+	// BulkImported how many of them reached Mailroom more than a day after they
+	// were received (an import or a late first sync). created_at is used as the
+	// time a message ARRIVED; for these it is the time it was loaded, so they
+	// distort every age and every ordering in sections 4 and 5.
+	WindowMessages, BulkImported int
 
 	ListID placement.ListIDCeiling
 	// ListIDAddresses counts sending addresses whose mail carries more than one
@@ -176,6 +196,7 @@ type measureLabel struct {
 type measureMessage struct {
 	From       string
 	Created    time.Time
+	Received   time.Time
 	Seen       bool
 	Archived   bool
 	Trashed    bool
@@ -221,6 +242,10 @@ func (tx *UserTx) PlacementMeasure(ctx context.Context, opts PlacementMeasureOpt
 		return m, err
 	}
 
+	if m.PlacedRecent, err = tx.placedSince(ctx, m.Abstentions.Since); err != nil {
+		return m, err
+	}
+
 	// The user's own filings feed sections 2, 3, 4 and 6.
 	filings, err := tx.placementFilings(ctx, "", time.Time{})
 	if err != nil {
@@ -242,6 +267,12 @@ func (tx *UserTx) PlacementMeasure(ctx context.Context, opts PlacementMeasureOpt
 	if err != nil {
 		return m, err
 	}
+	m.WindowMessages = len(msgs)
+	for _, mm := range msgs {
+		if mm.Created.Sub(mm.Received) > 24*time.Hour {
+			m.BulkImported++
+		}
+	}
 	var userEvents []placement.Event
 	for _, f := range filings {
 		if f.At.Before(m.Split) {
@@ -257,6 +288,21 @@ func (tx *UserTx) PlacementMeasure(ctx context.Context, opts PlacementMeasureOpt
 		return m, err
 	}
 	return m, nil
+}
+
+// placedSince counts the arrival placements decided on or after since (a
+// backfill's are the audit journal's, left out as everywhere else).
+func (tx *UserTx) placedSince(ctx context.Context, since time.Time) (int, error) {
+	var n int
+	if err := tx.tx.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM app.learned_placements p
+		  LEFT JOIN `+backfilledMessagesSQL("$1")+` bf ON bf.message_id = p.message_id
+		 WHERE p.user_id = $1 AND bf.message_id IS NULL AND p.decided_at >= $2`,
+		tx.userID.String(), since).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: placement measure (placed): %w", err)
+	}
+	return n, nil
 }
 
 // measureAreas reads the areas directly (ListAreas would materialise a fresh
@@ -512,7 +558,11 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 			continue
 		}
 		recentAddr[a.Value] += n
-		recentDom[d.Value] += n
+		// A domain key decides only an address with no filings of its own, so mail
+		// from an address that has some is the ADDRESS key's, not the domain's.
+		if _, own := byAddr[a.Value]; !own {
+			recentDom[d.Value] += n
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return addr, dom, fmt.Errorf("store: placement measure (recent): %w", err)
@@ -531,7 +581,7 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 func (tx *UserTx) measureMessages(ctx context.Context, since time.Time) (map[ulid.ULID]*measureMessage, time.Time, error) {
 	msgs := map[ulid.ULID]*measureMessage{}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT m.id, lower(btrim(m.from_address::text)), m.created_at, m.is_seen,
+		SELECT m.id, lower(btrim(m.from_address::text)), m.created_at, m.received_at, m.is_seen,
 		       (m.moved_mailbox_id IS NOT NULL OR m.desk_archived_at IS NOT NULL), m.trashed_at IS NOT NULL
 		  FROM app.messages m
 		 WHERE m.user_id = $1 AND NOT m.is_draft AND m.from_address IS NOT NULL AND m.created_at >= $2`,
@@ -542,7 +592,7 @@ func (tx *UserTx) measureMessages(ctx context.Context, since time.Time) (map[uli
 	for rows.Next() {
 		var idStr string
 		mm := &measureMessage{}
-		if err := rows.Scan(&idStr, &mm.From, &mm.Created, &mm.Seen, &mm.Archived, &mm.Trashed); err != nil {
+		if err := rows.Scan(&idStr, &mm.From, &mm.Created, &mm.Received, &mm.Seen, &mm.Archived, &mm.Trashed); err != nil {
 			rows.Close()
 			return nil, time.Time{}, fmt.Errorf("store: placement measure (message row): %w", err)
 		}
@@ -636,6 +686,10 @@ func (tx *UserTx) measureMessages(ctx context.Context, since time.Time) (map[uli
 	return msgs, earliestOpen, nil
 }
 
+// isFiling reports a label row that is somebody FILING the message into an area
+// by hand: the user's own, or an API key's acting for them.
+func isFiling(l measureLabel) bool { return l.By == LabelByUser || l.By == LabelByAgent }
+
 // onlyDeskArea returns the area of a message whose area-own-label rows are all
 // the desk's and name exactly one area: a message the desk placed by its own
 // verdict, and nobody (user, rule, learned placement, an API key, day-one
@@ -653,6 +707,10 @@ func onlyDeskArea(ls []measureLabel) (measureLabel, bool) {
 	return first, true
 }
 
+// newestFiling reports whether the message's newest area label is somebody's
+// filing (the user's or an API key's).
+func newestFiling(ls []measureLabel) bool { return len(ls) > 0 && isFiling(ls[len(ls)-1]) }
+
 // currentArea is where a message sits for section 5: its newest area-own-label
 // row's area (the user's re-file is the newest), or false for no area label.
 func currentArea(ls []measureLabel) (ulid.ULID, bool) {
@@ -664,16 +722,24 @@ func currentArea(ls []measureLabel) (ulid.ULID, bool) {
 
 // measureLeftAlone is section 4. DEFINITIONS, as built:
 //
-//   - EVENT: a message the desk placed by its own verdict (onlyDeskArea) whose
-//     placement is at least MeasureLeftAloneDays old by the split day, which
-//     the user OPENED (an `open` event) no earlier than the placement and no
-//     later than the window after it, and which is STILL where the desk put it
-//     (a move would have swapped the label). It teaches at placement + window.
-//     LeftAloneAny drops the opened condition.
+//   - EVENT: a message the desk placed by its own verdict (onlyDeskArea: every
+//     area label on it is the desk's, naming one area; a learned or rule label
+//     is never an event) whose placement is at least MeasureLeftAloneDays old by
+//     the split day, which the user OPENED (an `open` event) no earlier than
+//     the placement and no later than the window after it, and whose desk label
+//     is STILL there NOW. It teaches at placement + window. LeftAloneAny drops
+//     the opened condition.
+//     ⚠ "STILL THERE NOW" IS INFORMATION FROM AFTER THE SPLIT: a message the
+//     user moved after D has lost the desk label that would have made it an
+//     event as of D, and the label history needed to judge it as of D is not
+//     kept. The events are therefore survivors; the count of messages this
+//     leaves out (moved after D) is printed (UnobservableAfterD).
 //   - OUTCOME: a message that arrived on or after the split day and is old
-//     enough to be judged by now. Filed-to is the area of the user's own
-//     filing of it, if any; a rule's or learned placement's label excludes it
-//     (counted), because the real feature would not have acted on it.
+//     enough to be judged by now. FiledTo is the area of the user's (or an API
+//     key's) filing of it; DeskArea the desk's own label still on it; no area
+//     label at all is "label removed". A rule's, learned placement's, day-one
+//     setup's or the label classifier's label excludes it (counted): the real
+//     feature would not have acted on it, and it is not the user's act.
 //   - EXISTING EVIDENCE: the user's own filings before the split, so "new
 //     reach" means a key the user's filings did not already cover.
 func measureLeftAlone(msgs map[ulid.ULID]*measureMessage, userEvents []placement.Event, own map[string]bool,
@@ -703,8 +769,11 @@ func measureLeftAlone(msgs map[ulid.ULID]*measureMessage, userEvents []placement
 			}
 		} else if !mm.Created.Add(window).After(split) {
 			for _, l := range mm.Labels {
-				if l.By == LabelByUser && l.At.Sub(mm.Created) > window {
+				if isFiling(l) && l.At.Sub(mm.Created) > window {
 					cov.UnobservableMoved++
+					if !l.At.Before(split) {
+						cov.UnobservableAfterD++
+					}
 					break
 				}
 			}
@@ -713,8 +782,7 @@ func measureLeftAlone(msgs map[ulid.ULID]*measureMessage, userEvents []placement
 		if mm.Created.Before(split) || mm.Created.Add(window).After(now) {
 			continue
 		}
-		var o placement.LeftAloneOutcome
-		o.From = mm.From
+		o := placement.LeftAloneOutcome{From: mm.From, NoAreaLabel: len(mm.Labels) == 0}
 		excluded := false
 		for _, l := range mm.Labels {
 			switch l.By {
@@ -724,9 +792,17 @@ func measureLeftAlone(msgs map[ulid.ULID]*measureMessage, userEvents []placement
 			case LabelByLearned:
 				cov.ExcludedLearned++
 				excluded = true
-			case LabelByUser:
+			case LabelBySetup, LabelByML:
+				cov.ExcludedOther++
+				excluded = true
+			case LabelByUser, LabelByAgent:
+				// An API key acting for the user is a filing too: it moves the mail
+				// the same way, and a missing "agent" would read as "left alone".
 				a := l.Area
 				o.FiledTo = &a
+			case LabelByDesk:
+				a := l.Area
+				o.DeskArea = &a
 			}
 			if excluded {
 				break
@@ -750,9 +826,12 @@ func measureLeftAlone(msgs map[ulid.ULID]*measureMessage, userEvents []placement
 //     a message that carries an area label naming its AREA OF ORIGIN (the
 //     message's newest area-own-label row now: archiving does not remove it).
 //   - OUTCOME: a message that arrived on or after the split day, is old enough
-//     to be judged, and sits in Primary. Its class: archived unread again; opened
-//     (an `open` event, or marked seen); archived or trashed with neither; or
-//     kept (still there, unopened).
+//     to be judged, and sits in Primary, or has been filed out of it by the
+//     user. Its class: archived unread again; opened (an `open` event); seen with
+//     no `open` event (the flag alone: a bulk mark-read or another client can
+//     set it); archived or trashed with none of those; kept (still there,
+//     unopened); or re-filed out of Primary. Senders the signal did not teach
+//     are classified the same way, as the base-rate row.
 func measureArchivedUnread(msgs map[ulid.ULID]*measureMessage, own map[string]bool, split, now time.Time,
 	primary ulid.ULID) (placement.ArchiveResult, ArchivedCoverage) {
 	var cov ArchivedCoverage
@@ -774,17 +853,29 @@ func measureArchivedUnread(msgs map[ulid.ULID]*measureMessage, own map[string]bo
 				events = append(events, placement.Event{From: mm.From, Area: area, At: *mm.ArchUnread})
 			}
 		}
-		if mm.Created.Before(split) || mm.Created.Add(window).After(now) || !hasArea || area != primary || primary == (ulid.ULID{}) {
+		if mm.Created.Before(split) || mm.Created.Add(window).After(now) || primary == (ulid.ULID{}) || !hasArea {
 			continue
 		}
-		cls := placement.KeptUnopened
+		var cls placement.ArchiveClass
 		switch {
+		case area != primary && newestFiling(mm.Labels):
+			// The user (or a key) filed it out of Primary: their own act says it
+			// does not belong there. Its origin was not necessarily Primary (the
+			// move replaced the label that would say), so this is a confirmation
+			// with a caveat, not a count of messages that sat in Primary.
+			cls = placement.RefiledOut
+		case area != primary:
+			continue
 		case mm.ArchUnread != nil:
 			cls = placement.ArchivedUnread
-		case mm.OpenedAt != nil || mm.Seen:
+		case mm.OpenedAt != nil:
 			cls = placement.Opened
+		case mm.Seen:
+			cls = placement.SeenNoOpen
 		case mm.Archived || mm.Trashed:
 			cls = placement.ArchivedOther
+		default:
+			cls = placement.KeptUnopened
 		}
 		outcomes = append(outcomes, placement.ArchiveOutcome{From: mm.From, Class: cls})
 	}

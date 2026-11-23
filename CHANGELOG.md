@@ -25,18 +25,22 @@ rather than from a guess. Nothing is moved, filed or learned differently.
 
 - **A new read-only command, `mailroom-admin placement-measure`, answers six questions about a
   real mailbox.** It prints counts and your area names only (no addresses, senders or subjects; review the names before pasting the output anywhere public) and writes nothing:
-  - why new mail was not filed, over the last thirty days;
+  - why new mail was not filed, over the last thirty days, beside how much it did file
+    (mail synced from Sent or Drafts is not counted as an arrival);
   - how much filed-sender mail is refused only because the sender never passes authentication,
     and how much of that a rule already covers;
   - how many senders you file into more than one area end on a clear recent run of filings into
     one of them;
   - what would happen if "you opened it and left it where it was placed" counted as a hint,
     and what if "you archived it without opening it" did: how many senders each would teach, and
-    how often you later moved or opened mail from them. Each is scored on mail that arrived
-    after the evidence, with the split day printed, and shown beside a contrast and the rate at
-    which you move mail anyway;
+    what you later did with their mail. Each is scored on mail that arrived after the evidence,
+    with the split day printed. Mail the desk would have put in the same place anyway is counted
+    apart and never as a success, the number of messages a hint would really have moved is
+    printed, and the same classes are shown for senders the hint would not teach, so a hint is
+    only worth acting on if it differs from that base rate;
   - how many senders send under more than one mailing list, and how many of your mixed senders
-    a list-based key could separate.
+    a list-based key could separate (a pessimistic count: senders whose mailing list is not yet
+    recorded are set aside as undetermined, and "mailing list versus none" does not count).
   Every figure says when it is a lower or upper bound.
 
 ### Fixes

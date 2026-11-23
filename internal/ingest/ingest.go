@@ -1010,7 +1010,7 @@ func (in *Ingestor) ingestNew(ctx context.Context, tx *store.UserTx, userID ulid
 		// path only, for applyAreaLabelAtIngest's reason. Same store write as
 		// the desk (store.insertAreaOwnLabel), same change_log story (it rides
 		// the Email `created` row below), and STRICTLY FAIL-SOFT.
-		in.applyLearnedPlacementAtIngest(ctx, tx, msgID, in.learnedSender(proj, parsed, trustTime))
+		in.applyLearnedPlacementAtIngest(ctx, tx, msgID, prov.MailboxID, in.learnedSender(proj, parsed, trustTime))
 		// THE AREA'S OWN LABEL (#442 increment 3, "areas are labels"). Runs AFTER
 		// classifyMessage — and after applyRules before it — because
 		// areas_resolve.go's ResolveAreas checks the message's LABELS FIRST and
@@ -1307,7 +1307,7 @@ func (in *Ingestor) applyAreaLabelAtIngest(ctx context.Context, tx *store.UserTx
 // A GATED decision is logged at WARN on every message it holds back: an area
 // whose correction rate has switched learned placement off is a state the
 // operator must be able to see without running the report.
-func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store.UserTx, msgID ulid.ULID, sender placement.Sender) {
+func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store.UserTx, msgID, mailboxID ulid.ULID, sender placement.Sender) {
 	res, err := tx.LearnedPlacementForNewMessage(ctx, msgID, sender)
 	if in.learnedObserve != nil {
 		if err != nil {
@@ -1322,7 +1322,7 @@ func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store
 	// the message is already placed or held back, and the tally never decides
 	// anything.
 	if err == nil {
-		if _, rerr := tx.RecordLearnedAbstention(ctx, res); rerr != nil {
+		if _, rerr := tx.RecordLearnedAbstention(ctx, res, mailboxID); rerr != nil {
 			slog.WarnContext(ctx, "ingest: could not record why learned placement held back",
 				"message_id", msgID.String(), "err", rerr)
 		}

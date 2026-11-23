@@ -753,3 +753,24 @@ func TestImportLabelWithUnsafeCharacters(t *testing.T) {
 		t.Errorf("message_labels = %d, want 2 (the clean label on messages one and two)", got)
 	}
 }
+
+// Two archive labels that differ only in characters the store drops share one
+// Mailroom label; the importer counts the second spelling and carries on.
+func TestImportLabelsThatCanonicaliseTogether(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString(mboxEntry(1, "One", "X-Gmail-Labels: Tag\u202e"))
+	b.WriteString(mboxEntry(2, "Two", "X-Gmail-Labels: Tag\u200b"))
+	archive := filepath.Join(dir, "All mail Including Spam and Trash.mbox")
+	if err := os.WriteFile(archive, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stats := f.run(t, archive, f.options(t, filepath.Join(dir, "state.json")))
+	if stats.Imported != 2 || stats.Failed != 0 || stats.LabelsMerged != 1 {
+		t.Errorf("import = %+v, want 2 imported, none failed, 1 label spelling merged", stats)
+	}
+	if got := f.scalar(t, `SELECT count(*) FROM app.labels WHERE user_id=$1`, f.userID.String()); got != 1 {
+		t.Errorf("labels = %d, want one shared label", got)
+	}
+}

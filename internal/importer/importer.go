@@ -97,6 +97,9 @@ type Stats struct {
 	// the name once control and invisible characters were removed. Counted, never
 	// fatal: the message itself is still imported.
 	LabelsSkipped int64 `json:"labelsSkipped"`
+	// LabelsMerged counts archive labels whose name canonicalises to another
+	// label's: they share one Mailroom label. Counted, never fatal.
+	LabelsMerged int64 `json:"labelsMerged"`
 }
 
 // Progress is one progress report.
@@ -127,6 +130,11 @@ type Importer struct {
 	// The checkpoint carries it so a resume can prove, against the database, that
 	// the cursor still describes reality (Checkpoint.Validate).
 	lastHash string
+
+	// canonRaw remembers the first raw spelling seen for each saved label name,
+	// canonWarned the later spellings already counted.
+	canonRaw    map[string]string
+	canonWarned map[string]bool
 
 	stats     Stats
 	consecErr int
@@ -166,6 +174,8 @@ func New(st *store.Store, ing *ingest.Ingestor, opt Options) (*Importer, error) 
 		labels:      map[string]ulid.ULID{},
 		folderTally: map[string]int64{},
 		labelTally:  map[string]int64{},
+		canonRaw:    map[string]string{},
+		canonWarned: map[string]bool{},
 	}, nil
 }
 
@@ -615,6 +625,17 @@ func (im *Importer) labelIDs(ctx context.Context, names []string) ([]ulid.ULID, 
 			im.stats.LabelsSkipped++
 			im.log.Warn("importer: an archive label has no usable name and was skipped", "labelsSkipped", im.stats.LabelsSkipped)
 			continue
+		}
+		if first, seen := im.canonRaw[name]; seen && first != raw {
+			// Two archive labels differ only in characters the store drops: they
+			// share one Mailroom label. Counted once per extra spelling.
+			if !im.canonWarned[raw] {
+				im.canonWarned[raw] = true
+				im.stats.LabelsMerged++
+				im.log.Warn("importer: two archive labels share one saved name", "labelsMerged", im.stats.LabelsMerged)
+			}
+		} else if !seen {
+			im.canonRaw[name] = raw
 		}
 		if id, ok := im.labels[name]; ok {
 			if !have[id] {

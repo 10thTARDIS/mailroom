@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 )
 
 // WHY LEARNED PLACEMENT HELD BACK, PER DAY (migration 00100).
@@ -47,15 +49,34 @@ func LearnedAbstentionReason(r LearnedPlacementResult) (string, bool) {
 
 // RecordLearnedAbstention adds one to today's (UTC) count for the reason r
 // held the message back, and reports whether it recorded anything (false for a
-// placement, which is not an abstention).
+// placement, which is not an abstention, and for mail synced from a Sent or
+// Drafts mailbox).
+//
+// SENT AND DRAFTS ARE NOT ARRIVALS. Learned placement runs on every LIVE ingest
+// whatever mailbox the message came from (ingest has no role gate), so mail the
+// user wrote themselves, synced from Sent or Drafts, reaches it and would be
+// counted as "held back" for want of evidence about the user's own address.
+// That is not mail Mailroom failed to file for them, so it is not tallied. The
+// counter metric still sees it (it counts every decision). mailboxID zero means
+// the caller has none to name, and nothing is skipped.
 //
 // It runs in its own savepoint, so a failure here can never poison the ingest
 // transaction, and the caller logs it rather than treating it as a failed
 // placement: the message was already placed or held back by the time this runs.
-func (tx *UserTx) RecordLearnedAbstention(ctx context.Context, r LearnedPlacementResult) (bool, error) {
+func (tx *UserTx) RecordLearnedAbstention(ctx context.Context, r LearnedPlacementResult, mailboxID ulid.ULID) (bool, error) {
 	reason, ok := LearnedAbstentionReason(r)
 	if !ok {
 		return false, nil
+	}
+	if mailboxID != (ulid.ULID{}) {
+		var role *string
+		if err := tx.tx.QueryRow(ctx, `SELECT special_use FROM app.mailboxes WHERE user_id = $1 AND id = $2`,
+			tx.userID.String(), mailboxID.String()).Scan(&role); err != nil && !isNoRows(err) {
+			return false, fmt.Errorf("store: record learned abstention (mailbox role): %w", err)
+		}
+		if role != nil && (*role == `\Sent` || *role == `\Drafts`) {
+			return false, nil
+		}
 	}
 	err := tx.inSavepoint(ctx, func() error {
 		_, e := tx.tx.Exec(ctx, `

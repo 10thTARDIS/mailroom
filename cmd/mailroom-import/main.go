@@ -278,6 +278,9 @@ func printSummary(s importer.Stats, im *importer.Importer, dry bool) {
 	if s.LabelsSkipped > 0 {
 		fmt.Fprintf(os.Stderr, "labels-skipped=%d (no usable name once control characters were removed)\n", s.LabelsSkipped)
 	}
+	if s.LabelsMerged > 0 {
+		fmt.Fprintf(os.Stderr, "labels-merged=%d (spellings that differ only in control characters share one label)\n", s.LabelsMerged)
+	}
 	if rss := peakRSS(); rss > 0 {
 		fmt.Fprintf(os.Stderr, "peak rss=%s\n", humanBytes(rss))
 	}

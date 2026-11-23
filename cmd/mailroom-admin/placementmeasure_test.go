@@ -22,10 +22,11 @@ func sampleMeasure() store.PlacementMeasure {
 	now := time.Date(2026, 11, 23, 12, 0, 0, 0, time.UTC)
 	left := func(events int, keys placement.KeyTally, areas map[ulid.ULID]placement.AreaPrecision, tot placement.AreaPrecision, served, untaught, mt, mu int) placement.LeftAloneResult {
 		return placement.LeftAloneResult{Events: events, EventsByArea: map[ulid.ULID]int{u: 7, r: 3}, Keys: keys, Areas: areas, Total: tot,
-			Served: served, Untaught: untaught, MovedAnyTaught: mt, MovedAnyUntaught: mu}
+			Served: served, Untaught: untaught, MovedAnyTaught: mt, UntaughtMoved: mu}
 	}
-	prec := func(k, c int) placement.AreaPrecision {
-		return placement.AreaPrecision{Messages: k + c, Kept: k, Corrected: c, Gate: placement.Gate(placement.GateCounts{Kept: k, Corrected: c})}
+	prec := func(k, c, agree, unres int) placement.AreaPrecision {
+		return placement.AreaPrecision{Kept: k, Corrected: c, Agreement: agree, Unresolved: unres,
+			Gate: placement.Gate(placement.GateCounts{Kept: k, Corrected: c})}
 	}
 	keys := placement.KeyTally{
 		Confident: map[ulid.ULID]placement.KeyCounts{u: {Addresses: 2}, r: {Addresses: 1}},
@@ -36,7 +37,7 @@ func sampleMeasure() store.PlacementMeasure {
 		},
 	}
 	arch := placement.ArchiveResult{
-		Events: 7, Untaught: 3,
+		Events: 7,
 		Keys: placement.KeyTally{
 			Confident: map[ulid.ULID]placement.KeyCounts{r: {Addresses: 1}, p: {Addresses: 1}},
 			Reasons: map[placement.KeyKind]map[placement.Reason]int{
@@ -45,10 +46,13 @@ func sampleMeasure() store.PlacementMeasure {
 			},
 		},
 		Areas: map[ulid.ULID]placement.ArchiveAreaRow{
-			r: {Messages: 5, ArchivedUnread: 1, Opened: 2, KeptUnopened: 1, ArchivedOther: 1,
-				Strict:  placement.Gate(placement.GateCounts{Kept: 1, Corrected: 4}),
-				Engaged: placement.Gate(placement.GateCounts{Kept: 1, Corrected: 2})},
+			r: {Messages: 6, ArchivedUnread: 1, Opened: 1, SeenNoOpen: 1, KeptUnopened: 1, ArchivedOther: 1, RefiledOut: 1,
+				Strict:  placement.Gate(placement.GateCounts{Kept: 2, Corrected: 4}),
+				Engaged: placement.Gate(placement.GateCounts{Kept: 2, Corrected: 1})},
 		},
+		Untaught: placement.ArchiveAreaRow{Messages: 5, KeptUnopened: 3, Opened: 1, RefiledOut: 1,
+			Strict:  placement.Gate(placement.GateCounts{Kept: 1, Corrected: 4}),
+			Engaged: placement.Gate(placement.GateCounts{Kept: 1, Corrected: 1})},
 	}
 	return store.PlacementMeasure{
 		Now: now, Split: now.AddDate(0, 0, -45), WindowStart: now.AddDate(0, 0, -365),
@@ -62,14 +66,14 @@ func sampleMeasure() store.PlacementMeasure {
 		RecentDays:     30,
 		RecencyAddress: placement.Recency{Keys: 6, Mixed: 4, MixedRecent: 4, Rows: []placement.RecencyRow{{N: 2, Keys: 2, Recent: 1}, {N: 3, Keys: 1, Recent: 1}, {N: 5, Keys: 1, Recent: 1}}},
 		RecencyDomain:  placement.Recency{Keys: 5, Mixed: 5, MixedRecent: 4, Rows: []placement.RecencyRow{{N: 2, Keys: 2, Recent: 1}, {N: 3, Keys: 1, Recent: 1}, {N: 5, Keys: 1, Recent: 1}}},
-		LeftAlone:      left(10, keys, map[ulid.ULID]placement.AreaPrecision{u: prec(2, 1), r: prec(1, 1)}, prec(3, 2), 1, 4, 3, 2),
-		LeftAloneAny:   left(13, keys, map[ulid.ULID]placement.AreaPrecision{u: prec(3, 2), r: prec(1, 1)}, prec(4, 3), 1, 2, 4, 1),
-		LeftAloneCover: store.LeftAloneCoverage{DeskPlaced: 13, Opened: 10, EarliestOpen: now.AddDate(0, 0, -70), UnobservableMoved: 1,
-			ExcludedRule: 1, ExcludedLearned: 1, Outcomes: 10},
-		UserEvidence:    3,
+		LeftAlone:      left(10, keys, map[ulid.ULID]placement.AreaPrecision{u: prec(1, 3, 1, 1), r: prec(1, 1, 0, 1)}, prec(2, 4, 1, 2), 1, 4, 3, 2),
+		LeftAloneAny:   left(13, keys, map[ulid.ULID]placement.AreaPrecision{u: prec(2, 3, 2, 1), r: prec(1, 1, 0, 1)}, prec(3, 4, 2, 2), 1, 2, 4, 1),
+		LeftAloneCover: store.LeftAloneCoverage{DeskPlaced: 13, Opened: 10, EarliestOpen: now.AddDate(0, 0, -70), UnobservableMoved: 1, UnobservableAfterD: 1,
+			ExcludedRule: 1, ExcludedLearned: 1, ExcludedOther: 2, Outcomes: 10},
+		UserEvidence: 3, PlacedRecent: 20, WindowMessages: 60, BulkImported: 9,
 		Archived:        arch,
 		ArchivedCover:   store.ArchivedCoverage{EventsNoArea: 1, PrimaryOutcomes: 9},
-		ListID:          placement.ListIDCeiling{Filings: 17, Unfilled: 1, MixedAddresses: 5, MultiList: 4, Separated: 2, Partial: 1, NotHelped: 1, SubKeysConfident: 4},
+		ListID:          placement.ListIDCeiling{Filings: 17, Unfilled: 1, MixedAddresses: 5, MultiList: 5, Undetermined: 1, Separated: 1, Partial: 2, NotHelped: 1, SubKeysConfident: 3},
 		ListIDAddresses: 5, ListIDCensus: store.RecipientCensus{Total: 60, Filled: 41},
 	}
 }
@@ -91,16 +95,21 @@ func TestPrintPlacementMeasure(t *testing.T) {
 		"population: 10 message(s)",
 		"confident          8       2         4          1          1          2           1             2",
 		"last 5 filings agree:    1 key(s)",
-		"events before D: 13 desk-placed message(s) old enough to judge, 10 of them opened",
+		"events judged from mail placed at least 7 days before D: 13 desk-placed message(s), 10 of them opened in the window",
 		"OPENED and not moved (the signal): 10 event(s)",
 		"merely NOT MOVED (contrast",
-		"not judged (5/20)",
-		"filed by hand into ANY area: taught keys 3 of 5 later message(s), untaught keys 2 of 4",
-		"5 later message(s) in Primary",
-		"Primary                1/0          0       0       0      0       0        - /",
-		"0.200 / 0.036",
-		"a List-Id key would make the address clean (every list in one area): 2",
-		"(address + List-Id) keys that would reach 2 agreeing filings: 4",
+		"not judged (6/20)",
+		"WOULD CHANGE: 2 later message(s)",
+		"filed by hand into ANY area: taught senders 3 of 9 later message(s), untaught senders 2 of 4",
+		"6 later message(s) in Primary (or filed out of it) from taught senders and 5 from senders the signal did not teach",
+		"(base rate)",
+		"placed by learned placement in the same 30 days: 20  ->  held back 75.3% of the 81 it considered",
+		"9 of them reached Mailroom more than a day after they were received",
+		"UNDETERMINED",
+		"1 message(s) the user moved on or after D would have been events",
+		"Primary                   1/0      0       0       0      0      0       0        0        - / -",
+		"a List-Id key would make the address clean (every list in one area): 1",
+		"(address + List-Id) keys that would reach 2 agreeing filings: 3",
 		"41 of 60 messages are filled",
 		"REPORT ONLY: nothing was written.",
 	} {

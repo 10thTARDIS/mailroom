@@ -43,11 +43,16 @@ func IsUnsafeRune(r rune) bool {
 // somewhere else (an IMAP folder name the provider chose), where refusing would
 // refuse the user's own folder; a name the user types still goes through
 // CheckName and is refused. The result may be empty, which the caller must
-// treat as "no usable name". Invalid UTF-8 bytes are dropped too.
+// treat as "no usable name". Invalid UTF-8 bytes are dropped too; a genuine U+FFFD is kept.
 func SanitizeName(s string) string {
 	var b strings.Builder
-	for _, r := range s {
-		if r == utf8.RuneError || IsUnsafeRune(r) {
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		i += size
+		// An INVALID byte decodes as RuneError with size 1 and is dropped. A
+		// genuine U+FFFD (size 3) is ordinary text, which CheckName accepts, so
+		// it stays: the two functions must not disagree about what a name is.
+		if (r == utf8.RuneError && size == 1) || IsUnsafeRune(r) {
 			continue
 		}
 		b.WriteRune(r)

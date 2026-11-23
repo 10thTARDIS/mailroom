@@ -486,3 +486,31 @@ func TestApplyGmailObservationSanitisedLabelNames(t *testing.T) {
 		t.Errorf("the label was not removed when Gmail dropped it")
 	}
 }
+
+// Two provider labels that differ only in characters the store drops share ONE
+// local label. Gmail dropping one of them must not take the shared label off the
+// message while the other is still there; dropping the last one does.
+//
+// NEGATIVE CONTROL: with the removal comparing only the removed names (ignoring
+// what remains), the middle step takes the label off and this test goes red.
+func TestApplyGmailObservationSharedCanonicalLabel(t *testing.T) {
+	f := newGmailFixture(t)
+	m := f.message(t, "shared", "<shared@example.com>")
+	f.prov(t, m, f.gmail, f.inbox, 1)
+	both := []string{"Tag\u202e", "Tag\u200b"}
+	r := f.observe(t, m, f.inbox, 1, both...)
+	if r.LabelsCreated != 1 {
+		t.Errorf("two spellings created %d labels, want 1 shared", r.LabelsCreated)
+	}
+	if _, ok := f.labelsOf(t, m)["Tag"]; !ok {
+		t.Fatalf("the shared label is missing: %v", f.labelsOf(t, m))
+	}
+	f.observe(t, m, f.inbox, 1, "Tag\u200b") // Gmail drops ONE spelling
+	if _, ok := f.labelsOf(t, m)["Tag"]; !ok {
+		t.Errorf("the shared label was removed while a provider label that maps to it remains")
+	}
+	f.observe(t, m, f.inbox, 1) // and now the last
+	if _, ok := f.labelsOf(t, m)["Tag"]; ok {
+		t.Errorf("the shared label stayed after no provider label maps to it")
+	}
+}

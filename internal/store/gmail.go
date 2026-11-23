@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -230,7 +231,7 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 			 USING app.labels l
 			 WHERE ml.user_id = $1 AND ml.message_id = $2
 			   AND l.user_id = ml.user_id AND l.id = ml.label_id AND l.name = ANY($3)`,
-			tx.userID.String(), msgID.String(), canonicalNames(removed))
+			tx.userID.String(), msgID.String(), removedCanonical(removed, labels))
 		if err != nil {
 			return res, fmt.Errorf("store: gmail observation (remove labels): %w", err)
 		}
@@ -407,6 +408,18 @@ func (tx *UserTx) gmailFolderMailbox(ctx context.Context, accountID, folder stri
 	return id, nil
 }
 
+func distinctStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // canonicalNames is the labels' SAVED names: each through
 // textcheck.SanitizeName, the store's backstop (labels.go cleanName), with the
 // ones that leave nothing dropped. Every by-name lookup of a provider's label
@@ -415,6 +428,25 @@ func canonicalNames(names []string) []string {
 	out := make([]string, 0, len(names))
 	for _, n := range names {
 		if c := textcheck.SanitizeName(n); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// removedCanonical is the SAVED names to take off a message when Gmail dropped
+// `removed` and still holds `remaining`. Two provider labels can canonicalise to
+// ONE local label (they differ only in characters the store drops), and the
+// local label is then shared: it stays while ANY remaining provider label maps
+// to it, and goes only when none does.
+func removedCanonical(removed, remaining []string) []string {
+	keep := map[string]bool{}
+	for _, c := range canonicalNames(remaining) {
+		keep[c] = true
+	}
+	var out []string
+	for _, c := range canonicalNames(removed) {
+		if !keep[c] {
 			out = append(out, c)
 		}
 	}
@@ -492,6 +524,13 @@ func (tx *UserTx) LabelIDsByName(ctx context.Context, names []string) (map[strin
 	for _, n := range names {
 		if c := textcheck.SanitizeName(n); c != "" {
 			asked[c] = append(asked[c], n)
+		}
+	}
+	for c, raws := range asked {
+		if distinct := distinctStrings(raws); len(distinct) > 1 {
+			// Counted, never fatal: they share one local label (see removedCanonical).
+			slog.Warn("store: provider labels with different names share one saved label name",
+				"names_merged", len(distinct), "saved_name_len", len(c))
 		}
 	}
 	rows, err := tx.tx.Query(ctx, `
