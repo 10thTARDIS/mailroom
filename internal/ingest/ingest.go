@@ -1312,6 +1312,17 @@ func (in *Ingestor) applyLearnedPlacementAtIngest(ctx context.Context, tx *store
 			in.learnedObserve(res.Label())
 		}
 	}
+	// THE DURABLE TALLY (migration 00100): why learned placement held back, per
+	// user and day, so the last thirty days can be read back without the
+	// process-lifetime counter. A failure to record is logged and nothing more:
+	// the message is already placed or held back, and the tally never decides
+	// anything.
+	if err == nil {
+		if _, rerr := tx.RecordLearnedAbstention(ctx, res); rerr != nil {
+			slog.WarnContext(ctx, "ingest: could not record why learned placement held back",
+				"message_id", msgID.String(), "err", rerr)
+		}
+	}
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "ingest: learned placement failed; the desk places the message",

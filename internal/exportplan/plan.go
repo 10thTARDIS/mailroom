@@ -251,6 +251,12 @@ var plan = map[string]Entry{
 		"\"Not now\" on a rule offer, which lapses by itself after 30 days and is keyed by " +
 			"this instance's area ids"},
 
+	// Learned placement's per-day abstention tally (migration 00100). DROPPED: a
+	// private count of why this instance's ingest held back, per day; it says
+	// nothing about the mail itself and is meaningless on another instance.
+	"learned_placement_abstentions": {Dropped, "",
+		"a per-day tally of why learned placement held back on this instance's arrivals"},
+
 	// Stored-area readiness (ADR-049, migration 00086). DROPPED: whether THIS
 	// instance's stored area column is complete for the user; an import writes
 	// messages through the triggers and the flag is earned by `area-index`.

@@ -45,7 +45,7 @@ var appTables = []string{
 	"labels", "message_labels", "label_keyword_map", "category_tabs",
 	"areas", "area_feeds", "desk_preferences", "client_preferences", "drawer_archives",
 	"setup_runs", "setup_journal",
-	"learned_placements", "learned_placement_gate_resets",
+	"learned_placements", "learned_placement_gate_resets", "learned_placement_abstentions",
 	"calendar_invites", "calendar_responses",
 	"nudge_dismissals", "rule_suggestion_dismissals", "area_index_state",
 	"out_of_office",
@@ -381,6 +381,12 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 		u.ID, u.MessageID, tag+"-sender@example.net", areaID)
 	exec(`INSERT INTO app.learned_placement_gate_resets (user_id, area_id) VALUES ($1, $2)`,
 		u.ID, areaID)
+
+	// One day's abstention tally (migration 00100), so the RLS inventory probes
+	// it: a leak would tell one user how much of their mail another's learned
+	// placement could not place, and why.
+	exec(`INSERT INTO app.learned_placement_abstentions (user_id, day, reason, n) VALUES ($1, current_date, 'thin', 3)`,
+		u.ID)
 
 	// One follow-up nudge dismissal (#58, migration 00064): a leak would tell
 	// one user which of another's conversations they have closed.
