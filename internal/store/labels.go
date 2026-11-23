@@ -12,6 +12,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/tabs"
+	"mailroom/internal/textcheck"
 )
 
 // This file holds the canonical Label layer (spec §6): the hybrid label model
@@ -42,6 +43,25 @@ var ErrLabelNotFound = errors.New("store: label not found")
 
 // ErrLabelNameTaken is returned when a create/rename would collide with the
 // caller's UNIQUE (user_id, name) constraint on app.labels.
+// ErrNameInvalid is returned when a label or area name has nothing usable left
+// after textcheck.SanitizeName (empty, or only control and invisible characters).
+// THE STORE IS THE BACKSTOP for names: whatever path a name arrives by (the API,
+// day-one, the CLI, a job), it is sanitised here, so a name saved in this
+// database never carries a control or bidi character. The API refuses a TYPED
+// bad name first, with a clear error; this sanitises rather than refuses so a
+// name that is not the user's typing (a provider's folder name, a plan stored
+// before this check) still goes through.
+var ErrNameInvalid = errors.New("store: name is empty or has no usable characters")
+
+// cleanName is the store's name backstop.
+func cleanName(raw string) (string, error) {
+	n := textcheck.SanitizeName(raw)
+	if n == "" {
+		return "", ErrNameInvalid
+	}
+	return n, nil
+}
+
 var ErrLabelNameTaken = errors.New("store: label name already exists")
 
 // LabelView is the canonical Label projection for the JMAP Label extension.
@@ -109,6 +129,11 @@ func (tx *UserTx) CreateLabel(ctx context.Context, row LabelRow) (ulid.ULID, err
 	if err := validateLabelTab(row.Tab); err != nil {
 		return ulid.ULID{}, err
 	}
+	name, err := cleanName(row.Name)
+	if err != nil {
+		return ulid.ULID{}, err
+	}
+	row.Name = name
 	id := NewULID()
 	var parent any
 	if row.ParentID != nil {
@@ -166,6 +191,13 @@ func (tx *UserTx) UpdateLabel(ctx context.Context, id ulid.ULID, patch LabelPatc
 		if err := validateLabelTab(patch.Tab); err != nil {
 			return false, err
 		}
+	}
+	if patch.Name != nil {
+		n, err := cleanName(*patch.Name)
+		if err != nil {
+			return false, err
+		}
+		patch.Name = &n
 	}
 	// Lock and read current state so unspecified fields are preserved and the
 	// guarded UPDATE can detect a genuine no-op.

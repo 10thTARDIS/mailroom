@@ -15,6 +15,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // `mailroom-admin day-one` — the operator's route into DAY-ONE SETUP (#446),
@@ -354,7 +355,8 @@ func dayOnePlanFromCensus(census []store.FolderCensus, lines []dayOnePlanLine, w
 		}
 		choice := store.SetupFolderChoice{MailboxID: c.MailboxID, Action: l.Action}
 		if l.Action != store.SetupActionLeave && c.Role != "inbox" {
-			choice.LabelName = c.Name
+			// LabelName and AreaName stay blank where they would only copy the
+			// folder's name: the store derives them from it and sanitises them.
 			switch {
 			case l.HasArea:
 				choice.AreaName = l.Area // "" here means "no area", per dayOnePlanNoArea
@@ -362,7 +364,9 @@ func dayOnePlanFromCensus(census []store.FolderCensus, lines []dayOnePlanLine, w
 				id := *c.ExistingAreaID
 				choice.AreaID = &id
 			default:
-				choice.AreaName = c.Name
+				// A new area named after the folder: blank would mean "no area",
+				// so the name is copied, sanitised (the store sanitises again).
+				choice.AreaName = textcheck.SanitizeName(c.Name)
 			}
 		}
 		plan.Folders = append(plan.Folders, choice)
@@ -384,12 +388,12 @@ func defaultDayOnePlan(census []store.FolderCensus, windowDays int) store.SetupP
 	for _, c := range census {
 		choice := store.SetupFolderChoice{MailboxID: c.MailboxID, Action: store.SetupActionLabelArchive}
 		if c.Role != "inbox" {
-			choice.LabelName = c.Name
+			// Blank names: the store derives them from the folder and sanitises.
 			if c.ExistingAreaID != nil {
 				id := *c.ExistingAreaID
 				choice.AreaID = &id
 			} else {
-				choice.AreaName = c.Name
+				choice.AreaName = textcheck.SanitizeName(c.Name)
 			}
 		}
 		plan.Folders = append(plan.Folders, choice)

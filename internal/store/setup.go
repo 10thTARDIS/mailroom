@@ -335,12 +335,13 @@ func (tx *UserTx) resolveSetupPlan(ctx context.Context, plan SetupPlan) ([]setup
 		// INBOX gets no folder label: its mail is labelled with its own resolved
 		// area's label, per message (setupInboxLabels).
 		if c.Role != "inbox" && ch.Action != SetupActionLeave {
-			name := strings.TrimSpace(ch.LabelName)
+			// Sanitised whichever way it arrived (the store is the backstop for
+			// names; a plan stored before the API checked them still resumes).
+			// The default is the provider's folder name, which may carry control
+			// or bidi characters: derived, so sanitised, never refused for the
+			// folder's sake.
+			name := textcheck.SanitizeName(ch.LabelName)
 			if name == "" {
-				// The default is the provider's folder name, which may carry
-				// control or bidi characters. A typed labelName is checked at the
-				// API; this one is derived, so it is sanitised, never refused
-				// for the folder's sake.
 				name = textcheck.SanitizeName(c.Name)
 				if name == "" {
 					return nil, fmt.Errorf("%w: folder %s has no usable name (it holds only control or invisible characters); give it a labelName",
@@ -616,12 +617,16 @@ func (tx *UserTx) setupEnsureLabelAndArea(ctx context.Context, f *setupFolderFac
 	}
 
 	target := f.Choice.AreaID
-	if target == nil && strings.TrimSpace(f.Choice.AreaName) != "" {
+	areaName := textcheck.SanitizeName(f.Choice.AreaName)
+	if target == nil && strings.TrimSpace(f.Choice.AreaName) != "" && areaName == "" {
+		return fmt.Errorf("%w: areaName for folder %s has no usable characters", ErrSetupPlanInvalid, f.Choice.MailboxID)
+	}
+	if target == nil && areaName != "" {
 		areas, err := tx.areaIDsByLowerName(ctx)
 		if err != nil {
 			return err
 		}
-		if id, ok := areas[strings.ToLower(strings.TrimSpace(f.Choice.AreaName))]; ok {
+		if id, ok := areas[strings.ToLower(areaName)]; ok {
 			target = &id
 		} else {
 			// A NEW area owning this folder's label. Position 0 would push it to
@@ -634,7 +639,7 @@ func (tx *UserTx) setupEnsureLabelAndArea(ctx context.Context, f *setupFolderFac
 				return err
 			}
 			if _, err := tx.CreateArea(ctx, AreaRow{
-				Name: strings.TrimSpace(f.Choice.AreaName), Position: pos, LabelID: f.LabelID,
+				Name: areaName, Position: pos, LabelID: f.LabelID,
 			}); err != nil {
 				return fmt.Errorf("store: setup run: area %q: %w", f.Choice.AreaName, err)
 			}
