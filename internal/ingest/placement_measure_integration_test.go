@@ -410,7 +410,11 @@ func TestPlacementMeasureRecency(t *testing.T) {
 	// addresses disagree); runs flip 5, flop 2, tie 0, multi 1, shop 1. Recent
 	// mail counts only addresses with no filings of their own: new@flip 2 and
 	// new@shop 1 (k@flip's and a@shop's mail belongs to their address keys).
-	check("domain", m.RecencyDomain, 5, 5, 3, []placement.RecencyRow{{N: 2, Keys: 2, Recent: 2}, {N: 3, Keys: 1, Recent: 2}, {N: 5, Keys: 1, Recent: 2}})
+	// A domain's run needs two distinct addresses WITHIN the run (the rule the
+	// ingest path acts on): flip's run of 5 and flop's of 2 are each ONE address's
+	// habit, so no domain row counts them. (TestJudgeDomainRecencyCountsAddressesWithinTheRun
+	// holds the positive case.)
+	check("domain", m.RecencyDomain, 5, 5, 3, []placement.RecencyRow{{N: 2, Keys: 0, Recent: 0}, {N: 3, Keys: 0, Recent: 0}, {N: 5, Keys: 0, Recent: 0}})
 }
 
 // ── section 5 ────────────────────────────────────────────────────────────────
