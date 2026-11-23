@@ -165,8 +165,8 @@ describe("area provenance (#714)", () => {
     expect(got.area?.provenance).toBe("user");
   });
 
-  it('says "learned from your moves" for a learned placement', () => {
-    expect(t(areaProvenanceKey("learned"))).toBe("learned from your moves");
+  it('says "Learned sorting" for a learned placement', () => {
+    expect(t(areaProvenanceKey("learned"))).toBe("Learned sorting");
   });
 
   it("keeps every other producer's words, and a default for one it does not know", () => {

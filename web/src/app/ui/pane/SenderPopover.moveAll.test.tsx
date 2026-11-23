@@ -48,7 +48,7 @@ const confirmSpy = vi.fn(() => true);
 
 vi.mock("../../state", () => ({
   useApp: () => ({
-    actions: { relabel },
+    actions: { relabel, learnedSender: vi.fn(async () => null) },
     sync: { loadEmails, allMatchingIds },
     store,
     offerUndo: (label: string, inverse: () => Promise<boolean>) => void undos.push({ label, inverse }),
