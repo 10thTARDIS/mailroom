@@ -205,9 +205,13 @@
   overflow: auto;
 }
 
+/* The viewer's own sentences ("Loading the attachment…", "Showing the first part")
+   are text a person reads, so they take the normal text colour: --fg-muted on
+   --bg-sunken measured 5.34:1, under the 7:1 the accessibility lane holds a
+   sentence to. The lane caught it only when it looked while a file was loading. */
 .viewer-note {
   margin: 0;
-  color: var(--fg-muted);
+  color: var(--fg);
 }
 
 /* Fit is the default; 100% lets the container scroll instead of shrinking the
