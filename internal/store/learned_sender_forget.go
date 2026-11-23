@@ -62,17 +62,17 @@ func (tx *UserTx) ForgetSender(ctx context.Context, kind placement.KeyKind, valu
 	v := strings.ToLower(strings.TrimSpace(value))
 	switch kind {
 	case placement.KeyAddress:
-		a, ok := normaliseTrustAddress(v)
+		a, ok := normaliseForgetAddress(v)
 		if !ok {
-			return time.Time{}, ErrSenderInvalid
+			return time.Time{}, ErrForgetInvalid
 		}
 		v = a
 	case placement.KeyDomain:
 		if v == "" || strings.ContainsAny(v, "@ \t\r\n<>,;") || len(v) > 320 {
-			return time.Time{}, ErrSenderInvalid
+			return time.Time{}, ErrForgetInvalid
 		}
 	default:
-		return time.Time{}, ErrSenderInvalid
+		return time.Time{}, ErrForgetInvalid
 	}
 	var at time.Time
 	if err := tx.tx.QueryRow(ctx, `
@@ -83,4 +83,21 @@ func (tx *UserTx) ForgetSender(ctx context.Context, kind placement.KeyKind, valu
 		return time.Time{}, fmt.Errorf("store: forget sender: %w", err)
 	}
 	return at, nil
+}
+
+// ErrForgetInvalid is returned for an address or domain Forget cannot key on.
+var ErrForgetInvalid = fmt.Errorf("store: not a usable address or domain to forget")
+
+// normaliseForgetAddress is the key a Forget mark is stored under: lowercased
+// and trimmed by KeysFor (the rule the evidence is keyed with), with no
+// whitespace or brackets. Unlike trust it is NOT restricted to ASCII: the ASCII
+// rule is a security measure for what learned sorting BELIEVES
+// (normaliseTrustAddress); forgetting a sender whose address has an accent is
+// harmless, and refusing it would leave the user unable to forget them.
+func normaliseForgetAddress(addr string) (string, bool) {
+	a, _, ok := placement.KeysFor(addr)
+	if !ok || strings.ContainsAny(a.Value, " \t\r\n<>,;") {
+		return "", false
+	}
+	return a.Value, true
 }

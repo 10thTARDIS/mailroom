@@ -137,11 +137,23 @@ describe("LearnedSenderSection", () => {
     await mount(mk({ address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
     const sw = document.querySelector<HTMLInputElement>('input[role="switch"]')!;
     expect(sw.closest("label")?.textContent).toBe("Trust this sender for sorting");
-    expect(document.body.textContent).toContain("Only for senders you know, such as your own servers. It changes sorting only; warnings still show.");
+    expect(document.body.textContent).toContain("Only for senders you know, such as your own servers, whose mail no one else could plausibly fake. It changes sorting only; warnings still show.");
     expect(sw.checked).toBe(false);
     await click(sw);
     expect(trustLearnedSender).toHaveBeenCalledWith("alice@example.com", true);
     expect(document.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
+  });
+
+  it("hides the trust switch at the user's own domain and says why", async () => {
+    await mount(mk({ trustUseful: false, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+    expect(document.querySelector('input[role="switch"]')).toBeNull();
+    expect(document.body.textContent).toContain("Mail claiming to be from your own address is always checked, so trust can't help here.");
+  });
+
+  it("control: trustUseful true keeps the switch and shows no own-domain note", async () => {
+    await mount(mk({ trustUseful: true, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+    expect(document.querySelector('input[role="switch"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain("can't help here");
   });
 
   it("keeps the switch once trusted, so it can be turned off", async () => {

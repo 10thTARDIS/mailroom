@@ -13,6 +13,11 @@
 -- the correction gate). A domain cannot be trusted wholesale, which is why the
 -- key is an address and there is no kind column.
 --
+-- LIMIT: mail claiming to be from one of the user's OWN identity domains (the
+-- domains of their own addresses) is always checked by the self-spoof warning,
+-- so trusting such an address cannot help. Trust is for own-infrastructure
+-- senders at some OTHER domain.
+--
 -- address is stored lowercased and trimmed by the store; the CHECK makes the
 -- table refuse any other spelling, so a lookup by equality cannot miss a row
 -- that differs only in case.

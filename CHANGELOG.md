@@ -17,7 +17,8 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 - **A recent habit now wins over an old one.** If you used to file a sender's mail in one area and have moved it to another three times in a row since, with nothing in between, new mail follows your latest habit. Two moves are not enough, and a move somewhere else in between starts the count again.
 - **See what it learned about a sender.** A sender's card shows which area learned sorting files them in, how many of your moves that rests on, and whether it will act on their next message.
 - **Make it forget a sender (or a whole domain).** Everything you did with that sender before now stops counting. Nothing is deleted and your messages stay where they are, and moves you make afterwards count again.
-- **Trust a sender it cannot verify.** Learned sorting only files mail whose sender it can confirm as genuine, which automatic mail from your own server often cannot be. You can now trust one exact address so that missing confirmation no longer stops it. It does not switch off sender warnings, and it does not help a message whose check clearly failed. A whole domain cannot be trusted.
+- **Trust a sender it cannot verify.** Learned sorting only files mail whose sender it can confirm as genuine, which automatic mail from your own server often cannot be. You can now trust one exact address so that missing confirmation no longer stops it. It does not switch off sender warnings, and it does not help a message whose check clearly failed. A whole domain cannot be trusted. It helps senders at a domain that is not one of your own addresses' domains: mail claiming to be from your own address's domain is always checked, so the trust switch is hidden for those. Trust only senders you know and whose mail no one else could plausibly fake; a sender whose domain publishes no mail policy can be faked in a way that looks identical to the real one.
+- **The number of senders learned will jump when you upgrade.** Addresses you have moved only once now count as learned, so the status view and the report show a much larger count straight away. Nothing new is moved because of that number alone: it counts senders, not messages.
 - **A status view for learned sorting.** How many messages it filed in the last 30 days, how many you moved again, how reliable it has been, how many senders it has learned, and why it held other mail back.
 - **Forget, trust and stop-trusting appear in Activity.**
 - **One name.** The feature is now called **Learned sorting** everywhere, including the label on a sorted message.
@@ -32,7 +33,7 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 - **`placement-report` lists the new kinds of placement on their own rows.** Placements made on a single move and on a recent habit each get their own open, kept and corrected counts, so a weaker rule cannot hide inside a good overall figure. Read this report before and after you upgrade.
 - **`placement-explain` says which rule a decision rests on,** whether the sender is trusted and whether trust is what let the message through, and whether a Forget applies. `placement-measure` says that the recency rows are now acted on.
-- **`placement-backfill` uses the same decision,** so it can find more existing mail to move. Read its report before applying it.
+- **`placement-backfill` uses the same decision,** so it can find more existing mail to move. Its plan now splits the moves by the evidence they rest on (two or more agreeing moves, a single move, a recent habit), in total and per sender, and `--no-single` and `--no-recency` leave the weaker ones out so you can backfill on the old rule. Backfilled moves are not covered by the safety brake, so read the plan before applying it.
 
 ### Safety
 

@@ -66,6 +66,11 @@ const (
 	// BackfillExcluded: the operator's --exclude names the message's address
 	// or domain.
 	BackfillExcluded placement.Reason = "excluded"
+	// BackfillNoSingle and BackfillNoRecency: the operator's --no-single or
+	// --no-recency left out a move that rests on a single filing or a recency
+	// run.
+	BackfillNoSingle  placement.Reason = "no_single"
+	BackfillNoRecency placement.Reason = "no_recency"
 	// BackfillUnreadable: the message's stored bytes could not be read or
 	// parsed, so the arrival-time checks cannot be run. Never moved.
 	BackfillUnreadable placement.Reason = "unreadable"
@@ -141,6 +146,11 @@ type PlacementBackfillOptions struct {
 	// Senders turns on EXACT mode. Nil is placement-report's upper bound:
 	// the stored auth_fail and the warnings that need no verdict.
 	Senders PlacementSenderFunc
+	// NoSingle and NoRecency leave out the moves whose decision rests on a single
+	// filing or on a recency run (placement.Basis*), so an operator can backfill
+	// on the OLD rule only. Backfilled placements are not gated, so reading the
+	// plan, and these opt-outs, are the safeguard.
+	NoSingle, NoRecency bool
 }
 
 // PlacementBackfillMove is one message the plan moves.
@@ -165,7 +175,9 @@ type PlacementBackfillKey struct {
 	// Moves is the number of messages the plan moves on this key, and NowIn
 	// their breakdown by current area (zero ULID = Needs sorting).
 	Moves int
-	NowIn map[ulid.ULID]int
+	// ByBasis splits Moves by the evidence the decision rests on.
+	ByBasis map[placement.Basis]int
+	NowIn   map[ulid.ULID]int
 	// Skipped counts messages the key decided but that do not move, by
 	// reason (the per-message checks, exclusion, the gate, contested).
 	Skipped map[placement.Reason]int
@@ -188,6 +200,9 @@ type PlacementBackfillPlan struct {
 	NoOp    int
 	Abstain map[placement.Reason]int
 	Moves   []PlacementBackfillMove
+	// MovesByBasis is Moves by the evidence each decision rests on (ordinary,
+	// single filing, recency), every basis present so a zero prints as a zero.
+	MovesByBasis map[placement.Basis]int
 
 	// Pairs is Moves by (now in -> learned).
 	Pairs map[PlacementMove]int
@@ -243,6 +258,9 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 		Abstain:  map[placement.Reason]int{},
 		Pairs:    map[PlacementMove]int{},
 		Excluded: map[string]int{},
+		MovesByBasis: map[placement.Basis]int{
+			placement.BasisEvidence: 0, placement.BasisSingle: 0, placement.BasisRecency: 0,
+		},
 	}
 	excludes := normalizeExcludes(opts.Exclude)
 	for _, e := range excludes {
@@ -296,7 +314,7 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 	line := func(k placement.Key, area ulid.ULID) *PlacementBackfillKey {
 		l := keyLine[k]
 		if l == nil {
-			l = &PlacementBackfillKey{Key: k, AreaID: area, NowIn: map[ulid.ULID]int{}, Skipped: map[placement.Reason]int{}}
+			l = &PlacementBackfillKey{Key: k, AreaID: area, ByBasis: map[placement.Basis]int{}, NowIn: map[ulid.ULID]int{}, Skipped: map[placement.Reason]int{}}
 			keyLine[k] = l
 		}
 		return l
@@ -396,6 +414,14 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 		if e, ex := excludedBy(excludes, addrKey, domainKey); ex {
 			plan.Excluded[e]++
 			skip(d.Key, d.Area, BackfillExcluded)
+			continue
+		}
+		if (opts.NoSingle && d.Basis == placement.BasisSingle) || (opts.NoRecency && d.Basis == placement.BasisRecency) {
+			r := BackfillNoSingle
+			if d.Basis == placement.BasisRecency {
+				r = BackfillNoRecency
+			}
+			skip(d.Key, d.Area, r)
 			continue
 		}
 		if placedBy {
@@ -498,7 +524,9 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 		mv.Remove = st.Remove
 		plan.Moves = append(plan.Moves, mv)
 		plan.Pairs[PlacementMove{From: mv.NowIn, To: mv.AreaID}]++
+		plan.MovesByBasis[placementBasisOrDefault(mv.Basis)]++
 		l := line(mv.Key, mv.AreaID)
+		l.ByBasis[placementBasisOrDefault(mv.Basis)]++
 		l.Moves++
 		l.NowIn[mv.NowIn]++
 	}

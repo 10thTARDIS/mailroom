@@ -47,7 +47,7 @@ func TestMeasureRecency(t *testing.T) {
 	}
 	recent := map[string]int{"k1@a.example": 10, "k2@a.example": 4, "k3@a.example": 7, "k4@a.example": 1,
 		"k5@a.example": 50, "k6@a.example": 2, "k7@a.example": 6}
-	got := MeasureRecency(filings, recent, RecencyRuns)
+	got := MeasureRecency(filings, recent, RecencyRuns, 0)
 	if got.Keys != 7 || got.Mixed != 6 || got.MixedRecent != 30 {
 		t.Errorf("keys/mixed/mixedRecent = %d/%d/%d, want 7/6/30 (k5 is not mixed and its 50 are excluded)",
 			got.Keys, got.Mixed, got.MixedRecent)
@@ -63,10 +63,10 @@ func TestMeasureRecency(t *testing.T) {
 // TailRun alone, for the tie cases the aggregate hides.
 func TestTailRunTies(t *testing.T) {
 	u, p := ulid.Make(), ulid.Make()
-	if a, n := TailRun([]TimedFiling{{u, day(1)}, {p, day(1)}}); n != 0 || a != (ulid.ULID{}) {
+	if a, n := TailRun([]TimedFiling{{Area: u, At: day(1)}, {Area: p, At: day(1)}}); n != 0 || a != (ulid.ULID{}) {
 		t.Errorf("two areas at one instant: area %v run %d, want no tail area", a, n)
 	}
-	if a, n := TailRun([]TimedFiling{{p, day(1)}, {u, day(2)}, {u, day(3)}}); a != u || n != 2 {
+	if a, n := TailRun([]TimedFiling{{Area: p, At: day(1)}, {Area: u, At: day(2)}, {Area: u, At: day(3)}}); a != u || n != 2 {
 		t.Errorf("run = %v/%d, want U/2", a, n)
 	}
 	if _, n := TailRun(nil); n != 0 {

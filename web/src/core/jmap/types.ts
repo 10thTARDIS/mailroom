@@ -2958,6 +2958,12 @@ export interface LearnedSender {
   domain: LearnedSenderEvidence & { domain: string };
   decidedBy: "address" | "domain" | "none";
   trusted: boolean;
+  /**
+   * False when the address is at one of the user's own identity domains: mail
+   * claiming to be from there is always checked, so trusting it cannot help.
+   * Absent on an older server, which reads as true.
+   */
+  trustUseful?: boolean;
   forgottenAt: string | null;
 }
 

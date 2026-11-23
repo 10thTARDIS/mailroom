@@ -64,8 +64,24 @@ type LearnedSenderView struct {
 	// DecidedBy is "address", "domain" or "none".
 	DecidedBy string
 	Trusted   bool
+	// TrustUseful is false when the address is at one of the user's OWN identity
+	// domains: mail claiming to be from there is always checked (the self-spoof
+	// warning refuses it whatever trust says), so trusting it cannot help.
+	TrustUseful bool
 	// ForgottenAt is the newer of the address's and the domain's marks.
 	ForgottenAt *time.Time
+}
+
+// LearnedSenderEmpty is the entry for an input that cannot be keyed at all (not
+// an address): nothing is known about it, and one bad entry must not fail a
+// whole batch (LearnedSender/get's notFound stays empty).
+func LearnedSenderEmpty(sender string) LearnedSenderView {
+	return LearnedSenderView{
+		Sender:    sender,
+		Address:   LearnedSenderSide{Verdict: placement.NoEvidence, Reason: string(placement.NoEvidence)},
+		Domain:    LearnedSenderSide{Verdict: placement.NoEvidence, Reason: string(placement.NoEvidence)},
+		DecidedBy: "none", TrustUseful: false,
+	}
 }
 
 // LearnedSenderViewOf computes the view of one From address.
@@ -86,6 +102,11 @@ func (tx *UserTx) LearnedSenderViewOf(ctx context.Context, sender string) (Learn
 	if out.Trusted, err = tx.SenderTrusted(ctx, addrKey.Value); err != nil {
 		return out, err
 	}
+	own, err := tx.ownIdentityDomains(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.TrustUseful = !own[domainKey.Value]
 	// The gate matters only for a decision that acts.
 	gated := false
 	if d.Act {

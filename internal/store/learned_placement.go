@@ -454,7 +454,7 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 			e.Filings = map[ulid.ULID]int{}
 		}
 		e.Filings[f.AreaID]++
-		e.Timeline = append(e.Timeline, placement.TimedFiling{Area: f.AreaID, At: f.At})
+		e.Timeline = append(e.Timeline, placement.TimedFiling{Area: f.AreaID, At: f.At, Address: strings.ToLower(strings.TrimSpace(f.From))})
 		if f.At.After(e.LatestFiling) {
 			e.LatestFiling = f.At
 		}
@@ -488,8 +488,9 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 }
 
 // placementCorrection is a key's corrections: the newest of any placement, and
-// the newest of a placement made on a SINGLE filing (the stricter undo,
-// placement.SingleRelearnFilings). Zero when there is none.
+// the newest of a placement made on WEAKER evidence, a single filing or a
+// recency run (the stricter undo, placement.SingleRelearnFilings). Zero when
+// there is none.
 type placementCorrection struct {
 	Latest, LatestSingle time.Time
 }
@@ -521,7 +522,7 @@ func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key
 	}
 	rows, err := tx.tx.Query(ctx, `
 		SELECT p.key_kind, p.key_value, max(p.corrected_at),
-		       max(p.corrected_at) FILTER (WHERE p.basis = 'single')
+		       max(p.corrected_at) FILTER (WHERE p.basis IN ('single', 'recency'))
 		  FROM app.learned_placements p
 		  LEFT JOIN app.learned_sender_forgotten f
 		         ON f.user_id = p.user_id AND f.key_kind = p.key_kind AND f.key_value = p.key_value

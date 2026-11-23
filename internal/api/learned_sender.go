@@ -62,6 +62,7 @@ func learnedSenderJSON(v store.LearnedSenderView) map[string]any {
 		"domain":      learnedSenderSideJSON(v.Domain, map[string]any{"domain": v.DomainName}),
 		"decidedBy":   v.DecidedBy,
 		"trusted":     v.Trusted,
+		"trustUseful": v.TrustUseful,
 		"forgottenAt": jmapDateOrNil(v.ForgottenAt),
 	}
 }
@@ -74,6 +75,9 @@ func (a *API) learnedSenderArgs(userID ulid.ULID, rawArgs json.RawMessage, into 
 }
 
 func senderMethodErr(err error) *MethodError {
+	if errors.Is(err, store.ErrForgetInvalid) {
+		return &MethodError{Type: errInvalidArguments, Description: "sender is not a usable email address"}
+	}
 	if errors.Is(err, store.ErrSenderInvalid) {
 		return &MethodError{Type: errInvalidArguments, Description: "sender is not a usable email address (trusted senders must be plain ASCII)"}
 	}
@@ -101,6 +105,10 @@ func (a *API) learnedSenderGet(ctx context.Context, userID ulid.ULID, rawArgs js
 			}
 			seen[s] = true
 			v, err := tx.LearnedSenderViewOf(ctx, s)
+			if errors.Is(err, store.ErrSenderInvalid) {
+				// One input that cannot be keyed does not fail the batch.
+				v, err = store.LearnedSenderEmpty(s), nil
+			}
 			if err != nil {
 				return senderMethodErr(err)
 			}
@@ -136,7 +144,7 @@ func (a *API) learnedSenderForget(ctx context.Context, userID ulid.ULID, rawArgs
 	mErr := a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
 		addr, dom, ok := placement.KeysFor(args.Sender)
 		if !ok {
-			return senderMethodErr(store.ErrSenderInvalid)
+			return senderMethodErr(store.ErrForgetInvalid)
 		}
 		key := addr
 		if kind == placement.KeyDomain {

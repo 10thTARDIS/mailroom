@@ -71,3 +71,12 @@ export function forgetScope(s: LearnedSender): "address" | "domain" | null {
 export function showTrust(s: LearnedSender): boolean {
   return s.trusted || s.address.reason === "unauthenticated";
 }
+
+/**
+ * True when trust cannot help this sender: its address is at one of the user's
+ * own identity domains, where mail is always checked. An older server that does
+ * not say reads as useful.
+ */
+export function trustUseless(s: LearnedSender): boolean {
+  return s.trustUseful === false;
+}

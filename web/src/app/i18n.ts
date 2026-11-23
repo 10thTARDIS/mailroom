@@ -2811,7 +2811,9 @@ const en = {
   "learnedSender.forget.failed": "Could not forget this sender",
   "learnedSender.trust": "Trust this sender for sorting",
   "learnedSender.trust.hint":
-    "Only for senders you know, such as your own servers. It changes sorting only; warnings still show.",
+    "Only for senders you know, such as your own servers, whose mail no one else could plausibly fake. It changes sorting only; warnings still show.",
+  "learnedSender.trust.ownDomain":
+    "Mail claiming to be from your own address is always checked, so trust can't help here.",
   "learnedSender.trust.failed": "Could not change this setting",
   // The Settings status block (LearnedSorting/status), under the switch.
   "learnedStatus.heading": "What Learned sorting has done",

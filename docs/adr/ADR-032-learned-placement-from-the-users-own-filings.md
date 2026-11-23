@@ -695,6 +695,13 @@ feature knows the answer.
    non-ASCII character cannot be trusted, and at match time the raw From must be
    ASCII and equal the stored address after ASCII lowercasing, so Unicode case
    folding (the KELVIN SIGN folds to `k`) cannot collide with a trusted address.
+
+   **Residual risk:** a sender whose domain publishes no DMARC policy can be
+   spoofed in a way identical to the real sender, and trust is what lets such
+   mail through. Trust is therefore for senders the user knows and whose mail
+   no one else could plausibly fake, such as their own servers. A trusted
+   address at one of the user's own identity domains is still refused by the
+   self-spoof warning, so trust cannot help there (`trustUseful: false`).
 2. **Single filing (the threshold).** An ADDRESS key with exactly one filing
    and no contrary evidence may act. Domain keys keep their threshold
    (`MinFilings`, and `MinDomainAddresses`). The placement is recorded with
@@ -705,6 +712,9 @@ feature knows the answer.
    placement whose basis was `single`, the key is blocked until TWO more
    agreeing filings, strictly newer than that correction, arrive. (The rule
    for other placements is unchanged: blocked until anything newer is filed.)
+   The same stricter undo applies to a placement made on **recency**: it is
+   also weaker evidence, so a correction of one blocks its key until two more
+   agreeing filings arrive, strictly newer than the correction.
    A single-filing placement counts toward its area's correction gate like any
    other arrival placement, so a run of wrong single-filing placements stops
    the area.
@@ -715,10 +725,13 @@ feature knows the answer.
    already uses: filings are compared by time, strictly newer than the
    newest filing into any other area, and a newest instant shared by two
    areas has no run. Domain keys follow the same rule, only for a domain that
-   is not blocked as freemail or the user's own, and that spans at least
-   `MinDomainAddresses` addresses (the same narrowing as the domain
-   threshold). A correction still blocks a recency placement by the ordinary
-   contradiction rule.
+   is not blocked as freemail or the user's own, and whose RUN (not the whole
+   domain) spans at least `MinDomainAddresses` distinct addresses
+   (`placement.TailRunAddresses`; `placement-measure` section 3 uses the same
+   function): one address's habit must not be filed on for the rest of its
+   domain. A correction blocks a recency placement by the ordinary
+   contradiction rule, and, as it is weaker evidence, by the stricter undo of
+   decision 3.
 5. **Forget.** `LearnedSender/forget` stores a mark per (user, key kind, key)
    in `app.learned_sender_forgotten` (migration 00102). Evidence reads ignore
    filings and corrections older than the mark; nothing is deleted, and later

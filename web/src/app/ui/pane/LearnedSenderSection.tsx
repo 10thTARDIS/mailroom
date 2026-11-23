@@ -16,7 +16,7 @@ import type { JSX } from "react";
 import type { LearnedSender } from "../../../core/jmap/types";
 import { t } from "../../i18n";
 import { useApp, useMailState } from "../../state";
-import { forgetScope, learnedSenderSentence, showTrust } from "./learnedSender";
+import { forgetScope, learnedSenderSentence, showTrust, trustUseless } from "./learnedSender";
 
 export function LearnedSenderSection({ address, messageId }: { address: string; messageId: string }): JSX.Element | null {
   const { actions, pushToast } = useApp();
@@ -86,7 +86,9 @@ export function LearnedSenderSection({ address, messageId }: { address: string; 
       <h3 id={headingId}>{t("learnedSender.heading")}</h3>
       <p aria-live="polite">{learnedSenderSentence(state, areaName)}</p>
 
-      {showTrust(state) ? (
+      {trustUseless(state) && !state.trusted ? (
+        <p className="hint learned-sender-trust-own">{t("learnedSender.trust.ownDomain")}</p>
+      ) : showTrust(state) ? (
         <div className="learned-sender-trust">
           <label className="checkbox">
             <input

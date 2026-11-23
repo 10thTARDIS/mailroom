@@ -41,8 +41,41 @@ func TestLearnedSenderShapes(t *testing.T) {
 		t.Errorf("domain side = %v", dom)
 	}
 
-	// Bounds: 0 and 51 senders are refused; so is a non-address.
-	for _, bad := range [][]string{{}, make([]string, 51), {"not-an-address"}} {
+	// One input that cannot be keyed does not fail the batch: it gets an empty
+	// entry and notFound stays empty.
+	mix := call(t, h.api.learnedSenderGet, a.UserID, map[string]any{"senders": []string{"not-an-address", "alice@example.com"}})
+	ml := asArr(mix["list"])
+	if len(ml) != 2 || len(asArr(mix["notFound"])) != 0 {
+		t.Fatalf("mixed batch = %v, want two entries and an empty notFound", mix)
+	}
+	if bad := ml[0].(map[string]any); bad["sender"] != "not-an-address" || bad["decidedBy"] != "none" || bad["address"].(map[string]any)["filings"] != float64(0) || bad["address"].(map[string]any)["verdict"] != "none" {
+		t.Errorf("the unkeyable entry = %v", bad)
+	}
+	if good := ml[1].(map[string]any); good["sender"] != "alice@example.com" || good["trustUseful"] != true {
+		t.Errorf("the keyable entry = %v", good)
+	}
+
+	// trustUseful is false at one of the user's own identity domains.
+	if _, err := h.super.Exec(context.Background(), `
+		INSERT INTO app.identities (id, user_id, account_id, kind, address, display_name, enabled)
+		VALUES ($1, $2, $3, 'fixed', 'me@mine-own.example', 'me', true)`,
+		store.NewULID().String(), a.UserID.String(), a.AccountID.String()); err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	own := call(t, h.api.learnedSenderGet, a.UserID, map[string]any{"senders": []string{"robot@mine-own.example", "robot@elsewhere.example"}})
+	ol := asArr(own["list"])
+	if ol[0].(map[string]any)["trustUseful"] != false || ol[1].(map[string]any)["trustUseful"] != true {
+		t.Errorf("trustUseful = %v / %v, want false at an own domain, true elsewhere", ol[0].(map[string]any)["trustUseful"], ol[1].(map[string]any)["trustUseful"])
+	}
+
+	// Forget works for an accented address; trusting it is still refused.
+	call(t, h.api.learnedSenderForget, a.UserID, map[string]any{"sender": "Jos\u00e9@example.com", "scope": "address"})
+	if _, mErr := h.api.learnedSenderTrust(context.Background(), a.UserID, mustJSON(t, map[string]any{"sender": "jos\u00e9@example.com", "trusted": true})); mErr == nil || mErr.Type != errInvalidArguments {
+		t.Errorf("trusting an accented address: got %+v, want invalidArguments", mErr)
+	}
+
+	// Bounds: 0 and 51 senders are refused.
+	for _, bad := range [][]string{{}, make([]string, 51)} {
 		for i := range bad {
 			if bad[i] == "" {
 				bad[i] = "x@example.com"

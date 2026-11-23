@@ -35,7 +35,9 @@ It is deliberately careful:
 Open a sender's card to see what learned sorting has learned about that sender: which area it files them in, how many of your moves it is based on, and whether it will act on their next message. From there you can:
 
 - **Forget this sender.** Learned sorting ignores everything you did with that sender before now (it deletes nothing, and your messages stay where they are). Moves you make afterwards count again. You can forget just the address, or the whole domain.
-- **Trust this sender.** Some senders can never be confirmed as genuine, for example automatic mail from your own server. For one exact address you can tell learned sorting to sort it without that confirmation. It does not turn off sender warnings, and it does not apply to a message whose check clearly failed. A whole domain cannot be trusted.
+- **Trust this sender.** Some senders can never be confirmed as genuine, for example automatic mail from a server of your own. For one exact address you can tell learned sorting to sort it without that confirmation. It does not turn off sender warnings, and it does not apply to a message whose check clearly failed. A whole domain cannot be trusted.
+  - **Trust only senders you know**, such as your own servers, whose mail no one else could plausibly fake. A sender whose domain publishes no mail policy can be faked in a way that looks identical to the real one, and trust is exactly what lets such mail through.
+  - **It does not help for your own addresses' domains.** Mail claiming to be from the domain of one of your own addresses is always checked, so trust can't help there; the sender card hides the switch for those. Trust is for automatic senders at a different domain.
 
 Forget, trust and stop-trusting each leave a line in **Activity**.
 

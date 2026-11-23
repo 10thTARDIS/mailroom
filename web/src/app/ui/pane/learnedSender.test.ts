@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LearnedSender, LearnedSenderEvidence } from "../../../core/jmap/types";
-import { forgetScope, learnedSenderSentence, showTrust } from "./learnedSender";
+import { forgetScope, learnedSenderSentence, showTrust, trustUseless } from "./learnedSender";
 
 const names: Record<string, string> = { AU: "Updates", AN: "News" };
 const name = (id: string): string | null => names[id] ?? null;
@@ -80,6 +80,14 @@ describe("forgetScope and showTrust", () => {
     expect(showTrust(sender({ trusted: true }))).toBe(true);
     expect(showTrust(sender({ address: { reason: "thin" } }))).toBe(false);
     expect(showTrust(sender({ address: { acting: true, reason: null } }))).toBe(false);
+  });
+});
+
+describe("trustUseless", () => {
+  it("is true only when the server says trust cannot help", () => {
+    expect(trustUseless(sender({ trustUseful: false }))).toBe(true);
+    expect(trustUseless(sender({ trustUseful: true }))).toBe(false);
+    expect(trustUseless(sender({}))).toBe(false); // an older server that does not say
   });
 });
 

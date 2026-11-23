@@ -532,7 +532,7 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 		if !ok {
 			continue
 		}
-		tf := placement.TimedFiling{Area: f.AreaID, At: f.At}
+		tf := placement.TimedFiling{Area: f.AreaID, At: f.At, Address: a.Value}
 		if !f.HideAddr { // a forgotten filing is not evidence (learned_sender_forget.go)
 			byAddr[a.Value] = append(byAddr[a.Value], tf)
 		}
@@ -572,8 +572,8 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 	if err := rows.Err(); err != nil {
 		return addr, dom, fmt.Errorf("store: placement measure (recent): %w", err)
 	}
-	return placement.MeasureRecency(byAddr, recentAddr, placement.RecencyRuns),
-		placement.MeasureRecency(byDom, recentDom, placement.RecencyRuns), nil
+	return placement.MeasureRecency(byAddr, recentAddr, placement.RecencyRuns, 0),
+		placement.MeasureRecency(byDom, recentDom, placement.RecencyRuns, placement.MinDomainAddresses), nil
 }
 
 // ── sections 4 and 5: the per-message facts ──────────────────────────────────

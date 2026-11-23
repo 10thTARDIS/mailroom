@@ -173,8 +173,9 @@ type Evidence struct {
 	// corrected, or zero if never.
 	LatestCorrection time.Time
 	// LatestSingleCorrection is when a learned placement on this key that was
-	// made on BasisSingle was last corrected, or zero if never. It blocks the
-	// key until SingleRelearnFilings newer filings arrive.
+	// made on weaker evidence (BasisSingle or BasisRecency) was last corrected,
+	// or zero if never. It blocks the key until SingleRelearnFilings newer
+	// filings arrive. (The name predates recency joining it.)
 	LatestSingleCorrection time.Time
 	// Timeline is every filing with its area and time, in any order: what the
 	// recency run and the single-correction block are read from. It holds the
@@ -508,7 +509,8 @@ func Judge(kind KeyKind, e Evidence) Verdict {
 		// amendment): the same run section 3 of placement-measure counts.
 		// A domain key additionally needs the addresses MinDomainAddresses
 		// asks of any domain evidence.
-		if a, run := TailRun(e.Timeline); run >= RecencyRun && (kind != KeyDomain || e.Addresses >= MinDomainAddresses) {
+		a, run, addrs := TailRunAddresses(e.Timeline)
+		if run >= RecencyRun && (kind != KeyDomain || addrs >= MinDomainAddresses) {
 			return Verdict{Reason: Confident, Area: &a, Basis: BasisRecency}
 		}
 		return Verdict{Reason: Mixed}

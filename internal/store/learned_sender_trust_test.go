@@ -143,3 +143,19 @@ func TestTrustIsASCIIOnly(t *testing.T) {
 		t.Fatalf("KELVIN SIGN sender = %+v, want not trusted and unauthenticated", c)
 	}
 }
+
+// Forget is not subject to the trust ASCII rule: a sender with an accent can be
+// forgotten, and still cannot be trusted.
+func TestForgetAcceptsWhatTrustRefuses(t *testing.T) {
+	if k, ok := normaliseForgetAddress("  José@Example.com "); !ok || k != "josé@example.com" {
+		t.Fatalf("forget normaliser = %q %v, want the lowercased address", k, ok)
+	}
+	if _, ok := normaliseTrustAddress("josé@example.com"); ok {
+		t.Fatal("trust accepted a non-ASCII address")
+	}
+	for _, bad := range []string{"", "no-at", "a b@example.com", "<a@example.com>"} {
+		if _, ok := normaliseForgetAddress(bad); ok {
+			t.Errorf("forget accepted %q", bad)
+		}
+	}
+}

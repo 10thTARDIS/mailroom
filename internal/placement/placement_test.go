@@ -299,6 +299,9 @@ func TestJudgeRecency(t *testing.T) {
 	}
 	d := run(3)
 	d.Addresses = 2
+	for i := range d.Timeline { // the run's filings come from two addresses
+		d.Timeline[i].Address = []string{"a@d.example", "b@d.example"}[i%2]
+	}
 	if v := Judge(KeyDomain, d); v.Reason != Confident || v.Basis != BasisRecency {
 		t.Errorf("a domain run over two addresses = %+v, want confident on recency", v)
 	}
@@ -309,5 +312,53 @@ func TestJudgeRecency(t *testing.T) {
 	}
 	if dc := Decide(addr, dom, Evidence{}, d, nil); !dc.Act || dc.Basis != BasisRecency {
 		t.Errorf("recency on an ordinary domain = %+v, want act on recency", dc)
+	}
+}
+
+func filA(a ulid.ULID, mins int, addr string) TimedFiling {
+	f := fil(a, mins)
+	f.Address = addr
+	return f
+}
+
+// A domain's recency run needs two distinct addresses WITHIN the run, not just
+// across the domain: x2 filed once into Updates and x1 filed three times into
+// Promotions is one address's habit, and must not be filed on for newcomers.
+func TestJudgeDomainRecencyCountsAddressesWithinTheRun(t *testing.T) {
+	one := tl(2, filA(updates, 0, "x2@corp.example"),
+		filA(promotions, 10, "x1@corp.example"), filA(promotions, 11, "x1@corp.example"), filA(promotions, 12, "x1@corp.example"))
+	one.Addresses = 2 // the whole domain has two addresses
+	if v := Judge(KeyDomain, one); v.Reason != Mixed {
+		t.Errorf("a run of three by ONE address in a two-address domain = %+v, want mixed", v)
+	}
+	two := tl(2, filA(updates, 0, "x2@corp.example"),
+		filA(promotions, 10, "x1@corp.example"), filA(promotions, 11, "x2@corp.example"), filA(promotions, 12, "x1@corp.example"))
+	two.Addresses = 2
+	if v := Judge(KeyDomain, two); v.Reason != Confident || v.Basis != BasisRecency {
+		t.Errorf("a run of three by two addresses = %+v, want confident on recency", v)
+	}
+	// The measure is the same rule.
+	fs := map[string][]TimedFiling{"corp.example": one.Timeline, "other.example": two.Timeline}
+	got := MeasureRecency(fs, map[string]int{}, []int{3}, MinDomainAddresses)
+	if got.Rows[0].Keys != 1 {
+		t.Errorf("domain recency rows = %+v, want exactly one key (the two-address run)", got.Rows)
+	}
+}
+
+// A correction of a RECENCY placement is undone as strictly as a single
+// filing's: two newer filings, not one.
+func TestJudgeRecencyCorrectionNeedsTwoMoreFilings(t *testing.T) {
+	corr := t0.Add(30 * time.Minute)
+	mk := func(extra ...TimedFiling) Evidence {
+		fs := []TimedFiling{fil(promotions, 0), fil(updates, 10), fil(updates, 11), fil(updates, 12)}
+		e := tl(1, append(fs, extra...)...)
+		e.LatestCorrection, e.LatestSingleCorrection = corr, corr // what the store sets for a recency basis
+		return e
+	}
+	if v := Judge(KeyAddress, mk(fil(updates, 31))); v.Reason != Contradicted {
+		t.Errorf("one newer filing after a recency correction: %+v, want still contradicted", v)
+	}
+	if v := Judge(KeyAddress, mk(fil(updates, 31), fil(updates, 32))); v.Reason != Confident {
+		t.Errorf("two newer filings: %+v, want confident", v)
 	}
 }

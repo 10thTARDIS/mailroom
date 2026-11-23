@@ -1500,7 +1500,12 @@ components:
         (an address never filed still gets an entry with `filings: 0`). Each
         entry: `{sender, address: {areaId, filings, verdict, acting, reason,
         forgottenAt}, domain: {domain, areaId, filings, verdict, acting,
-        reason, forgottenAt}, decidedBy, trusted, forgottenAt}`. `verdict` is
+        reason, forgottenAt}, decidedBy, trusted, trustUseful, forgottenAt}`.
+        `trustUseful` is `false` when the address is at one of the user's own
+        identity domains (mail claiming to be from there is always checked, so
+        trusting it cannot help). An input that is not an address does not fail
+        the batch: it gets an empty entry (`filings: 0`, verdict `none`).
+        `verdict` is
         `confident`, `thin`, `mixed`, `contradicted` or `none`; `decidedBy` is
         `address`, `domain` or `none`; `acting` means learned sorting would
         place the sender's next AUTHENTICATED message (the same decision as
