@@ -259,6 +259,12 @@ type SenderChecks struct {
 	// Authenticated is Auth.Authenticated(): the condition acted on.
 	Auth          placement.SenderAuth
 	Authenticated bool
+	// Trusted: the user marked this exact From address as trusted (#169). It
+	// waives ONE thing, the requirement of a trusted DMARC pass, and only while
+	// the message's authentication did not clearly fail (Auth.AuthFail).
+	// TrustApplied is true when that waiver is what let an unauthenticated
+	// message through, so explain can say so.
+	Trusted, TrustApplied bool
 	// Warnings are the sender spoofing / look-alike warnings.
 	Warnings []senderwarn.Warning
 	Refusal  placement.Reason
@@ -266,16 +272,28 @@ type SenderChecks struct {
 
 // senderChecks evaluates every check (no short circuit, so the explain path
 // can show them all); Refusal is the first that refuses, in senderRefusal's
-// documented order.
-func senderChecks(sender placement.Sender, warn *senderwarn.Index) SenderChecks {
+// documented order. trusted is the user's set of trusted From addresses (nil =
+// none).
+//
+// TRUST SKIPS EXACTLY ONE CHECK (#169): the trusted-DMARC requirement, for the
+// one exact From address the user named. The ambiguous-From refusal and the
+// warnings (self-spoof, look-alike) are evaluated and refuse exactly as they do
+// for any sender, and a message whose authentication clearly FAILED is still
+// refused: trust waives a missing pass, not a failure.
+func senderChecks(sender placement.Sender, warn *senderwarn.Index, trusted map[string]bool) SenderChecks {
 	auth := sender.Auth()
 	c := SenderChecks{Ambiguous: sender.Ambiguous(), Auth: auth, Authenticated: auth.Authenticated()}
-	_, domainKey, _ := sender.Keys()
+	addrKey, domainKey, _ := sender.Keys()
+	c.Trusted = trusted[addrKey.Value]
 	c.Warnings = warn.Check(senderwarn.Sender{Domain: domainKey.Value, AuthPassed: auth.AffirmativePass})
+	authOK := c.Authenticated
+	if !authOK && c.Trusted && !auth.AuthFail {
+		authOK, c.TrustApplied = true, true
+	}
 	switch {
 	case c.Ambiguous:
 		c.Refusal = placement.AmbiguousFrom
-	case !c.Authenticated:
+	case !authOK:
 		c.Refusal = placement.Unauthenticated
 	case len(c.Warnings) > 0:
 		c.Refusal = placement.SenderWarned
@@ -292,12 +310,13 @@ func senderChecks(sender placement.Sender, warn *senderwarn.Index) SenderChecks 
 //     parse that disagrees with the stored From (placement.NewSender).
 //   - Unauthenticated: SenderAuth.Authenticated() is false (a trusted DMARC
 //     pass bound to the From domain when authserv-ids are configured, else
-//     "did not clearly fail").
+//     "did not clearly fail"), unless the user trusts this exact address and
+//     the authentication did not clearly fail.
 //   - SenderWarned: the spoofing / look-alike warnings would flag it, asked
 //     exactly as the reading pane asks them (internal/api/sender_warnings.go):
 //     the same index, the same trusted affirmative pass suppressing selfSpoof.
-func senderRefusal(sender placement.Sender, warn *senderwarn.Index) placement.Reason {
-	return senderChecks(sender, warn).Refusal
+func senderRefusal(sender placement.Sender, warn *senderwarn.Index, trusted map[string]bool) placement.Reason {
+	return senderChecks(sender, warn, trusted).Refusal
 }
 
 // placementFiling is one user filing into an area: the evidence unit.

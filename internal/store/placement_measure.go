@@ -471,7 +471,10 @@ func (tx *UserTx) measureAuth(ctx context.Context, filings []placementFiling, op
 				out.Unreadable++
 				continue
 			}
-			refusal = senderChecks(s, warn)
+			// Trust-agnostic on purpose (nil): section 2 lists who learned sorting
+			// cannot believe on authentication, which is exactly the list a user
+			// would choose their trusted senders from.
+			refusal = senderChecks(s, warn, nil)
 		}
 		out.Read++
 		t.bucket.Messages++

@@ -109,6 +109,12 @@ type sidecarTab struct {
 	Position int    `json:"position"`
 }
 
+// sidecarTrustedSender is one address the user marked as trusted for learned
+// sorting (#169). An address, not an id: it means the same on another instance.
+type sidecarTrustedSender struct {
+	Address string `json:"address"`
+}
+
 type sidecarRemoteAllow struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
@@ -256,6 +262,7 @@ func writeConfig(ctx context.Context, st *store.Store, opt Options) (map[string]
 		searches    []store.SavedSearch
 		tabViews    []store.CategoryTabView
 		allows      []store.RemoteAllow
+		trusted     []string
 		contacts    []store.Contact
 		keys        map[string][]store.ExportContactKey
 		subs        []store.ExportSubmission
@@ -322,6 +329,9 @@ func writeConfig(ctx context.Context, st *store.Store, opt Options) (map[string]
 			return e
 		}
 		if allows, e = tx.ListRemoteAllows(ctx); e != nil {
+			return e
+		}
+		if trusted, e = tx.TrustedSenders(ctx); e != nil {
 			return e
 		}
 		if contacts, e = tx.ListContacts(ctx); e != nil {
@@ -519,6 +529,15 @@ func writeConfig(ctx context.Context, st *store.Store, opt Options) (map[string]
 		return nil, "", err
 	}
 	counts["remote_allows.json"] = len(outAllows)
+
+	outTrusted := make([]sidecarTrustedSender, 0, len(trusted))
+	for _, a := range trusted {
+		outTrusted = append(outTrusted, sidecarTrustedSender{Address: a})
+	}
+	if err := writeJSON(opt.OutDir, "learned_sender_trust.json", outTrusted); err != nil {
+		return nil, "", err
+	}
+	counts["learned_sender_trust.json"] = len(outTrusted)
 
 	outContacts := make([]sidecarContact, 0, len(contacts))
 	for _, c := range contacts {

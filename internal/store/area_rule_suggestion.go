@@ -223,7 +223,11 @@ func (tx *UserTx) learnedWouldNotFile(ctx context.Context, areaID ulid.ULID, add
 	if err != nil {
 		return "", false, err
 	}
-	c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded))
+	trusted, err := tx.trustedSenderSet(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded), trusted)
 	if c.Refusal != "" {
 		return string(c.Refusal), true, nil
 	}

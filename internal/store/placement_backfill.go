@@ -272,6 +272,10 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 		return plan, err
 	}
 	warn := senderwarn.NewIndex(sd.Own, sd.Corresponded)
+	trusted, err := tx.trustedSenderSet(ctx)
+	if err != nil {
+		return plan, err
+	}
 	counts, err := tx.placementAreaCounts(ctx, nil)
 	if err != nil {
 		return plan, err
@@ -441,7 +445,7 @@ func (tx *UserTx) PlanPlacementBackfill(ctx context.Context, opts PlacementBackf
 				skip(p.mv.Key, p.mv.AreaID, BackfillUnreadable)
 				continue
 			}
-			r := senderRefusal(s, warn)
+			r := senderRefusal(s, warn, trusted)
 			if r == "" {
 				// Tripwire: the sender was built from the stored From, so its
 				// key IS the planned one. A difference means the identity that

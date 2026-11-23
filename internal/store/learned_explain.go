@@ -174,7 +174,11 @@ func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender pl
 		if err != nil {
 			return LearnedTrace{}, err
 		}
-		c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded))
+		trusted, err := tx.trustedSenderSet(ctx)
+		if err != nil {
+			return LearnedTrace{}, err
+		}
+		c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded), trusted)
 		tr.Checks = &c
 	}
 	if d.Act {
