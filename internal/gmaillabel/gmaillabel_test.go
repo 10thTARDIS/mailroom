@@ -73,3 +73,11 @@ func TestSanitize(t *testing.T) {
 		t.Errorf("an empty reading must stay an empty, non-nil reading: %#v", s)
 	}
 }
+
+func TestAltered(t *testing.T) {
+	got := Altered([]string{"Plain", "Bad\xffname", "Ctl\x01x", "Work"})
+	want := []string{"Bad\ufffdname", "Ctlx"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Altered = %q, want %q (only the labels Sanitize changed, in their sanitised form)", got, want)
+	}
+}

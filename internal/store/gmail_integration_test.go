@@ -514,3 +514,48 @@ func TestApplyGmailObservationSharedCanonicalLabel(t *testing.T) {
 		t.Errorf("the shared label stayed after no provider label maps to it")
 	}
 }
+
+// A provider label is mirrored back to Gmail (X-GM-LABELS, by the LOCAL name)
+// only when the local name is the provider's, byte for byte. An invalid byte
+// (replaced by U+FFFD) or a control character (dropped) means the saved name
+// is NOT the provider's, and writing it back would create a different provider
+// label: those are created LOCAL-ONLY, with no keyword atom. A plain label
+// still mirrors (positive control).
+//
+// NEGATIVE CONTROLS, run and recorded in the PR: dropping the RuneError
+// condition turns the "already sanitised upstream" case red; dropping the
+// altered-labels check turns the raw-byte cases red.
+func TestGmailLabelMirrorsOnlyWhenTheProviderNameSurvives(t *testing.T) {
+	f := newGmailFixture(t)
+	m := f.message(t, "mirror", "<mirror@example.com>")
+	f.prov(t, m, f.gmail, f.inbox, 1)
+	// Through the real entry point, with the RAW provider bytes.
+	f.observe(t, m, f.inbox, 1, "Plain", "Bad\xffname", "Ctl\x01x")
+	mirrored := func(name string) int {
+		return f.count(t, `SELECT count(*) FROM app.label_keyword_map k JOIN app.labels l ON l.id = k.label_id
+		                    WHERE l.user_id = $1 AND l.name = $2`, f.user.String(), name)
+	}
+	if mirrored("Plain") != 1 {
+		t.Errorf("a plain provider label must mirror (positive control)")
+	}
+	if got := f.labelsOf(t, m); got["Bad\ufffdname"] == "" || got["Ctlx"] == "" {
+		t.Fatalf("labels = %v, want the sanitised Bad\\ufffdname and Ctlx on the message", got)
+	}
+	if mirrored("Bad\ufffdname") != 0 {
+		t.Errorf("a label whose provider name had an invalid byte has a keyword atom: it would be written back as a different Gmail label")
+	}
+	if mirrored("Ctlx") != 0 {
+		t.Errorf("a label whose provider name had a control character has a keyword atom")
+	}
+	// The same name arriving ALREADY sanitised (a caller that sanitised upstream,
+	// so `altered` cannot know): U+FFFD alone must keep it local-only.
+	if err := f.st.UserTx(context.Background(), f.user, func(tx *UserTx) error {
+		_, _, _, err := tx.ensureLabelsByName(context.Background(), []string{"Pre\ufffdsanitised"}, nil)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if mirrored("Pre\ufffdsanitised") != 0 {
+		t.Errorf("a name holding U+FFFD was mirrored")
+	}
+}

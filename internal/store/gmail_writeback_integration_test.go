@@ -60,7 +60,7 @@ func (f *gmailFixture) labelMessage(t *testing.T, msg ulid.ULID, name string) ul
 	t.Helper()
 	var lid ulid.ULID
 	if err := f.st.UserTx(context.Background(), f.user, func(tx *UserTx) error {
-		ids, _, _, err := tx.ensureLabelsByName(context.Background(), []string{name})
+		ids, _, _, err := tx.ensureLabelsByName(context.Background(), []string{name}, nil)
 		if err != nil {
 			return err
 		}
@@ -343,7 +343,7 @@ func TestKeywordAndLabelIntentsDoNotCollide(t *testing.T) {
 	f.prov(t, m, f.generic, f.genericInbox, 11)
 	var atom string
 	if err := f.st.UserTx(context.Background(), f.user, func(tx *UserTx) error {
-		ids, _, _, err := tx.ensureLabelsByName(context.Background(), []string{"Clash"})
+		ids, _, _, err := tx.ensureLabelsByName(context.Background(), []string{"Clash"}, nil)
 		if err != nil {
 			return err
 		}

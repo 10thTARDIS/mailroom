@@ -266,7 +266,7 @@ func withGmail(prov *ingest.Provenance, items sync.FetchItems, m sync.MessageMet
 	if !items.GmailExt || m.GmailLabels == nil {
 		return
 	}
-	prov.Gmail = &ingest.GmailReading{MsgID: m.GmailMsgID, ThrID: m.GmailThrID, Labels: gmaillabel.Sanitize(m.GmailLabels)}
+	prov.Gmail = &ingest.GmailReading{MsgID: m.GmailMsgID, ThrID: m.GmailThrID, Labels: gmaillabel.Sanitize(m.GmailLabels), Altered: gmaillabel.Altered(m.GmailLabels)}
 	if m.GmailMsgID != 0 {
 		prov.GmMsgID = strconv.FormatUint(m.GmailMsgID, 10)
 	}

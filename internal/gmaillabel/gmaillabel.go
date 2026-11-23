@@ -96,6 +96,20 @@ func Classify(labels []string) Classified {
 // otherwise fail the message's ingest on every pass. A label that sanitises
 // to nothing is dropped. NIL STAYS NIL: nil means "no reading", which is not
 // the same as an empty label set, and nothing here may turn one into the other.
+// Altered returns the sanitised form of each raw label Sanitize CHANGED (an
+// invalid byte replaced, a control character dropped). A caller that sanitises
+// early passes it on, so a later stage can tell that a name is no longer the
+// provider's own spelling (which decides whether it may be written back).
+func Altered(raw []string) []string {
+	var out []string
+	for _, r := range raw {
+		if s := Sanitize([]string{r}); len(s) == 1 && s[0] != r {
+			out = append(out, s[0])
+		}
+	}
+	return out
+}
+
 func Sanitize(labels []string) []string {
 	if labels == nil {
 		return nil

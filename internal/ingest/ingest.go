@@ -95,6 +95,10 @@ type GmailReading struct {
 	MsgID  uint64
 	ThrID  uint64
 	Labels []string // decoded X-GM-LABELS; never nil for a real reading
+	// Altered names the labels (sanitised form) the sync layer's sanitiser
+	// already changed, so the store can keep them local-only (see
+	// store.GmailObservation.Altered).
+	Altered []string
 }
 
 // Archive describes a message ingested from a LOCAL ARCHIVE — an mbox, a
@@ -660,7 +664,7 @@ func (in *Ingestor) applyGmail(ctx context.Context, tx *store.UserTx, msgID ulid
 	}
 	r, err := tx.ApplyGmailObservation(ctx, msgID, store.GmailObservation{
 		MailboxID: prov.MailboxID, UIDValidity: prov.UIDValidity, UID: prov.UID,
-		MsgID: prov.Gmail.MsgID, ThrID: prov.Gmail.ThrID, Labels: prov.Gmail.Labels,
+		MsgID: prov.Gmail.MsgID, ThrID: prov.Gmail.ThrID, Labels: prov.Gmail.Labels, Altered: prov.Gmail.Altered,
 	})
 	if err != nil {
 		// STRICTLY FAIL-SOFT, like applyRules (#52 review H2): the labels

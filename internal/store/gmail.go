@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
@@ -97,6 +99,13 @@ type GmailObservation struct {
 	ThrID       uint64
 	// Labels is the decoded X-GM-LABELS list; never nil for a real reading.
 	Labels []string
+	// Altered names the labels (in their sanitised form) whose provider spelling
+	// gmaillabel.Sanitize already changed UPSTREAM (the sync layer sanitises
+	// before it hands the list on): invalid bytes replaced, control characters
+	// dropped. ApplyGmailObservation adds the ones its own pass changes. Such a
+	// label is created local-only, never written back under a changed name.
+	Altered []string
+	altered map[string]bool
 }
 
 // GmailApplyResult says what one observation changed.
@@ -145,6 +154,10 @@ var ErrGmailNoReading = errors.New("store: a Gmail observation without an X-GM-L
 func (tx *UserTx) ApplyGmailObservation(ctx context.Context, msgID ulid.ULID, obs GmailObservation) (GmailApplyResult, error) {
 	if obs.Labels == nil {
 		return GmailApplyResult{}, ErrGmailNoReading
+	}
+	obs.altered = map[string]bool{}
+	for _, n := range append(gmaillabel.Altered(obs.Labels), obs.Altered...) {
+		obs.altered[n] = true
 	}
 	obs.Labels = gmaillabel.Sanitize(obs.Labels)
 	sp, err := tx.tx.Begin(ctx) // SAVEPOINT
@@ -208,7 +221,7 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 	// --- user labels: apply the difference --------------------------------
 	added, removed := gmaillabel.Diff(prior, labels)
 	if len(added) > 0 {
-		ids, created, skipped, err := tx.ensureLabelsByName(ctx, added)
+		ids, created, skipped, err := tx.ensureLabelsByName(ctx, added, obs.altered)
 		if err != nil {
 			return res, err
 		}
@@ -453,6 +466,17 @@ func removedCanonical(removed, remaining []string) []string {
 	return out
 }
 
+// mirrorsToProvider reports whether a label created for the provider label n
+// may be mirrored back to the provider (X-GM-LABELS by the LOCAL name). It may
+// only when the local name IS the provider's, byte for byte: n unchanged by the
+// store's sanitiser (c == n), not altered by gmaillabel.Sanitize before it, valid
+// UTF-8, and holding no U+FFFD (what Sanitize puts in place of an invalid byte,
+// so a name that has one may not be the provider's bytes). Otherwise writeback
+// would create or write a DIFFERENT provider label.
+func mirrorsToProvider(n, canonical string, altered map[string]bool) bool {
+	return n == canonical && !altered[n] && utf8.ValidString(n) && !strings.ContainsRune(canonical, utf8.RuneError)
+}
+
 // ensureLabelsByName returns the ids of the user's labels with these names
 // (compared in their saved, sanitised form), creating each missing one
 // (mirrored to IMAP, as the Takeout importer creates them: ADR-047 writes a
@@ -469,7 +493,7 @@ func removedCanonical(removed, remaining []string) []string {
 // written back, and a sanitised name can never create or rename a label at the
 // provider. The provider's own name stays the identity in
 // message_provenance.gm_labels.
-func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string) (ids []string, created, skipped int, err error) {
+func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string, altered map[string]bool) (ids []string, created, skipped int, err error) {
 	have, err := tx.LabelIDsByName(ctx, names)
 	if err != nil {
 		return nil, 0, 0, err
@@ -485,7 +509,7 @@ func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string) (ids [
 			ids = append(ids, id.String())
 			continue
 		}
-		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: c == n})
+		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: mirrorsToProvider(n, c, altered)})
 		if errors.Is(err, ErrLabelNameTaken) {
 			// Created concurrently (another account's sync, a client): re-read.
 			again, rerr := tx.LabelIDsByName(ctx, []string{n})
