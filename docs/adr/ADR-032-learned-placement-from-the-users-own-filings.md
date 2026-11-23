@@ -654,6 +654,91 @@ test went red, and the mechanism was restored.
   (`placementCorrections` reads every origin). A key the user corrects stops
   acting for new mail, whatever placed the corrected message.
 
+## Amendment: learned sorting acts on more senders (v1.104 beta 2)
+
+**Status:** Accepted (decisions from the maintainer, 2026-11-23). This
+amendment changes §3 (the threshold), §7b (the authentication rule) and adds
+recency and a per-sender Forget. "Learned sorting" is the user-facing name of
+this feature; the names in code stay as they are.
+
+### Why
+
+Measurements on real mailboxes (the `placement-measure` report) showed three
+ceilings: one-filing senders never act (a user's second filing is the evidence
+for the third), mixed keys that the user has since settled never recover, and
+senders from the user's own infrastructure can never pass the trusted DMARC
+check. Each ceiling is a place where the user keeps filing by hand while the
+feature knows the answer.
+
+### Decisions
+
+1. **Trusted senders (authentication rule).** A user may mark one exact From
+   address as trusted (`LearnedSender/trust`, table `app.learned_sender_trust`,
+   migration 00101). For a trusted address, and only for it, the requirement
+   of a trusted DMARC pass is skipped. Nothing else is skipped: an ambiguous
+   From, the self-spoof and look-alike warnings, the evidence rules, the gate
+   and the mixed/contradicted verdicts all still apply. A message whose
+   authentication CLEARLY failed (`SenderAuth.AuthFail`) is still refused
+   even for a trusted address: trust waives a missing pass, not a failure.
+   A domain cannot be trusted wholesale. Trust changes learning only; the
+   warnings shown to the user are unchanged.
+2. **Single filing (the threshold).** An ADDRESS key with exactly one filing
+   and no contrary evidence may act. Domain keys keep their threshold
+   (`MinFilings`, and `MinDomainAddresses`). The placement is recorded with
+   `basis = 'single'` (migration 00103, a column on `app.learned_placements`:
+   the lightest place that is queryable by the report and survives the
+   filing it was made on).
+3. **The stricter undo for a single filing.** If the user corrects a
+   placement whose basis was `single`, the key is blocked until TWO more
+   agreeing filings, strictly newer than that correction, arrive. (The rule
+   for other placements is unchanged: blocked until anything newer is filed.)
+   A single-filing placement counts toward its area's correction gate like any
+   other arrival placement, so a run of wrong single-filing placements stops
+   the area.
+4. **Recency for mixed keys.** A mixed address key whose newest N = 3 filings
+   all go to one area, with no filing into another area at or after the
+   run's start, acts on that area (`basis = 'recency'`). A run is
+   `placement.TailRun`, the definition section 3 of `placement-measure`
+   already uses: filings are compared by time, strictly newer than the
+   newest filing into any other area, and a newest instant shared by two
+   areas has no run. Domain keys follow the same rule, only for a domain that
+   is not blocked as freemail or the user's own, and that spans at least
+   `MinDomainAddresses` addresses (the same narrowing as the domain
+   threshold). A correction still blocks a recency placement by the ordinary
+   contradiction rule.
+5. **Forget.** `LearnedSender/forget` stores a mark per (user, key kind, key)
+   in `app.learned_sender_forgotten` (migration 00102). Evidence reads ignore
+   filings and corrections older than the mark; nothing is deleted, and later
+   filings count again. An address mark also hides those filings from the
+   domain's evidence (otherwise the domain fallback would act on the very
+   evidence the user forgot); a domain mark affects the domain key only. The
+   correction gate's counts are not affected (the gate is a record of what
+   learned sorting did, not of what it knows).
+6. **Visibility.** Single-filing and recency placements are their own origin
+   rows in `placement-report` (open, kept, corrected, as the arrival origin
+   already is), `placement-explain` states the basis and which rule applied,
+   and `placement-measure` shows how many keys each rule reaches.
+   `LearnedSorting/status` reuses the report's queries.
+7. **Change log.** `learned_sender_trust` and `learned_sender_forgotten` are
+   private per-user settings, like the rule-suggestion dismissals: no
+   `/get`, `/changes` or state string of their own, so no `change_log` row.
+   Activity entries for forget, trust and untrust are written through
+   `app.audit_log`.
+
+### Safeguards that stay
+
+Every placement is still gated per area (Wilson lower bound), the off switch
+still applies, `applied_by = 'user'` is still the only evidence, and nothing
+here acts on a message a label already placed.
+
+### Measurement and roll-out
+
+- Read `placement-report` before and after deploy: the single-filing and
+  recency origin rows give their kept and corrected counts apart from the
+  rest, so a weaker rule cannot hide inside a strong aggregate.
+- `placement-backfill` asks the same decision, so its report may find more
+  mail to move; read it before `--apply`.
+
 ## References
 
 - **#28**: the next increments of learned placement.
