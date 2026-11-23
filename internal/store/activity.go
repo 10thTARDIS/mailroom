@@ -44,6 +44,12 @@ const (
 	ActivityKindSignOut    = "sign_out"
 	ActivityKindPlacement  = "placement"
 	ActivityKindRuleApply  = "rule_apply"
+	// ActivityKindLearnedSender: Forget, trust and untrust of a sender for
+	// learned sorting. Shown in the bulk-actions group: it is the user's own
+	// change to how their mail is sorted. The entry's KeyName is the sender, read
+	// through app.learned_sender_events (never from the audit row, which survives
+	// a hard delete), or "a sender" when that row is gone.
+	ActivityKindLearnedSender = "learned_sender"
 
 	// The audit_log vocabulary of a rule bulk apply (ADR-053, gap 1).
 	RuleApplyObjectType = "Rule"
@@ -92,6 +98,7 @@ var kindSource = map[string]string{
 	ActivityKindPurge:      ActivitySourcePurge,
 	ActivityKindSignIn:     ActivitySourceSession, ActivityKindSignOut: ActivitySourceSession,
 	ActivityKindPlacement: ActivitySourceBulk, ActivityKindRuleApply: ActivitySourceBulk,
+	ActivityKindLearnedSender: ActivitySourceBulk,
 }
 
 // ActivitySourceOf is the filter group of a kind ("" for an unknown kind).
@@ -328,6 +335,20 @@ func (b *actBuilder) activityBranch(kind string, f ActivityFilter, n string) str
 		            AND a.action IN ('` + backfillActionMove + `', '` + backfillActionUndo + `')` + inner + `
 		          GROUP BY a.object_id, a.action) g` + cond + `
 		  ORDER BY g.at DESC, g.bid DESC LIMIT ` + n + `)`
+	case ActivityKindLearnedSender:
+		// outcome is the action (learned_sender.forget|trust|untrust), method the
+		// scope, key_name the sender. The audit row's object_id is the EVENT id,
+		// not an address.
+		return `(SELECT a.created_at AS at, 'learned_sender' AS kind, lpad(a.id::text, 20, '0') AS id, a.action::text AS outcome,
+			COALESCE(e.address, 'a sender')::text AS key_name, a.detail->>'scope' AS method, NULL::text AS reason,
+			NULL::text AS purpose, NULL::text AS fingerprint, NULL::text AS user_agent, NULL::int AS cnt,
+			NULL::text AS object_type, NULL::text AS object_id, false AS object_exists
+		   FROM app.audit_log a
+		   LEFT JOIN app.learned_sender_events e ON e.user_id = $1 AND e.id::text = a.object_id
+		  WHERE a.user_id = $1 AND a.object_type = '` + LearnedSenderObjectType + `'
+		    AND a.action IN ('` + LearnedSenderForget + `', '` + LearnedSenderTrust + `', '` + LearnedSenderUntrust + `')` +
+			b.timeCond(f, kind, "a.created_at", "a.id", true) + `
+		  ORDER BY a.created_at DESC, a.id DESC LIMIT ` + n + `)`
 	case ActivityKindRuleApply:
 		return `(SELECT a.created_at AS at, 'rule_apply' AS kind, lpad(a.id::text, 20, '0') AS id, a.action::text AS outcome,
 			r.name::text AS key_name, NULL::text AS method, NULL::text AS reason,
@@ -438,7 +459,7 @@ func (tx *UserTx) ListActivity(ctx context.Context, f ActivityFilter) (ActivityP
 		if cnt != nil {
 			e.Count = *cnt
 		}
-		if e.Kind == ActivityKindPurge || e.Kind == ActivityKindAIKey || e.Kind == ActivityKindRuleApply {
+		if e.Kind == ActivityKindPurge || e.Kind == ActivityKindAIKey || e.Kind == ActivityKindRuleApply || e.Kind == ActivityKindLearnedSender {
 			e.ID = strings.TrimLeft(e.ID, "0")
 			if e.ID == "" {
 				e.ID = "0"
@@ -477,6 +498,8 @@ func (tx *UserTx) activityCovers(ctx context.Context, kinds []string) (map[strin
 		   WHERE a.user_id = $1 AND a.object_type = '` + backfillObjectType + `'`,
 		ActivityKindRuleApply: `SELECT min(a.created_at) FROM app.audit_log a
 		   WHERE a.user_id = $1 AND a.object_type = '` + RuleApplyObjectType + `'`,
+		ActivityKindLearnedSender: `SELECT min(a.created_at) FROM app.audit_log a
+		   WHERE a.user_id = $1 AND a.object_type = '` + LearnedSenderObjectType + `'`,
 	}
 	out := map[string]*time.Time{}
 	for _, k := range kinds {

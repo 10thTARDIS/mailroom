@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -154,14 +155,26 @@ const (
 	LearnedSenderUntrust    = "learned_sender.untrust"
 )
 
-// AuditLearnedSender writes one Activity entry (the existing audit writer, as
-// AuditRuleApply): who it concerns (the address or domain), and for a forget
-// its scope. Never message content.
+// AuditLearnedSender writes one Activity entry for a Forget or a trust change.
+//
+// ⚠ THE ADDRESS NEVER GOES INTO app.audit_log. Audit rows survive a hard delete
+// of the user (user_id is ON DELETE SET NULL, deliberately), so a sender address
+// there would outlive the account it belongs to. The address is written to
+// app.learned_sender_events (cascades with the user, RLS forced); the audit row
+// carries only that event's id in object_id and the scope in detail, and
+// Activity resolves the address by joining through the events table.
 func (tx *UserTx) AuditLearnedSender(ctx context.Context, action, subject, scope string) error {
+	kind := strings.TrimPrefix(action, "learned_sender.")
+	id := NewULID().String()
+	if _, err := tx.tx.Exec(ctx, `
+		INSERT INTO app.learned_sender_events (id, user_id, address, kind, scope)
+		VALUES ($1, $2, $3, $4, $5)`, id, tx.userID.String(), subject, kind, scope); err != nil {
+		return fmt.Errorf("store: learned sender event: %w", err)
+	}
 	if _, err := tx.tx.Exec(ctx, `
 		INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail)
 		VALUES ($1, 'user', $2, $3, $4, jsonb_build_object('scope', $5::text))`,
-		tx.userID.String(), action, LearnedSenderObjectType, subject, scope); err != nil {
+		tx.userID.String(), action, LearnedSenderObjectType, id, scope); err != nil {
 		return fmt.Errorf("store: audit learned sender: %w", err)
 	}
 	return nil

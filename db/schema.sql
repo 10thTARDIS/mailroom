@@ -4347,6 +4347,26 @@ CREATE POLICY learned_sender_forgotten_isolation ON app.learned_sender_forgotten
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
 
+-- WHERE THE ADDRESS BEHIND A LEARNED-SORTING ACTIVITY ENTRY LIVES (migration
+-- 00104): the audit row carries only this row's id, because audit_log survives a
+-- hard delete and an address must not. Cascades with the user. Not a
+-- JMAP-visible object: no change_log row.
+CREATE TABLE app.learned_sender_events (
+  id         app.ulid PRIMARY KEY,
+  user_id    app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  address    text NOT NULL CHECK (length(address) BETWEEN 3 AND 320),
+  kind       text NOT NULL CHECK (kind IN ('forget', 'trust', 'untrust')),
+  scope      text NOT NULL CHECK (scope IN ('address', 'domain')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX learned_sender_events_by_user ON app.learned_sender_events (user_id, created_at);
+ALTER TABLE app.learned_sender_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_sender_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_sender_events_isolation ON app.learned_sender_events
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
 -- OUT OF OFFICE (#50, migration 00065): the vacation responder Mailroom writes
 -- to the provider as a ManageSieve script (internal/outofoffice). One row per
 -- mail account; JMAP-visible as 'OutOfOffice' with the account id as its id.
@@ -4677,6 +4697,9 @@ GRANT SELECT, INSERT, DELETE ON app.learned_sender_trust TO mailroom_app;
 
 -- Forget marks (migration 00102): a second Forget moves the mark forward, so UPDATE.
 GRANT SELECT, INSERT, UPDATE ON app.learned_sender_forgotten TO mailroom_app;
+
+-- Learned-sorting activity events (migration 00104): written once, never changed.
+GRANT SELECT, INSERT ON app.learned_sender_events TO mailroom_app;
 
 -- Local DKIM verdicts (#776): written once with the message, gone with it; no UPDATE.
 GRANT SELECT, INSERT, DELETE ON app.message_local_auth TO mailroom_app;

@@ -47,6 +47,7 @@ var appTables = []string{
 	"setup_runs", "setup_journal",
 	"learned_placements", "learned_placement_gate_resets", "learned_placement_abstentions",
 	"learned_sender_trust", "learned_sender_forgotten",
+	"learned_sender_events",
 	"calendar_invites", "calendar_responses",
 	"nudge_dismissals", "rule_suggestion_dismissals", "area_index_state",
 	"out_of_office",
@@ -398,6 +399,11 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// senders another has asked learned sorting to forget.
 	exec(`INSERT INTO app.learned_sender_forgotten (user_id, key_kind, key_value) VALUES ($1, 'address', $2)`,
 		u.ID, tag+"-forgotten@example.net")
+
+	// One learned-sorting activity event (migration 00104): a leak would tell one
+	// user which senders another has forgotten or trusted.
+	exec(`INSERT INTO app.learned_sender_events (id, user_id, address, kind, scope) VALUES ($1, $2, $3, 'forget', 'address')`,
+		NewULID().String(), u.ID, tag+"-event@example.net")
 
 	// One follow-up nudge dismissal (#58, migration 00064): a leak would tell
 	// one user which of another's conversations they have closed.
