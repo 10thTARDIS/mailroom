@@ -117,6 +117,21 @@ export function entryWords(e: ActivityEntry): EntryWords {
       const undo = e.outcome === "placement.backfill.undo";
       return { template: tCount(undo ? "activity.placement.undo" : "activity.placement.move", n), name: null, tone: "plain" };
     }
+    case "learned_sender": {
+      const name = e.keyName !== null && e.keyName !== "" ? e.keyName : t("activity.learnedSender.unnamed");
+      switch (e.outcome) {
+        case "learned_sender.trust":
+          return { template: withName("activity.learnedSender.trust"), name, tone: "plain" };
+        case "learned_sender.untrust":
+          return { template: withName("activity.learnedSender.untrust"), name, tone: "plain" };
+        default:
+          return {
+            template: withName(e.method === "domain" ? "activity.learnedSender.forget.domain" : "activity.learnedSender.forget"),
+            name,
+            tone: "plain",
+          };
+      }
+    }
     case "rule_apply": {
       const n = e.count ?? 0;
       const undo = e.outcome === "rule.apply_undo";

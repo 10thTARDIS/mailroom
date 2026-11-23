@@ -132,12 +132,33 @@ func (f *fixture) lpUpdate(t *testing.T, msgID ulid.ULID, up store.EmailUpdate) 
 	}
 }
 
+// lpSeeding runs fn with learned placement switched OFF and restores the switch
+// after. Since a single filing now acts (ADR-032 amendment), the second message
+// of a seeding loop would be PLACED by learned placement, and re-filing a
+// message into the area it was just placed in records no filing: the seeding
+// would teach nothing. Seeding is the user's own history, made before the
+// feature acts, so it is made with the feature out of the way.
+func (f *fixture) lpSeeding(t *testing.T, fn func()) {
+	t.Helper()
+	was := f.scalar(t, `SELECT COALESCE((SELECT learned_placement_enabled FROM app.desk_preferences WHERE user_id = $1), true)::int`,
+		f.userID.String()) == 1
+	if was {
+		f.lpSwitch(t, false)
+	}
+	fn()
+	if was {
+		f.lpSwitch(t, true)
+	}
+}
+
 // lpFile ingests n messages from `from` and Re-files each into target.
 func (f *fixture) lpFile(t *testing.T, from string, n int, areas map[string]store.AreaView, target string) {
 	t.Helper()
-	for i := 0; i < n; i++ {
-		f.lpRefile(t, f.lpIngest(t, from), areas, target)
-	}
+	f.lpSeeding(t, func() {
+		for i := 0; i < n; i++ {
+			f.lpRefile(t, f.lpIngest(t, from), areas, target)
+		}
+	})
 }
 
 // lpFileHeld is lpFile for a sender whose mail the desk ALREADY places in
@@ -147,9 +168,11 @@ func (f *fixture) lpFile(t *testing.T, from string, n int, areas map[string]stor
 // query now counts them.
 func (f *fixture) lpFileHeld(t *testing.T, from string, n int, areas map[string]store.AreaView, target string) {
 	t.Helper()
-	for i := 0; i < n; i++ {
-		f.lpRefileChecked(t, f.lpIngest(t, from), areas, target, false)
-	}
+	f.lpSeeding(t, func() {
+		for i := 0; i < n; i++ {
+			f.lpRefileChecked(t, f.lpIngest(t, from), areas, target, false)
+		}
+	})
 	f.lpClaim(t, from, areas[target])
 }
 
@@ -268,13 +291,16 @@ func TestLearnedPlacementFilesAKnownSender(t *testing.T) {
 	}
 }
 
-// TestLearnedPlacementThinEvidenceAbstains: one filing is not a pattern.
-func TestLearnedPlacementThinEvidenceAbstains(t *testing.T) {
+// TestLearnedPlacementAThinDomainAbstains: a domain whose filings all come from
+// ONE address is that address's evidence relabelled, so it does not act for
+// another address (an ADDRESS with a single filing of its own does act now,
+// ADR-032 amendment; TestLearnedSortingASingleFilingPlaces).
+func TestLearnedPlacementAThinDomainAbstains(t *testing.T) {
 	f := newFixture(t)
 	areas := f.lpAreas(t)
-	f.lpFile(t, "alice@example.com", 1, areas, "Updates")
-	f.lpWantFilings(t, "alice@example.com", areas["Updates"], 1)
-	f.assertDeskPlaced(t, f.lpIngest(t, "alice@example.com"), areas, "one filing")
+	f.lpFile(t, "bob@shop.example", 2, areas, "Updates")
+	f.lpWantFilings(t, "bob@shop.example", areas["Updates"], 2)
+	f.assertDeskPlaced(t, f.lpIngest(t, "eve@shop.example"), areas, "a domain over one address")
 }
 
 // TestLearnedPlacementMixedEvidenceAbstains: filed into two areas, so no
@@ -347,15 +373,24 @@ func TestLearnedPlacementAddressBeatsDomain(t *testing.T) {
 	f.lpSwitch(t, false)
 	f.lpFile(t, "bob@shop.example", 2, areas, "Promotions")
 	f.lpFile(t, "carol@shop.example", 2, areas, "Promotions")
-	// dave has ONE filing, into the domain's own area: thin on his address.
-	f.lpFile(t, "dave@shop.example", 1, areas, "Promotions")
+	// dave has ONE filing, into a DIFFERENT area from the domain's: a single
+	// filing acts for an address, so his address decides for Updates and the
+	// domain's Promotions is not followed.
+	f.lpFile(t, "dave@shop.example", 1, areas, "Updates")
 	// erin has two, so her address is confident on its own.
 	f.lpFile(t, "erin@shop.example", 2, areas, "Promotions")
 	f.lpSwitch(t, true)
 
-	// Thin address, confident domain agreeing with it: the address decides,
-	// and it abstains.
-	f.assertDeskPlaced(t, f.lpIngest(t, "dave@shop.example"), areas, "thin address in a confident domain")
+	// Single-filing address, confident domain disagreeing with it: the address
+	// decides.
+	daveMsg := f.lpIngest(t, "dave@shop.example")
+	if n := f.lpLabelBy(t, daveMsg, areas["Updates"], store.LabelByLearned); n != 1 {
+		t.Errorf("single-filing address in a confident domain: learned Updates = %d, want 1 (the address decides)", n)
+	}
+	if n := f.scalar(t, `SELECT count(*) FROM app.learned_placements WHERE message_id=$1 AND key_kind='address' AND key_value='dave@shop.example'`,
+		daveMsg.String()); n != 1 {
+		t.Errorf("placement key: want (address, dave@shop.example)")
+	}
 
 	// A corrected address: erin's learned placement is taken back without a
 	// re-file, so her evidence is consistent but contradicted. The domain is
@@ -367,10 +402,10 @@ func TestLearnedPlacementAddressBeatsDomain(t *testing.T) {
 	f.lpUpdate(t, erinLearned, store.EmailUpdate{RemoveLabelIDs: []ulid.ULID{areas["Promotions"].LabelID}})
 	f.assertDeskPlaced(t, f.lpIngest(t, "erin@shop.example"), areas, "corrected address in a confident domain")
 
-	// dave filed into Updates now: the domain becomes mixed, so what follows
-	// is the address deciding on its own.
+	// dave now files twice into Promotions: his address is mixed (Updates 1,
+	// Promotions 2: a run of 2 is not recency), so it abstains.
 	f.lpSwitch(t, false)
-	f.lpFile(t, "dave@shop.example", 2, areas, "Updates")
+	f.lpFile(t, "dave@shop.example", 2, areas, "Promotions")
 	f.lpSwitch(t, true)
 	f.assertDeskPlaced(t, f.lpIngest(t, "dave@shop.example"), areas, "mixed address")
 
@@ -643,7 +678,7 @@ func TestPlacementReportCounts(t *testing.T) {
 	}
 	// Existing mail, ingested while learning is OFF: three from alice (two
 	// get filed into Updates, one stays in Primary) and one from bob (filed
-	// once: thin), plus mixed carol.
+	// once: a single filing, which acts for an address), plus mixed carol.
 	setSwitch(&off)
 	f.lpFile(t, "alice@example.com", 2, areas, "Updates")
 	f.lpIngest(t, "alice@example.com")
@@ -670,8 +705,11 @@ func TestPlacementReportCounts(t *testing.T) {
 		t.Errorf("filings = %d, want 5", rep.Filings)
 	}
 	r := rep.KeyReasons[placement.KeyAddress]
-	if r[placement.Confident] != 1 || r[placement.Thin] != 1 || r[placement.Mixed] != 1 {
-		t.Errorf("address keys = %v, want confident 1, thin 1, mixed 1", r)
+	if r[placement.Confident] != 2 || r[placement.Thin] != 0 || r[placement.Mixed] != 1 {
+		t.Errorf("address keys = %v, want confident 2 (alice, and bob on a single filing), thin 0, mixed 1", r)
+	}
+	if b := rep.ConfidentBasis[placement.KeyAddress]; b[placement.BasisEvidence] != 1 || b[placement.BasisSingle] != 1 {
+		t.Errorf("confident address keys by evidence = %v, want 1 ordinary (alice), 1 single filing (bob)", b)
 	}
 	for _, a := range rep.Areas {
 		if a.AreaID == areas["Updates"].ID && a.ConfidentAddresses != 1 {
@@ -679,14 +717,15 @@ func TestPlacementReportCounts(t *testing.T) {
 		}
 	}
 	move := store.PlacementMove{From: areas["Primary"].ID, To: areas["Updates"].ID}
-	if rep.Moves[move] != 1 || len(rep.Moves) != 1 {
-		t.Errorf("backfill moves = %v, want exactly Primary->Updates: 1", rep.Moves)
+	moveBob := store.PlacementMove{From: areas["Primary"].ID, To: areas["Promotions"].ID}
+	if rep.Moves[move] != 1 || rep.Moves[moveBob] != 1 || len(rep.Moves) != 2 {
+		t.Errorf("backfill moves = %v, want Primary->Updates: 1 (alice) and Primary->Promotions: 1 (bob, single filing)", rep.Moves)
 	}
 	if rep.Held != 5 {
 		t.Errorf("held (user-filed) = %d, want 5", rep.Held)
 	}
-	if rep.Abstain[placement.Thin] != 1 || rep.Abstain[placement.Mixed] != 1 {
-		t.Errorf("backfill abstentions = %v, want thin 1 (bob), mixed 1 (carol)", rep.Abstain)
+	if rep.Abstain[placement.Thin] != 0 || rep.Abstain[placement.Mixed] != 1 {
+		t.Errorf("backfill abstentions = %v, want thin 0, mixed 1 (carol)", rep.Abstain)
 	}
 }
 

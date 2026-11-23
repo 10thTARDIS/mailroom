@@ -27,7 +27,7 @@ type activityIDs struct {
 }
 
 // activityKindsAll is every kind the list can return.
-var activityKindsAll = []string{"ai_tool", "ai_key", "decryption", "purge", "sign_in", "sign_out", "placement", "rule_apply"}
+var activityKindsAll = []string{"ai_tool", "ai_key", "decryption", "purge", "sign_in", "sign_out", "placement", "rule_apply", "learned_sender"}
 
 // seedActivityRows writes one record for every Activity source, each carrying a
 // value no other user's rows share, so a leak is visible in the JSON by name.
@@ -57,6 +57,13 @@ func seedActivityRows(t *testing.T, super *pgxpool.Pool, u apiFixture, tag strin
 		exec(`INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail) VALUES ($1,'user',$2,$3,$4,'{"changed":4}')`,
 			u.UserID.String(), a.action, a.typ, a.obj)
 	}
+	// A learned-sorting entry: the audit row carries only the event's id, and the
+	// address lives in app.learned_sender_events (it must not outlive the user).
+	evt := store.NewULID().String()
+	exec(`INSERT INTO app.learned_sender_events (id, user_id, address, kind, scope) VALUES ($1,$2,$3,'forget','address')`,
+		evt, u.UserID.String(), "sender-"+tag+"@example.net")
+	exec(`INSERT INTO app.audit_log (user_id, actor, action, object_type, object_id, detail) VALUES ($1,'user',$2,$3,$4,'{"scope":"address"}')`,
+		u.UserID.String(), store.LearnedSenderForget, store.LearnedSenderObjectType, evt)
 	exec(`INSERT INTO app.rules (id, user_id, name, conditions, actions) VALUES ($1,$2,$3,'{}','[]')`,
 		ids.rule, u.UserID.String(), "rule-"+tag)
 	exec(`INSERT INTO app.pgp_decrypt_audit (id, user_id, message_id, purpose, outcome, key_fingerprint) VALUES ($1,$2,$3,'body','decrypted','AABBCCDD11')`,

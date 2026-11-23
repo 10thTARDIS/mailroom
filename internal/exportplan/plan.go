@@ -257,6 +257,28 @@ var plan = map[string]Entry{
 	"learned_placement_abstentions": {Dropped, "",
 		"a per-day tally of why learned placement held back on this instance's arrivals"},
 
+	// Trusted senders for learned sorting (#169, migration 00101). EXPORTED: it is
+	// the user's own choice about one exact sender, written by hand, and nothing
+	// re-derives it. It names an address, not an id of this instance, so it means
+	// the same on another one.
+	"learned_sender_trust": {Exported, "learned_sender_trust.json (the addresses the user marked as trusted)",
+		"a deliberate act of the user about one exact From address; not derivable from the mail"},
+
+	// Forget marks for learned sorting (#167, migration 00102). DROPPED: a mark is
+	// a moment on THIS instance's clock that tells the evidence reads to ignore
+	// older label rows; an import writes fresh label rows with fresh times, so the
+	// mark would hide nothing, and the filings it was about are not exported with
+	// their original times.
+	"learned_sender_forgotten": {Dropped, "",
+		"a point in time on this instance's clock that hides older filings from learned sorting; " +
+			"an import creates new filing times, so it would hide nothing"},
+
+	// The addresses behind learned sorting's Activity entries (migration 00104).
+	// DROPPED, like the Activity record it backs (audit_log is WITHHELD): a log of
+	// what the user did here, which says nothing about their mail.
+	"learned_sender_events": {Dropped, "",
+		"the sender addresses behind Activity entries for Forget and trust; the Activity record itself is not exported"},
+
 	// Stored-area readiness (ADR-049, migration 00086). DROPPED: whether THIS
 	// instance's stored area column is complete for the user; an import writes
 	// messages through the triggers and the flag is earned by `area-index`.

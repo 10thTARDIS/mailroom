@@ -36,14 +36,18 @@ func bfPass(domain string) string {
 // bfPlan runs the planner in EXACT mode over the fixture's own blob store.
 func (f *fixture) bfPlan(t *testing.T, excludes ...string) store.PlacementBackfillPlan {
 	t.Helper()
+	return f.bfPlanOpts(t, store.PlacementBackfillOptions{Exclude: excludes})
+}
+
+// bfPlanOpts is bfPlan with the other options (--no-single, --no-recency).
+func (f *fixture) bfPlanOpts(t *testing.T, opts store.PlacementBackfillOptions) store.PlacementBackfillPlan {
+	t.Helper()
 	ctx := context.Background()
 	var plan store.PlacementBackfillPlan
 	if err := f.st.UserTx(ctx, f.userID, func(tx *store.UserTx) error {
 		var e error
-		plan, e = tx.PlanPlacementBackfill(ctx, store.PlacementBackfillOptions{
-			Exclude: excludes,
-			Senders: BackfillSenders(f.ing.blobs, f.userID, f.dek, f.ing.trustedAuthservIDs),
-		})
+		opts.Senders = BackfillSenders(f.ing.blobs, f.userID, f.dek, f.ing.trustedAuthservIDs)
+		plan, e = tx.PlanPlacementBackfill(ctx, opts)
 		return e
 	}); err != nil {
 		t.Fatalf("plan: %v", err)

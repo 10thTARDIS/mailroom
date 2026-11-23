@@ -44,7 +44,7 @@ func TestPrintPlacementBackfill(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"checks: EXACT",
-		"learned placement: ON",
+		"learned sorting: ON",
 		"move 2",
 		fmt.Sprintf("  %-42s %6d", "sender not authenticated", 2),
 		fmt.Sprintf("  %-42s %6d", "ambiguous From", 0),
@@ -77,6 +77,37 @@ func TestValidateExcludes(t *testing.T) {
 	for _, bad := range []string{"", "localhost", "a@", "@", "a b.example", "a.example,b.example"} {
 		if err := validateExcludes([]string{bad}); err == nil {
 			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// The plan prints how many moves rest on each kind of evidence, in total and per
+// key, and the opt-out reasons, so the weaker rules can be read (and left out)
+// before an ungated apply.
+func TestPrintPlacementBackfillSplitsMovesByEvidence(t *testing.T) {
+	plan := store.PlacementBackfillPlan{
+		Enabled: true, Exact: true,
+		Abstain:      map[placement.Reason]int{store.BackfillNoSingle: 2},
+		Pairs:        map[store.PlacementMove]int{},
+		Excluded:     map[string]int{},
+		MovesByBasis: map[placement.Basis]int{placement.BasisEvidence: 5, placement.BasisSingle: 3, placement.BasisRecency: 1},
+		Keys: []store.PlacementBackfillKey{{
+			Key:     placement.Key{Kind: placement.KeyAddress, Value: "bob@example.com"},
+			Moves:   3,
+			ByBasis: map[placement.Basis]int{placement.BasisSingle: 3},
+			NowIn:   map[ulid.ULID]int{}, Skipped: map[placement.Reason]int{},
+		}},
+	}
+	var buf bytes.Buffer
+	printPlacementBackfill(&buf, plan, nil, nil, false)
+	out := buf.String()
+	for _, want := range []string{
+		"ordinary (>= 2 agreeing filings) 5 · SINGLE FILING 3 · RECENCY RUN 1",
+		"left out: single filing (--no-single)",
+		"0/3/0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
 		}
 	}
 }

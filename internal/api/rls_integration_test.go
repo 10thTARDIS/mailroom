@@ -2222,7 +2222,8 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 	// status must (the control that proves the probe can see the row).
 	"LearnedPlacement/getStatus": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		superExec(t, h, `INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)`,
+		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)
+		                 ON CONFLICT DO NOTHING`,
 			b.UserID.String(), b.MessageID.String(), b.AreaID.String())
 		res, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", a.UserID, map[string]any{})
 		if mErr != nil {
@@ -2239,6 +2240,101 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 		if _, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", a.UserID, map[string]any{
 			"accountId": b.UserID.String()}); mErr == nil || mErr.Type != errAccountNotFound {
 			t.Fatalf("LearnedPlacement/getStatus naming B's account: got %+v, want accountNotFound", mErr)
+		}
+	},
+
+	// Learned sorting's per-sender settings (#167, #169, migrations 00101 and
+	// 00102). B trusts one address and has forgotten it; none of that is A's to
+	// see or change, and each probe has the control that A's own row works.
+	"LearnedSender/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		const addr = "b-secret-trusted@b-private.example"
+		superExec(t, h, `INSERT INTO app.learned_sender_trust (user_id, address) VALUES ($1, $2)`, b.UserID.String(), addr)
+		superExec(t, h, `INSERT INTO app.learned_sender_forgotten (user_id, key_kind, key_value) VALUES ($1, 'address', $2)`, b.UserID.String(), addr)
+		res, mErr := invokeAs(t, h, "LearnedSender/get", a.UserID, map[string]any{"senders": []string{addr}})
+		if mErr != nil {
+			t.Fatalf("LearnedSender/get: %+v", mErr)
+		}
+		e := asArr(res["list"])[0].(map[string]any)
+		if e["trusted"] != false || e["forgottenAt"] != nil {
+			t.Errorf("LearnedSender/get showed A B's trust or Forget mark: %v", e)
+		}
+		own, mErr := invokeAs(t, h, "LearnedSender/get", b.UserID, map[string]any{"senders": []string{addr}})
+		if mErr != nil || asArr(own["list"])[0].(map[string]any)["trusted"] != true {
+			t.Errorf("LearnedSender/get for B = %v, %+v, want trusted (the control that the probe can see the row)", own, mErr)
+		}
+		if _, mErr := invokeAs(t, h, "LearnedSender/get", a.UserID, map[string]any{
+			"accountId": b.UserID.String(), "senders": []string{addr}}); mErr == nil || mErr.Type != errAccountNotFound {
+			t.Fatalf("LearnedSender/get naming B's account: got %+v, want accountNotFound", mErr)
+		}
+	},
+	"LearnedSender/trust": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		const addr = "shared-name@example.net"
+		count := func(u rlsUser) int {
+			var n int
+			superScan(t, h, &n, `SELECT count(*) FROM app.learned_sender_trust WHERE user_id = $1`, u.UserID.String())
+			return n
+		}
+		before := count(b)
+		if _, mErr := invokeAs(t, h, "LearnedSender/trust", a.UserID, map[string]any{"sender": addr, "trusted": true}); mErr != nil {
+			t.Fatalf("LearnedSender/trust: %+v", mErr)
+		}
+		if got := count(b); got != before {
+			t.Fatalf("A's trust changed B's trusted senders from %d to %d", before, got)
+		}
+		if count(a) != 1 {
+			t.Fatalf("control: A's own trust was not stored")
+		}
+		// Untrusting does not reach B's row of the same address either.
+		superExec(t, h, `INSERT INTO app.learned_sender_trust (user_id, address) VALUES ($1, $2)`, b.UserID.String(), addr)
+		if _, mErr := invokeAs(t, h, "LearnedSender/trust", a.UserID, map[string]any{"sender": addr, "trusted": false}); mErr != nil {
+			t.Fatalf("LearnedSender/trust (untrust): %+v", mErr)
+		}
+		if got := count(b); got != before+1 {
+			t.Fatalf("A's untrust removed B's trust (B now has %d, want %d)", got, before+1)
+		}
+		if count(a) != 0 {
+			t.Fatalf("control: A's untrust did not remove A's own row")
+		}
+	},
+	"LearnedSender/forget": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		count := func(u rlsUser) int {
+			var n int
+			superScan(t, h, &n, `SELECT count(*) FROM app.learned_sender_forgotten WHERE user_id = $1`, u.UserID.String())
+			return n
+		}
+		beforeB := count(b)
+		for _, scope := range []string{"address", "domain"} {
+			if _, mErr := invokeAs(t, h, "LearnedSender/forget", a.UserID, map[string]any{"sender": "x@example.net", "scope": scope}); mErr != nil {
+				t.Fatalf("LearnedSender/forget %s: %+v", scope, mErr)
+			}
+		}
+		if got := count(b); got != beforeB {
+			t.Fatalf("A's Forget changed B's marks from %d to %d", beforeB, got)
+		}
+		if count(a) != 2 {
+			t.Fatalf("control: A's own marks = %d, want 2", count(a))
+		}
+	},
+	"LearnedSorting/status": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
+		superExec(t, h, `INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
+		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)
+		                 ON CONFLICT DO NOTHING`,
+			b.UserID.String(), b.MessageID.String(), b.AreaID.String())
+		res, mErr := invokeAs(t, h, "LearnedSorting/status", a.UserID, map[string]any{})
+		if mErr != nil {
+			t.Fatalf("LearnedSorting/status: %+v", mErr)
+		}
+		assertNoBLeak(t, "LearnedSorting/status", res, b)
+		if res["placed"] != float64(0) {
+			t.Errorf("LearnedSorting/status counted B's placement for A: %v", res)
+		}
+		own, mErr := invokeAs(t, h, "LearnedSorting/status", b.UserID, map[string]any{})
+		if mErr != nil || own["placed"] != float64(1) {
+			t.Errorf("LearnedSorting/status for B = %v, %+v, want placed=1", own, mErr)
+		}
+		if _, mErr := invokeAs(t, h, "LearnedSorting/status", a.UserID, map[string]any{
+			"accountId": b.UserID.String()}); mErr == nil || mErr.Type != errAccountNotFound {
+			t.Fatalf("LearnedSorting/status naming B's account: got %+v, want accountNotFound", mErr)
 		}
 	},
 

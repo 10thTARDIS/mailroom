@@ -49,6 +49,9 @@ type PlacementReport struct {
 	Areas   []PlacementReportArea
 	// KeyReasons counts keys by verdict, per key kind (address, domain).
 	KeyReasons map[placement.KeyKind]map[placement.Reason]int
+	// ConfidentBasis splits the confident keys by the evidence they rest on, per
+	// key kind (a single filing, a recency run, or the ordinary rule).
+	ConfidentBasis map[placement.KeyKind]map[placement.Basis]int
 	// Filings is the number of user filings the evidence is built from.
 	Filings int
 
@@ -81,6 +84,9 @@ type PlacementReport struct {
 func (tx *UserTx) PlacementReport(ctx context.Context) (PlacementReport, error) {
 	rep := PlacementReport{
 		KeyReasons: map[placement.KeyKind]map[placement.Reason]int{
+			placement.KeyAddress: {}, placement.KeyDomain: {},
+		},
+		ConfidentBasis: map[placement.KeyKind]map[placement.Basis]int{
 			placement.KeyAddress: {}, placement.KeyDomain: {},
 		},
 		Moves:   map[PlacementMove]int{},
@@ -121,56 +127,19 @@ func (tx *UserTx) PlacementReport(ctx context.Context) (PlacementReport, error) 
 		return rep, fmt.Errorf("store: placement report (areas): %w", err)
 	}
 
-	// Evidence and key verdicts.
-	filings, err := tx.placementFilings(ctx, "", time.Time{})
+	// Evidence and key verdicts (placementKeyTally: the one definition, shared
+	// with LearnedSorting/status).
+	kt, err := tx.placementKeyTally(ctx)
 	if err != nil {
 		return rep, err
 	}
-	rep.Filings = len(filings)
-	byAddr, byDomain := aggregatePlacementEvidence(filings)
-	corrections, err := tx.placementCorrections(ctx, nil, time.Time{})
-	if err != nil {
-		return rep, err
-	}
-	withCorrection := func(kind placement.KeyKind, m map[string]placement.Evidence) {
-		for k, e := range m {
-			e.LatestCorrection = corrections[placement.Key{Kind: kind, Value: k}]
-			m[k] = e
+	rep.Filings, rep.KeyReasons, rep.ConfidentBasis = kt.Filings, kt.Reasons, kt.Basis
+	for id, n := range kt.ConfidentByArea {
+		if i, ok := index[id]; ok {
+			rep.Areas[i].ConfidentAddresses = n[0]
+			rep.Areas[i].ConfidentDomains = n[1]
 		}
 	}
-	withCorrection(placement.KeyAddress, byAddr)
-	withCorrection(placement.KeyDomain, byDomain)
-	own, err := tx.ownIdentityDomains(ctx)
-	if err != nil {
-		return rep, err
-	}
-	// A key with a correction but no remaining filings (the user re-filed
-	// every message elsewhere and then took those labels off too) has no
-	// evidence and judges NoEvidence, which is what ingest would say.
-	tally := func(kind placement.KeyKind, m map[string]placement.Evidence) {
-		for k, e := range m {
-			if kind == placement.KeyDomain && placement.DomainFallbackBlocked(k, own) {
-				// A freemail or own domain never acts as a fallback, whatever
-				// its filings say: reported as its own verdict.
-				rep.KeyReasons[kind][placement.DomainBlocked]++
-				continue
-			}
-			v := placement.Judge(kind, e)
-			rep.KeyReasons[kind][v.Reason]++
-			if v.Reason != placement.Confident {
-				continue
-			}
-			if i, ok := index[*v.Area]; ok {
-				if kind == placement.KeyAddress {
-					rep.Areas[i].ConfidentAddresses++
-				} else {
-					rep.Areas[i].ConfidentDomains++
-				}
-			}
-		}
-	}
-	tally(placement.KeyAddress, byAddr)
-	tally(placement.KeyDomain, byDomain)
 
 	// Placements and the gate.
 	counts, err := tx.placementAreaCounts(ctx, nil)
@@ -201,4 +170,68 @@ func (tx *UserTx) PlacementReport(ctx context.Context) (PlacementReport, error) 
 		return rep, err
 	}
 	return rep, nil
+}
+
+// PlacementKeyTally is every key's verdict, counted: the evidence side of
+// placement-report and of LearnedSorting/status.
+type PlacementKeyTally struct {
+	// Filings is the number of user filings the evidence is built from.
+	Filings int
+	// Reasons counts keys by verdict, per key kind; Basis splits the confident
+	// ones by the evidence they rest on.
+	Reasons map[placement.KeyKind]map[placement.Reason]int
+	Basis   map[placement.KeyKind]map[placement.Basis]int
+	// ConfidentByArea is, per area, the confident [address, domain] key counts.
+	ConfidentByArea map[ulid.ULID][2]int
+}
+
+// placementKeyTally judges every key with filings. A key with a correction but
+// no remaining filings has no evidence and judges NoEvidence, which is what
+// ingest would say; a freemail or own domain is reported as blocked whatever its
+// filings say (it never acts as a fallback).
+func (tx *UserTx) placementKeyTally(ctx context.Context) (PlacementKeyTally, error) {
+	out := PlacementKeyTally{
+		Reasons:         map[placement.KeyKind]map[placement.Reason]int{placement.KeyAddress: {}, placement.KeyDomain: {}},
+		Basis:           map[placement.KeyKind]map[placement.Basis]int{placement.KeyAddress: {}, placement.KeyDomain: {}},
+		ConfidentByArea: map[ulid.ULID][2]int{},
+	}
+	filings, err := tx.placementFilings(ctx, "", time.Time{})
+	if err != nil {
+		return out, err
+	}
+	out.Filings = len(filings)
+	byAddr, byDomain := aggregatePlacementEvidence(filings)
+	corrections, err := tx.placementCorrections(ctx, nil, time.Time{})
+	if err != nil {
+		return out, err
+	}
+	own, err := tx.ownIdentityDomains(ctx)
+	if err != nil {
+		return out, err
+	}
+	tally := func(kind placement.KeyKind, m map[string]placement.Evidence) {
+		for k, e := range m {
+			corrections[placement.Key{Kind: kind, Value: k}].applyTo(&e)
+			if kind == placement.KeyDomain && placement.DomainFallbackBlocked(k, own) {
+				out.Reasons[kind][placement.DomainBlocked]++
+				continue
+			}
+			v := placement.Judge(kind, e)
+			out.Reasons[kind][v.Reason]++
+			if v.Reason != placement.Confident {
+				continue
+			}
+			out.Basis[kind][v.Basis]++
+			n := out.ConfidentByArea[*v.Area]
+			if kind == placement.KeyAddress {
+				n[0]++
+			} else {
+				n[1]++
+			}
+			out.ConfidentByArea[*v.Area] = n
+		}
+	}
+	tally(placement.KeyAddress, byAddr)
+	tally(placement.KeyDomain, byDomain)
+	return out, nil
 }

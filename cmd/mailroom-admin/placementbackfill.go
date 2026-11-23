@@ -55,6 +55,8 @@ func runPlacementBackfill(ctx context.Context, args []string) error {
 		userIDStr = fs.String("user-id", "", "user id (ULID)")
 		apply     = fs.Bool("apply", false, "perform the printed plan (default: report only)")
 		undo      = fs.String("undo", "", "batch id (ULID): reverse one applied batch")
+		noSingle  = fs.Bool("no-single", false, "leave out moves that rest on a single filing (backfill on the old rule)")
+		noRecency = fs.Bool("no-recency", false, "leave out moves that rest on a recency run (backfill on the old rule)")
 	)
 	fs.Var(&excludes, "exclude", "sender address or domain to leave alone (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -67,8 +69,8 @@ func runPlacementBackfill(ctx context.Context, args []string) error {
 	if err := validateExcludes(excludes); err != nil {
 		return err
 	}
-	if *undo != "" && (*apply || len(excludes) > 0) {
-		return errors.New("placement-backfill: --undo takes no --apply or --exclude")
+	if *undo != "" && (*apply || len(excludes) > 0 || *noSingle || *noRecency) {
+		return errors.New("placement-backfill: --undo takes no --apply, --exclude, --no-single or --no-recency")
 	}
 
 	d, err := openDeps(ctx)
@@ -114,7 +116,7 @@ func runPlacementBackfill(ctx context.Context, args []string) error {
 	if err := d.store.UserTx(ctx, userID, func(tx *store.UserTx) error {
 		var e error
 		plan, e = tx.PlanPlacementBackfill(ctx, store.PlacementBackfillOptions{
-			Exclude: excludes,
+			Exclude: excludes, NoSingle: *noSingle, NoRecency: *noRecency,
 			Senders: ingest.BackfillSenders(blobs, userID, dek, trusted),
 		})
 		if e != nil {
@@ -191,6 +193,8 @@ var backfillReasonOrder = []struct {
 	{placement.NoKey, "no key"},
 	{placement.DomainBlocked, "domain fallback blocked (freemail/own)"},
 	{store.BackfillExcluded, "excluded (--exclude)"},
+	{store.BackfillNoSingle, "left out: single filing (--no-single)"},
+	{store.BackfillNoRecency, "left out: recency run (--no-recency)"},
 	{store.BackfillPlacedBefore, "placed by learned placement before"},
 	{store.LearnedGated, "area stopped by its correction gate"},
 	{store.BackfillUnreadable, "message bytes unreadable"},
@@ -207,11 +211,11 @@ func printPlacementBackfill(w io.Writer, plan store.PlacementBackfillPlan,
 	batches []store.PlacementBackfillBatch, trusted []string, apply bool) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
 	names := plan.AreaNames
-	p("=== placement-backfill (#714): learned placement for mail already on the desk ===\n")
+	p("=== placement-backfill (#714): learned sorting for mail already on the desk ===\n")
 	if plan.Enabled {
-		p("learned placement: ON\n")
+		p("learned sorting: ON\n")
 	} else {
-		p("learned placement: OFF for this login: --apply is refused; the plan below is what it would do\n")
+		p("learned sorting: OFF for this login: --apply is refused; the plan below is what it would do\n")
 	}
 	if len(trusted) > 0 {
 		p("authentication: a DMARC pass bound to the From domain, from a trusted authserv-id (%s)\n", strings.Join(trusted, ","))
@@ -262,6 +266,12 @@ func printPlacementBackfill(w io.Writer, plan store.PlacementBackfillPlan,
 		}
 	}
 
+	// Backfilled placements are NOT gated, so reading what rests on the weaker
+	// rules is the safeguard (ADR-032 amendment).
+	p("\nMOVES BY EVIDENCE (%d): ordinary (>= 2 agreeing filings) %d · SINGLE FILING %d · RECENCY RUN %d\n", len(plan.Moves),
+		plan.MovesByBasis[placement.BasisEvidence], plan.MovesByBasis[placement.BasisSingle], plan.MovesByBasis[placement.BasisRecency])
+	p("  (--no-single and --no-recency leave the last two out, to backfill on the old rule; backfilled moves are not gated)\n")
+
 	p("\nMOVES BY AREA PAIR (%d)\n", len(plan.Moves))
 	p("  %-20s %-20s %8s\n", "NOW IN", "LEARNED", "MESSAGES")
 	pairs := make([]store.PlacementMove, 0, len(plan.Pairs))
@@ -279,10 +289,10 @@ func printPlacementBackfill(w io.Writer, plan store.PlacementBackfillPlan,
 	}
 
 	p("\nPER KEY (each line is exactly what --apply does for that key)\n")
-	p("  %-7s %-40s %-14s %6s  %-34s %s\n", "KIND", "KEY", "LEARNED", "MOVES", "NOW IN", "SKIPPED")
+	p("  %-7s %-40s %-14s %6s  %-12s %-34s %s\n", "KIND", "KEY", "LEARNED", "MOVES", "ORD/SGL/REC", "NOW IN", "SKIPPED")
 	for _, k := range plan.Keys {
-		p("  %-7s %-40s %-14s %6d  %-34s %s\n", k.Key.Kind, k.Key.Value, areaName(names, k.AreaID), k.Moves,
-			nowInBreakdown(names, k.NowIn), skippedBreakdown(k.Skipped))
+		p("  %-7s %-40s %-14s %6d  %-12s %-34s %s\n", k.Key.Kind, k.Key.Value, areaName(names, k.AreaID), k.Moves,
+			basisBreakdown(k.ByBasis), nowInBreakdown(names, k.NowIn), skippedBreakdown(k.Skipped))
 	}
 
 	if len(batches) > 0 {
@@ -362,4 +372,13 @@ func printPlacementBackfillUndo(w io.Writer, batch ulid.ULID, res store.Placemen
 		p("  %-14s %6d\n", o, res.Outcomes[o])
 	}
 	p("(refiled: the user or a rule filed the message after the batch moved it; their decision stands)\n")
+}
+
+// basisBreakdown is "ord 3 · single 1 · recency 0" for a key's moves; "-" when
+// it moves nothing.
+func basisBreakdown(m map[placement.Basis]int) string {
+	if len(m) == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%d/%d/%d", m[placement.BasisEvidence], m[placement.BasisSingle], m[placement.BasisRecency])
 }

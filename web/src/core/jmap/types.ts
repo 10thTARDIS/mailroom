@@ -272,7 +272,8 @@ export type ActivityKind =
   | "sign_in"
   | "sign_out"
   | "placement"
-  | "rule_apply";
+  | "rule_apply"
+  | "learned_sender";
 
 /** One entry. Fields a kind does not have are null. Never message content. */
 export interface ActivityEntry {
@@ -2934,6 +2935,52 @@ export interface LearningStatus {
   senders: LearningStatusSender[];
   moreSenders: number;
   sendersTruncated: boolean;
+}
+
+/** One key's learned-sorting evidence (LearnedSender/get): the address or its domain. */
+export interface LearnedSenderEvidence {
+  areaId: Id | null;
+  filings: number;
+  /** confident | thin | mixed | contradicted | none */
+  verdict: string;
+  /** Would learned sorting place this sender's next authenticated message? */
+  acting: boolean;
+  /** The abstention code when not acting (none, thin, mixed, contradicted, blocked, unauthenticated, gated, off, ...). */
+  reason: string | null;
+  /** When this key was forgotten (newer of the two is the top-level value). Absent on older servers. */
+  forgottenAt?: string | null;
+}
+
+/** LearnedSender/get, /forget and /trust (#167). */
+export interface LearnedSender {
+  sender: string;
+  address: LearnedSenderEvidence;
+  domain: LearnedSenderEvidence & { domain: string };
+  decidedBy: "address" | "domain" | "none";
+  trusted: boolean;
+  /**
+   * False when the address is at one of the user's own identity domains: mail
+   * claiming to be from there is always checked, so trusting it cannot help.
+   * Absent on an older server, which reads as true.
+   */
+  trustUseful?: boolean;
+  forgottenAt: string | null;
+}
+
+/** LearnedSorting/status (v1.104): the same counts as placement-report, for Settings. */
+export interface LearnedSortingStatus {
+  enabled: boolean;
+  windowDays: number;
+  placed: number;
+  corrected: number;
+  precision: number | null;
+  lowerBound: number | null;
+  sendersLearned: { address: number; domain: number };
+  /** Abstention reason code -> count of messages held back. */
+  heldBack: Record<string, number>;
+  /** The date (YYYY-MM-DD) the held-back counting began. */
+  heldBackSince: string | null;
+  areas: Array<{ areaId: Id; placed: number; corrected: number; gate: "acting" | "stopped" | "not_judged" }>;
 }
 
 /**

@@ -26,8 +26,8 @@
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 
-import type { LearningStatus, LearningStatusSender } from "../../../../core/jmap/types";
-import { t } from "../../../i18n";
+import type { LearnedSortingStatus, LearningStatus, LearningStatusSender } from "../../../../core/jmap/types";
+import { t, tCount } from "../../../i18n";
 import type { MessageKey } from "../../../i18n";
 import { useApp, useMailState } from "../../../state";
 import { makeRuleForSender } from "../../ruleSuggestion";
@@ -50,6 +50,9 @@ export function LearnedPlacementToggle(): JSX.Element | null {
   const { actions } = useApp();
   const prefs = useMailState().deskPreferences;
   const [busy, setBusy] = useState(false);
+  // The newer status block says what the older one's first line says, so the
+  // older line steps aside once the newer one has loaded.
+  const [newer, setNewer] = useState(false);
   if (prefs === null || typeof prefs.learnedPlacementEnabled !== "boolean") return null;
   const on = prefs.learnedPlacementEnabled;
 
@@ -73,7 +76,8 @@ export function LearnedPlacementToggle(): JSX.Element | null {
         {t("settings.learned.toggle")}
       </label>
       <p className="field-hint">{t("settings.learned.explain")}</p>
-      {on ? <LearningStatusBlock /> : null}
+      {on ? <LearnedSortingStatusBlock onLoaded={setNewer} /> : null}
+      {on ? <LearningStatusBlock hideFiled={newer} /> : null}
     </fieldset>
   );
 }
@@ -93,7 +97,7 @@ function filedText(s: LearningStatus): string {
   return `${filed} ${moved}`;
 }
 
-function LearningStatusBlock(): JSX.Element | null {
+function LearningStatusBlock({ hideFiled }: { hideFiled: boolean }): JSX.Element | null {
   const app = useApp();
   const { actions } = app;
   const areas = useMailState().areas;
@@ -136,7 +140,7 @@ function LearningStatusBlock(): JSX.Element | null {
 
   return (
     <div className="learned-status">
-      <p className="field-hint">{filedText(status)}</p>
+      {hideFiled ? null : <p className="field-hint">{filedText(status)}</p>}
       {lines.length > 0 ? (
         <>
           <h4>{t("settings.learned.senders.heading")}</h4>
@@ -167,6 +171,98 @@ function LearningStatusBlock(): JSX.Element | null {
             </p>
           ) : null}
         </>
+      ) : null}
+    </div>
+  );
+}
+
+/** Held-back reason codes we have a plain phrase for; anything else is counted under "other reasons". */
+const HELD_KEYS: Record<string, MessageKey> = {
+  none: "learnedStatus.held.reason.none",
+  thin: "learnedStatus.held.reason.thin",
+  mixed: "learnedStatus.held.reason.mixed",
+  contradicted: "learnedStatus.held.reason.contradicted",
+  unauthenticated: "learnedStatus.held.reason.unauthenticated",
+  gated: "learnedStatus.held.reason.gated",
+  blocked: "learnedStatus.held.reason.blocked",
+  warned: "learnedStatus.held.reason.warned",
+  ambiguous: "learnedStatus.held.reason.ambiguous",
+  elsewhere: "learnedStatus.held.reason.elsewhere",
+};
+
+/**
+ * LEARNED SORTING'S NUMBERS (LearnedSorting/status): what it placed and what
+ * the user corrected, per area, and what it held back and why. FAILURE IS
+ * SILENCE, as for the block below it: a failed call draws nothing.
+ */
+function LearnedSortingStatusBlock({ onLoaded }: { onLoaded: (loaded: boolean) => void }): JSX.Element | null {
+  const { actions } = useApp();
+  const areas = useMailState().areas;
+  const [status, setStatus] = useState<LearnedSortingStatus | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void actions.learnedSortingStatus().then((s) => {
+      if (live) {
+        setStatus(s);
+        onLoaded(s !== null && s.enabled);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [actions, onLoaded]);
+
+  if (!status || !status.enabled) return null;
+  const days = status.windowDays;
+  const rows = status.areas.filter((a) => areas[a.areaId] !== undefined && (a.placed > 0 || a.corrected > 0 || a.gate === "stopped"));
+  // Reasons with a count, in plain words; unknown codes are summed, never dropped.
+  const held: Array<{ key: string; label: string; count: number }> = [];
+  let other = 0;
+  for (const [code, count] of Object.entries(status.heldBack ?? {})) {
+    if (count <= 0) continue;
+    const k = HELD_KEYS[code];
+    if (k) held.push({ key: code, label: t(k), count });
+    else other += count;
+  }
+  if (other > 0) held.push({ key: "other", label: t("learnedStatus.held.reason.other"), count: other });
+
+  return (
+    <div className="learned-status" role="group" aria-label={t("learnedStatus.heading")}>
+      <p className="field-hint">
+        {status.placed > 0
+          ? tCount("learnedStatus.placed", status.placed, { placed: status.placed, days, corrected: status.corrected })
+          : t("learnedStatus.none", { days })}
+      </p>
+      {rows.length > 0 ? (
+        <ul>
+          {rows.map((a) => (
+            <li key={a.areaId}>
+              {t("learnedStatus.area", {
+                area: areas[a.areaId]?.name ?? "",
+                placed: a.placed,
+                corrected: a.corrected,
+              })}
+              {a.gate === "stopped" ? ` · ${t("learnedStatus.area.stopped")}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {held.length > 0 ? (
+        <>
+          <h4>
+            {status.heldBackSince
+              ? t("learnedStatus.held.heading", { date: status.heldBackSince })
+              : t("learnedStatus.held.heading.plain")}
+          </h4>
+          <ul>
+            {held.map((h) => (
+              <li key={h.key}>{t("learnedStatus.held.line", { reason: h.label, count: h.count })}</li>
+            ))}
+          </ul>
+        </>
+      ) : status.heldBackSince ? (
+        <p className="field-hint">{t("learnedStatus.held.none", { date: status.heldBackSince })}</p>
       ) : null}
     </div>
   );

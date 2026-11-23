@@ -26,7 +26,7 @@ To see why a message is in its area, open the sender's name for the sender card,
 |---|---|
 | you placed it | You moved it |
 | by rule | One of your rules |
-| learned from your moves | [Learned sorting](sorting.md#learned-sorting) |
+| Learned sorting | [Learned sorting](sorting.md#learned-sorting) |
 | by the desk's plan | [Day-one setup](#day-one-setup) |
 | filed by an AI tool (API key) | An [assistant](ai-assistants.md) |
 | automatically | The built-in sorting of mail by what it does |

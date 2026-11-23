@@ -253,6 +253,12 @@ var methodCapabilities = map[string]string{
 	"Area/ruleSuggestion":        capDesk,
 	"Area/dismissRuleSuggestion": capDesk,
 	"LearnedPlacement/getStatus": capDesk,
+	// Learned sorting (#167, #169): what it knows about a sender, Forget, and
+	// trust; and its status.
+	"LearnedSender/get":     capDesk,
+	"LearnedSender/forget":  capDesk,
+	"LearnedSender/trust":   capDesk,
+	"LearnedSorting/status": capDesk,
 
 	"DeskPreferences/get":     capDesk,
 	"OutOfOffice/get":         capOutOfOffice,

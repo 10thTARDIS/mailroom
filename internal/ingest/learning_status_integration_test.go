@@ -185,8 +185,10 @@ func TestLearningStatusCandidateCap(t *testing.T) {
 	f.lpSwitch(t, false)
 	for i := 0; i < store.LearningStatusMaxCandidates+2; i++ {
 		who := fmt.Sprintf("sender%02d@example.com", i)
+		// Interleaved so the newest run is two, not three (a run of three acts).
+		f.lpFile(t, who, 1, areas, "Updates")
 		f.lpFile(t, who, 1, areas, "Promotions")
-		f.lpFile(t, who, 3, areas, "Updates")
+		f.lpFile(t, who, 2, areas, "Updates")
 	}
 	f.lpSwitch(t, true)
 

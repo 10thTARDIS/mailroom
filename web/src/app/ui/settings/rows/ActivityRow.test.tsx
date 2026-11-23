@@ -350,4 +350,13 @@ describe("the model", () => {
     expect(entryWords(rule).template).toBe("Rule {name} was applied to 1 existing message.");
     expect(entryWords({ ...rule, count: 12, outcome: "rule.apply_undo" }).template).toBe("Rule {name} was undone for 12 messages.");
   });
+
+  it("words a learned-sender entry for forget, domain forget, trust, untrust and a gone record", () => {
+    const e = entry({ id: "learned_sender:1", kind: "learned_sender", source: "bulk", outcome: "learned_sender.forget", keyName: "alice@example.com", method: "address" });
+    expect(entryWords(e)).toMatchObject({ template: "Learned sorting forgot {name}", name: "alice@example.com" });
+    expect(entryWords({ ...e, method: "domain", keyName: "example.com" }).template).toBe("Learned sorting forgot everything learned about {name}");
+    expect(entryWords({ ...e, outcome: "learned_sender.trust" }).template).toBe("Learned sorting now trusts {name}");
+    expect(entryWords({ ...e, outcome: "learned_sender.untrust" }).template).toBe("Learned sorting no longer trusts {name}");
+    expect(entryWords({ ...e, keyName: null }).name).toBe("a sender");
+  });
 });

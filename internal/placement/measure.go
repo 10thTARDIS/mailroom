@@ -27,6 +27,7 @@ package placement
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -38,6 +39,9 @@ import (
 type TimedFiling struct {
 	Area ulid.ULID
 	At   time.Time
+	// Address is the From address the filing was of (lowercased). Only read to
+	// count the distinct addresses behind a DOMAIN key's run (TailRunAddresses).
+	Address string
 }
 
 // RecencyRuns are the run lengths the recency measurement reports.
@@ -54,8 +58,27 @@ var RecencyRuns = []int{2, 3, 5}
 // newest instant holds filings into two areas has no tail area (run 0), and a
 // tied filing never lengthens a run it cannot be proved to belong to.
 func TailRun(fs []TimedFiling) (area ulid.ULID, run int) {
+	a, rf := tailRunFilings(fs)
+	return a, len(rf)
+}
+
+// TailRunAddresses is TailRun plus how many DISTINCT addresses the run's
+// filings were of. A domain key's run needs MinDomainAddresses of them: counted
+// over the whole domain, one address's habit would be filed on for every other
+// address at the domain (x2 filed once into Updates, x1 filed three times into
+// Promotions would otherwise make the domain "Promotions" on x1's habit alone).
+func TailRunAddresses(fs []TimedFiling) (area ulid.ULID, run, addresses int) {
+	a, rf := tailRunFilings(fs)
+	seen := map[string]bool{}
+	for _, f := range rf {
+		seen[f.Address] = true
+	}
+	return a, len(rf), len(seen)
+}
+
+func tailRunFilings(fs []TimedFiling) (area ulid.ULID, run []TimedFiling) {
 	if len(fs) == 0 {
-		return ulid.ULID{}, 0
+		return ulid.ULID{}, nil
 	}
 	var newest time.Time
 	for _, f := range fs {
@@ -70,7 +93,7 @@ func TailRun(fs []TimedFiling) (area ulid.ULID, run int) {
 		}
 	}
 	if len(areasAtNewest) != 1 {
-		return ulid.ULID{}, 0
+		return ulid.ULID{}, nil
 	}
 	for a := range areasAtNewest {
 		area = a
@@ -83,7 +106,7 @@ func TailRun(fs []TimedFiling) (area ulid.ULID, run int) {
 	}
 	for _, f := range fs {
 		if f.Area == area && f.At.After(lastOther) {
-			run++
+			run = append(run, f)
 		}
 	}
 	return area, run
@@ -114,7 +137,7 @@ type Recency struct {
 // run of that length, and the recent mail they received. filings is keyed by key
 // value; recent is the recent-window message count by key value (a key absent
 // from it received none).
-func MeasureRecency(filings map[string][]TimedFiling, recent map[string]int, ns []int) Recency {
+func MeasureRecency(filings map[string][]TimedFiling, recent map[string]int, ns []int, minAddresses int) Recency {
 	out := Recency{}
 	for _, n := range ns {
 		out.Rows = append(out.Rows, RecencyRow{N: n})
@@ -139,9 +162,11 @@ func MeasureRecency(filings map[string][]TimedFiling, recent map[string]int, ns 
 		}
 		out.Mixed++
 		out.MixedRecent += recent[k]
-		_, run := TailRun(fs)
+		_, run, addrs := TailRunAddresses(fs)
 		for i := range out.Rows {
-			if run >= out.Rows[i].N {
+			// minAddresses is the rule's own: 0 for an address key, MinDomainAddresses
+			// for a domain key (Judge asks the same).
+			if run >= out.Rows[i].N && addrs >= minAddresses {
 				out.Rows[i].Keys++
 				out.Rows[i].Recent += recent[k]
 			}
@@ -173,6 +198,7 @@ func AggregateEvents(events []Event) (byAddr, byDomain map[string]Evidence) {
 			ev.Filings = map[ulid.ULID]int{}
 		}
 		ev.Filings[e.Area]++
+		ev.Timeline = append(ev.Timeline, TimedFiling{Area: e.Area, At: e.At, Address: strings.ToLower(strings.TrimSpace(e.From))})
 		if e.At.After(ev.LatestFiling) {
 			ev.LatestFiling = e.At
 		}

@@ -241,8 +241,10 @@ func lpCases() []lpCase {
 		{name: "placed", want: "placed", setup: file("alice@example.com", 2, "Updates"), arrive: from("alice@example.com"),
 			filed: []lpFiled{{"alice@example.com", "Updates", 2}}},
 		{name: "none", want: "none", arrive: from("stranger@example.com")},
-		{name: "thin", want: "thin", setup: file("alice@example.com", 1, "Updates"), arrive: from("alice@example.com"),
-			filed: []lpFiled{{"alice@example.com", "Updates", 1}}},
+		// A single filing of an ADDRESS now acts (ADR-032 amendment), so "thin" is
+		// a domain's: one address's filings are not yet the domain's pattern.
+		{name: "thin", want: "thin", setup: file("bob@shop.example", 2, "Updates"), arrive: from("eve@shop.example"),
+			filed: []lpFiled{{"bob@shop.example", "Updates", 2}}},
 		{name: "agrees", want: "agrees", setup: func(t *testing.T, f *fixture, areas map[string]store.AreaView) {
 			f.lpSwitch(t, false)
 			f.lpFile(t, "alice@example.com", 2, areas, "Primary")
@@ -480,8 +482,8 @@ func TestPlacementExplainAsOf(t *testing.T) {
 		t.Fatalf("fixture: the arrival was %v, want placed", got)
 	}
 	time.Sleep(20 * time.Millisecond)
-	f.lpSwitch(t, false) // so the extra filings are not corrections of a learned label
-	f.lpFile(t, "alice@example.com", 3, areas, "Promotions")
+	f.lpSwitch(t, false)                                     // so the extra filings are not corrections of a learned label
+	f.lpFile(t, "alice@example.com", 2, areas, "Promotions") // 2, not 3: a run of 3 would act (recency)
 	f.lpSwitch(t, true)
 
 	if got := f.lpExplainRaw(t, msg, raw, nil, false).Trace.Result.Label(); got != "mixed" {

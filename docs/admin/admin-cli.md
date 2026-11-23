@@ -130,10 +130,10 @@ Keys, backup and DNS: [PGP keys](pgp-keys.md).
 | `materialize-area-labels --user-id U [--apply]` | Write an area's label onto mail that only landed there by verdict. |
 | `day-one --user-id U [--account-id A --window N --plan F --apply --undo RUN --runs]` | Turn a folder-sorted mailbox into a desk: census and preview first, `--undo` reverses a run. |
 | `day-one-server-archive --user-id U [--apply --limit N]` | Move day-one archives still in INBOX on the server to Archive. |
-| `placement-report --user-id U [--reset-gate AREA]` | Learned placement outcomes and correction gates. Read-only. |
+| `placement-report --user-id U [--reset-gate AREA]` | Learned sorting outcomes and correction gates. Read-only except `--reset-gate`. Placements made on a **single filing** and on a **recency run** are listed as their own "arrival" rows (open, kept, corrected), apart from the ordinary rule, and the verdict table splits confident keys by the evidence they rest on. |
 | `placement-measure --user-id U [--split-days N --window-days N --recent-days N --auth-scan-max N --no-headers]` | Measure learned sorting before changing it. Read-only counts: why arrivals were not placed (30 days), filed senders refused only for authentication, recency for mixed senders, the "opened and left alone" and "archived unread" signals scored on a time split, and the List-Id ceiling. |
-| `placement-backfill --user-id U [--exclude A] [--apply] [--undo BATCH]` | Apply learned placement to mail already on the desk. |
-| `placement-explain --user-id U (--message-id M \| --sender A)` | Why placement did or did not move a message. |
+| `placement-backfill --user-id U [--exclude A] [--no-single] [--no-recency] [--apply] [--undo BATCH]` | Apply learned sorting to mail already on the desk. The plan splits its moves by evidence (ordinary, single filing, recency run), in total and per key; `--no-single` and `--no-recency` leave the weaker ones out, to backfill on the old rule. Backfilled moves are not gated, so read the split first. |
+| `placement-explain --user-id U (--message-id M \| --sender A)` | Why learned sorting did or did not move a message: the evidence and the rule it rests on (ordinary, single filing, recency), whether the sender is trusted and whether trust was what let it through, and any Forget mark. |
 | `drawer-report --user-id U [--apply] [--enable\|--disable]` | Preview the drawer auto-archive sweep; flip its switch. |
 | `suggest-rules`, `accept-rules`, `apply-rules --user-id U [--apply]` | Persist, accept and apply rules derived from your filing. `apply-rules --undo` reverses. |
 | `delete-label --user-id U --name N [--apply]` | Delete a label. |

@@ -164,6 +164,7 @@ func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender pl
 	} else {
 		area := d.Area
 		out.AreaID = &area
+		out.Basis = d.Basis
 	}
 
 	// 4b. THE SENDER MUST BE WHO IT CLAIMS: senderRefusal, the one function
@@ -174,7 +175,11 @@ func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender pl
 		if err != nil {
 			return LearnedTrace{}, err
 		}
-		c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded))
+		trusted, err := tx.trustedSenderSet(ctx)
+		if err != nil {
+			return LearnedTrace{}, err
+		}
+		c := senderChecks(sender, senderwarn.NewIndex(sd.Own, sd.Corresponded), trusted)
 		tr.Checks = &c
 	}
 	if d.Act {

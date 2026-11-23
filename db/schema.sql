@@ -4163,6 +4163,10 @@ CREATE TABLE app.learned_placements (
   corrected_at timestamptz,
   -- Migration 00076: LAST, in ADD COLUMN order (migrate-check compares order).
   withdrawn_at timestamptz,
+  -- Migration 00103, ADD COLUMN order again: what evidence the placement was
+  -- made on. 'single' and 'recency' are the weaker rules (ADR-032 amendment),
+  -- reported apart and, for 'single', undone more strictly.
+  basis        text NOT NULL DEFAULT 'evidence' CHECK (basis IN ('evidence', 'single', 'recency')),
   PRIMARY KEY (user_id, message_id),
   CONSTRAINT learned_placements_kept_stamped
     CHECK ((outcome = 'kept') = (kept_at IS NOT NULL AND kept_by IS NOT NULL)),
@@ -4304,6 +4308,61 @@ CREATE TABLE app.learned_placement_abstentions (
 ALTER TABLE app.learned_placement_abstentions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE app.learned_placement_abstentions FORCE ROW LEVEL SECURITY;
 CREATE POLICY learned_placement_abstentions_isolation ON app.learned_placement_abstentions
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
+-- TRUSTED SENDERS FOR LEARNED SORTING (migration 00101): one exact From address
+-- the user has marked as trusted, for which learned sorting skips only the
+-- trusted-DMARC requirement. Address scope only. Not a JMAP-visible object: no
+-- change_log row.
+CREATE TABLE app.learned_sender_trust (
+  user_id    app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  address    text NOT NULL CHECK (length(address) BETWEEN 3 AND 320 AND address = lower(btrim(address))),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, address)
+);
+ALTER TABLE app.learned_sender_trust ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_sender_trust FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_sender_trust_isolation ON app.learned_sender_trust
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
+-- FORGET WHAT LEARNED SORTING KNOWS ABOUT A SENDER (migration 00102): one mark
+-- per (user, key kind, key); the evidence reads ignore filings and corrections
+-- older than forgotten_at. Nothing is deleted. Not a JMAP-visible object: no
+-- change_log row.
+CREATE TABLE app.learned_sender_forgotten (
+  user_id      app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  key_kind     text NOT NULL CHECK (key_kind IN ('address', 'domain')),
+  key_value    text NOT NULL CHECK (length(key_value) BETWEEN 1 AND 320 AND key_value = lower(btrim(key_value))),
+  forgotten_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, key_kind, key_value)
+);
+ALTER TABLE app.learned_sender_forgotten ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_sender_forgotten FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_sender_forgotten_isolation ON app.learned_sender_forgotten
+  FOR ALL TO mailroom_app
+  USING (user_id = app.current_user_id())
+  WITH CHECK (user_id = app.current_user_id());
+
+-- WHERE THE ADDRESS BEHIND A LEARNED-SORTING ACTIVITY ENTRY LIVES (migration
+-- 00104): the audit row carries only this row's id, because audit_log survives a
+-- hard delete and an address must not. Cascades with the user. Not a
+-- JMAP-visible object: no change_log row.
+CREATE TABLE app.learned_sender_events (
+  id         app.ulid PRIMARY KEY,
+  user_id    app.ulid NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  address    text NOT NULL CHECK (length(address) BETWEEN 3 AND 320),
+  kind       text NOT NULL CHECK (kind IN ('forget', 'trust', 'untrust')),
+  scope      text NOT NULL CHECK (scope IN ('address', 'domain')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX learned_sender_events_by_user ON app.learned_sender_events (user_id, created_at);
+ALTER TABLE app.learned_sender_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app.learned_sender_events FORCE ROW LEVEL SECURITY;
+CREATE POLICY learned_sender_events_isolation ON app.learned_sender_events
   FOR ALL TO mailroom_app
   USING (user_id = app.current_user_id())
   WITH CHECK (user_id = app.current_user_id());
@@ -4632,6 +4691,15 @@ GRANT SELECT, INSERT, UPDATE ON app.rule_suggestion_dismissals TO mailroom_app;
 -- Learned placement's per-day abstention tally (migration 00100): an upsert per
 -- arrival, so UPDATE; never deleted by the app.
 GRANT SELECT, INSERT, UPDATE ON app.learned_placement_abstentions TO mailroom_app;
+
+-- Trusted senders for learned sorting (migration 00101): untrusting deletes the row.
+GRANT SELECT, INSERT, DELETE ON app.learned_sender_trust TO mailroom_app;
+
+-- Forget marks (migration 00102): a second Forget moves the mark forward, so UPDATE.
+GRANT SELECT, INSERT, UPDATE ON app.learned_sender_forgotten TO mailroom_app;
+
+-- Learned-sorting activity events (migration 00104): written once, never changed.
+GRANT SELECT, INSERT ON app.learned_sender_events TO mailroom_app;
 
 -- Local DKIM verdicts (#776): written once with the message, gone with it; no UPDATE.
 GRANT SELECT, INSERT, DELETE ON app.message_local_auth TO mailroom_app;

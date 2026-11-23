@@ -46,6 +46,8 @@ var appTables = []string{
 	"areas", "area_feeds", "desk_preferences", "client_preferences", "drawer_archives",
 	"setup_runs", "setup_journal",
 	"learned_placements", "learned_placement_gate_resets", "learned_placement_abstentions",
+	"learned_sender_trust", "learned_sender_forgotten",
+	"learned_sender_events",
 	"calendar_invites", "calendar_responses",
 	"nudge_dismissals", "rule_suggestion_dismissals", "area_index_state",
 	"out_of_office",
@@ -319,7 +321,7 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// correspondents, not merely a setting.
 	exec(`INSERT INTO app.remote_allows (id, user_id, kind, value)
 	      VALUES ($1, $2, 'address', $3)`,
-		NewULID().String(), u.ID, tag+"-trusted@example.net")
+		NewULID().String(), u.ID, strings.ToLower(tag)+"-trusted@example.net")
 
 	// A saved signature (#56), so the RLS inventory has a compose_snippets row. Its
 	// body is text the user wrote, so a leak is closer to reading a draft.
@@ -387,6 +389,21 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// placement could not place, and why.
 	exec(`INSERT INTO app.learned_placement_abstentions (user_id, day, reason, n) VALUES ($1, current_date, 'thin', 3)`,
 		u.ID)
+
+	// One trusted sender (migration 00101): a leak would tell one user which
+	// senders another has told learned sorting to believe without a DMARC pass.
+	exec(`INSERT INTO app.learned_sender_trust (user_id, address) VALUES ($1, $2)`,
+		u.ID, strings.ToLower(tag)+"-trusted@example.net")
+
+	// One forget mark (migration 00102): a leak would tell one user which
+	// senders another has asked learned sorting to forget.
+	exec(`INSERT INTO app.learned_sender_forgotten (user_id, key_kind, key_value) VALUES ($1, 'address', $2)`,
+		u.ID, strings.ToLower(tag)+"-forgotten@example.net")
+
+	// One learned-sorting activity event (migration 00104): a leak would tell one
+	// user which senders another has forgotten or trusted.
+	exec(`INSERT INTO app.learned_sender_events (id, user_id, address, kind, scope) VALUES ($1, $2, $3, 'forget', 'address')`,
+		NewULID().String(), u.ID, tag+"-event@example.net")
 
 	// One follow-up nudge dismissal (#58, migration 00064): a leak would tell
 	// one user which of another's conversations they have closed.

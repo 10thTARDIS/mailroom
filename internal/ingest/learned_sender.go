@@ -65,6 +65,7 @@ func LearnedSender(from string, parsed *mime.Message, trusted []string, received
 				DMARCPass:       match != ml.DMARCNoMatch,
 				DMARCMatch:      string(match),
 				AffirmativePass: top.AffirmativelyPassed(),
+				TrustedFail:     top.Has("dmarc", "fail") || (top.Has("spf", "fail") && top.Has("dkim", "fail")),
 				AuthFail:        authFail,
 			}
 		})

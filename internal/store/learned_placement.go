@@ -73,9 +73,21 @@ const (
 	PlacementWithdrawn = "withdrawn"
 )
 
+// placementBasisOrDefault is the basis recorded with a placement: the decision's,
+// else the ordinary one (an empty basis would break the column's CHECK).
+func placementBasisOrDefault(b placement.Basis) placement.Basis {
+	if b == "" {
+		return placement.BasisEvidence
+	}
+	return b
+}
+
 // LearnedPlacementResult says what learned placement did with one message.
 type LearnedPlacementResult struct {
 	Placed bool
+	// Basis is the evidence the decision rests on when a key was confident
+	// (placement.Basis*), and is what the placement log records.
+	Basis placement.Basis
 	// Reason is placement.Confident when Placed, otherwise why not.
 	Reason placement.Reason
 	Key    placement.Key
@@ -173,9 +185,10 @@ func (tx *UserTx) learnedPlacement(ctx context.Context, msgID ulid.ULID, sender 
 		return LearnedPlacementResult{}, fmt.Errorf("store: learned placement: area %s label already on message %s", area, msgID)
 	}
 	if _, err := tx.tx.Exec(ctx, `
-		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		VALUES ($1, $2, $3, $4, $5)`,
-		tx.userID.String(), msgID.String(), string(out.Key.Kind), out.Key.Value, area.String()); err != nil {
+		INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id, basis)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		tx.userID.String(), msgID.String(), string(out.Key.Kind), out.Key.Value, area.String(),
+		string(placementBasisOrDefault(out.Basis))); err != nil {
 		return LearnedPlacementResult{}, fmt.Errorf("store: learned placement (log): %w", err)
 	}
 	out.Placed = true
@@ -219,6 +232,9 @@ type LearnedEvidence struct {
 	AddressVerdict, DomainVerdict placement.Verdict
 	// DomainFallbackBlocked: the domain is freemail or one of the user's own.
 	DomainFallbackBlocked bool
+	// AddressForgotten and DomainForgotten are the user's Forget marks on the
+	// two keys (zero: none): evidence older than a mark is ignored.
+	AddressForgotten, DomainForgotten time.Time
 }
 
 // decideLearnedEvidence is decideLearned's body. asOf, when not zero, counts
@@ -235,13 +251,18 @@ func (tx *UserTx) decideLearnedEvidence(ctx context.Context, addrKey, domainKey 
 		return placement.Decision{}, LearnedEvidence{}, err
 	}
 	addrEv, domainEv := byAddr[addrKey.Value], byDomain[domainKey.Value]
-	addrEv.LatestCorrection = corrections[addrKey]
-	domainEv.LatestCorrection = corrections[domainKey]
+	corrections[addrKey].applyTo(&addrEv)
+	corrections[domainKey].applyTo(&domainEv)
 	own, err := tx.ownIdentityDomains(ctx)
 	if err != nil {
 		return placement.Decision{}, LearnedEvidence{}, err
 	}
+	marks, err := tx.forgetMarks(ctx)
+	if err != nil {
+		return placement.Decision{}, LearnedEvidence{}, err
+	}
 	ev := LearnedEvidence{
+		AddressForgotten: marks[addrKey], DomainForgotten: marks[domainKey],
 		Address: addrEv, Domain: domainEv,
 		AddressVerdict:        placement.Judge(placement.KeyAddress, addrEv),
 		DomainVerdict:         placement.Judge(placement.KeyDomain, domainEv),
@@ -259,6 +280,12 @@ type SenderChecks struct {
 	// Authenticated is Auth.Authenticated(): the condition acted on.
 	Auth          placement.SenderAuth
 	Authenticated bool
+	// Trusted: the user marked this exact From address as trusted (#169). It
+	// waives ONE thing, the requirement of a trusted DMARC pass, and only while
+	// the message's authentication did not clearly fail (Auth.AuthFail).
+	// TrustApplied is true when that waiver is what let an unauthenticated
+	// message through, so explain can say so.
+	Trusted, TrustApplied bool
 	// Warnings are the sender spoofing / look-alike warnings.
 	Warnings []senderwarn.Warning
 	Refusal  placement.Reason
@@ -266,16 +293,38 @@ type SenderChecks struct {
 
 // senderChecks evaluates every check (no short circuit, so the explain path
 // can show them all); Refusal is the first that refuses, in senderRefusal's
-// documented order.
-func senderChecks(sender placement.Sender, warn *senderwarn.Index) SenderChecks {
+// documented order. trusted is the user's set of trusted From addresses (nil =
+// none).
+//
+// THE RULE: trust waives the ABSENCE of a trusted pass, never the PRESENCE of a
+// trusted failure, and never a sender warning. A failure the TRUSTED
+// Authentication-Results header reports (auth.TrustedFail) or that clearly
+// failed anywhere (auth.AuthFail) refuses the waiver.
+//
+// TRUST SKIPS EXACTLY ONE CHECK (#169): the trusted-DMARC requirement, for the
+// one exact From address the user named. The ambiguous-From refusal and the
+// warnings (self-spoof, look-alike) are evaluated and refuse exactly as they do
+// for any sender, and a message whose authentication clearly FAILED is still
+// refused: trust waives a missing pass, not a failure.
+func senderChecks(sender placement.Sender, warn *senderwarn.Index, trusted map[string]bool) SenderChecks {
 	auth := sender.Auth()
 	c := SenderChecks{Ambiguous: sender.Ambiguous(), Auth: auth, Authenticated: auth.Authenticated()}
 	_, domainKey, _ := sender.Keys()
-	c.Warnings = warn.Check(senderwarn.Sender{Domain: domainKey.Value, AuthPassed: auth.AffirmativePass})
+	if k, ok := sender.TrustKey(); ok { // ASCII From only, matched exactly (placement.ASCIIKey)
+		c.Trusted = trusted[k]
+	}
+	// An affirmative pass suppresses the self-spoof warning only when it is a
+	// pass learned sorting would itself believe: an unaligned DKIM pass beside a
+	// waived DMARC must not switch the warning off.
+	c.Warnings = warn.Check(senderwarn.Sender{Domain: domainKey.Value, AuthPassed: auth.AffirmativePass && c.Authenticated})
+	authOK := c.Authenticated
+	if !authOK && c.Trusted && !auth.AuthFail && !auth.TrustedFail {
+		authOK, c.TrustApplied = true, true
+	}
 	switch {
 	case c.Ambiguous:
 		c.Refusal = placement.AmbiguousFrom
-	case !c.Authenticated:
+	case !authOK:
 		c.Refusal = placement.Unauthenticated
 	case len(c.Warnings) > 0:
 		c.Refusal = placement.SenderWarned
@@ -292,12 +341,13 @@ func senderChecks(sender placement.Sender, warn *senderwarn.Index) SenderChecks 
 //     parse that disagrees with the stored From (placement.NewSender).
 //   - Unauthenticated: SenderAuth.Authenticated() is false (a trusted DMARC
 //     pass bound to the From domain when authserv-ids are configured, else
-//     "did not clearly fail").
+//     "did not clearly fail"), unless the user trusts this exact address and
+//     the authentication did not clearly fail.
 //   - SenderWarned: the spoofing / look-alike warnings would flag it, asked
 //     exactly as the reading pane asks them (internal/api/sender_warnings.go):
 //     the same index, the same trusted affirmative pass suppressing selfSpoof.
-func senderRefusal(sender placement.Sender, warn *senderwarn.Index) placement.Reason {
-	return senderChecks(sender, warn).Refusal
+func senderRefusal(sender placement.Sender, warn *senderwarn.Index, trusted map[string]bool) placement.Reason {
+	return senderChecks(sender, warn, trusted).Refusal
 }
 
 // placementFiling is one user filing into an area: the evidence unit.
@@ -305,6 +355,10 @@ type placementFiling struct {
 	AreaID ulid.ULID
 	From   string
 	At     time.Time
+	// HideAddr and HideDomain: the filing is older than a forget mark that
+	// hides it from the address key's / the domain key's evidence
+	// (learned_sender_forget.go). A filing hidden from both is not returned.
+	HideAddr, HideDomain bool
 }
 
 // placementFilings reads the user's own area filings: app.message_labels rows
@@ -348,7 +402,7 @@ func (tx *UserTx) placementFilings(ctx context.Context, domain string, asOf time
 		return nil, fmt.Errorf("store: learned placement (evidence): %w", err)
 	}
 	defer rows.Close()
-	var out []placementFiling
+	var all []placementFiling
 	for rows.Next() {
 		var areaStr string
 		var f placementFiling
@@ -360,9 +414,31 @@ func (tx *UserTx) placementFilings(ctx context.Context, domain string, asOf time
 			return nil, fmt.Errorf("store: learned placement: parse area id %q: %w", areaStr, err)
 		}
 		f.AreaID = id
+		all = append(all, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	marks, err := tx.forgetMarks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(marks) == 0 {
+		return all, nil
+	}
+	out := all[:0]
+	for _, f := range all {
+		if a, d, ok := placement.KeysFor(f.From); ok {
+			f.HideAddr = f.At.Before(marks[a]) // a zero mark is the year 1: hides nothing
+			f.HideDomain = f.At.Before(marks[d]) || f.HideAddr
+		}
+		if f.HideAddr && f.HideDomain {
+			continue
+		}
 		out = append(out, f)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // aggregatePlacementEvidence folds filings into per-address and per-domain
@@ -378,6 +454,7 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 			e.Filings = map[ulid.ULID]int{}
 		}
 		e.Filings[f.AreaID]++
+		e.Timeline = append(e.Timeline, placement.TimedFiling{Area: f.AreaID, At: f.At, Address: strings.ToLower(strings.TrimSpace(f.From))})
 		if f.At.After(e.LatestFiling) {
 			e.LatestFiling = f.At
 		}
@@ -388,12 +465,16 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 		if !ok {
 			continue
 		}
-		add(byAddr, a.Value, f)
-		add(byDomain, d.Value, f)
-		if domainAddrs[d.Value] == nil {
-			domainAddrs[d.Value] = map[string]bool{}
+		if !f.HideAddr {
+			add(byAddr, a.Value, f)
 		}
-		domainAddrs[d.Value][a.Value] = true
+		if !f.HideDomain {
+			add(byDomain, d.Value, f)
+			if domainAddrs[d.Value] == nil {
+				domainAddrs[d.Value] = map[string]bool{}
+			}
+			domainAddrs[d.Value][a.Value] = true
+		}
 	}
 	for k, e := range byAddr {
 		e.Addresses = 1
@@ -406,43 +487,65 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 	return byAddr, byDomain
 }
 
-// placementCorrections returns the newest correction time per key, for the
-// keys named (nil = every key with a correction).
-func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key, asOf time.Time) (map[placement.Key]time.Time, error) {
+// placementCorrection is a key's corrections: the newest of any placement, and
+// the newest of a placement made on WEAKER evidence, a single filing or a
+// recency run (the stricter undo, placement.SingleRelearnFilings). Zero when
+// there is none.
+type placementCorrection struct {
+	Latest, LatestSingle time.Time
+}
+
+// applyTo puts the corrections on the key's evidence.
+func (c placementCorrection) applyTo(e *placement.Evidence) {
+	e.LatestCorrection, e.LatestSingleCorrection = c.Latest, c.LatestSingle
+}
+
+// placementCorrections returns the corrections per key, for the keys named
+// (nil = every key with a correction).
+func (tx *UserTx) placementCorrections(ctx context.Context, keys []placement.Key, asOf time.Time) (map[placement.Key]placementCorrection, error) {
 	args := []any{tx.userID.String()}
 	filter := ""
 	if keys != nil {
 		var ors []string
 		for _, k := range keys {
 			args = append(args, string(k.Kind), k.Value)
-			ors = append(ors, `(key_kind = $`+strconv.Itoa(len(args)-1)+` AND key_value = $`+strconv.Itoa(len(args))+`)`)
+			ors = append(ors, `(p.key_kind = $`+strconv.Itoa(len(args)-1)+` AND p.key_value = $`+strconv.Itoa(len(args))+`)`)
 		}
 		if len(ors) == 0 {
-			return map[placement.Key]time.Time{}, nil
+			return map[placement.Key]placementCorrection{}, nil
 		}
 		filter = ` AND (` + strings.Join(ors, " OR ") + `)`
 	}
 	if !asOf.IsZero() {
 		args = append(args, asOf)
-		filter += ` AND corrected_at < $` + strconv.Itoa(len(args))
+		filter += ` AND p.corrected_at < $` + strconv.Itoa(len(args))
 	}
 	rows, err := tx.tx.Query(ctx, `
-		SELECT key_kind, key_value, max(corrected_at)
-		  FROM app.learned_placements
-		 WHERE user_id = $1 AND outcome = 'corrected'`+filter+`
-		 GROUP BY key_kind, key_value`, args...)
+		SELECT p.key_kind, p.key_value, max(p.corrected_at),
+		       max(p.corrected_at) FILTER (WHERE p.basis IN ('single', 'recency'))
+		  FROM app.learned_placements p
+		  LEFT JOIN app.learned_sender_forgotten f
+		         ON f.user_id = p.user_id AND f.key_kind = p.key_kind AND f.key_value = p.key_value
+		 WHERE p.user_id = $1 AND p.outcome = 'corrected'
+		   AND (f.forgotten_at IS NULL OR p.corrected_at >= f.forgotten_at)`+filter+`
+		 GROUP BY p.key_kind, p.key_value`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: learned placement (corrections): %w", err)
 	}
 	defer rows.Close()
-	out := map[placement.Key]time.Time{}
+	out := map[placement.Key]placementCorrection{}
 	for rows.Next() {
 		var kind, value string
 		var at time.Time
-		if err := rows.Scan(&kind, &value, &at); err != nil {
+		var single *time.Time
+		if err := rows.Scan(&kind, &value, &at, &single); err != nil {
 			return nil, fmt.Errorf("store: learned placement (scan corrections): %w", err)
 		}
-		out[placement.Key{Kind: placement.KeyKind(kind), Value: value}] = at
+		c := placementCorrection{Latest: at}
+		if single != nil {
+			c.LatestSingle = *single
+		}
+		out[placement.Key{Kind: placement.KeyKind(kind), Value: value}] = c
 	}
 	return out, rows.Err()
 }

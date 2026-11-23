@@ -408,8 +408,8 @@ func (tx *UserTx) measureAuth(ctx context.Context, filings []placementFiling, op
 			continue
 		}
 		addrEv, domainEv := byAddr[addrKey.Value], byDomain[domainKey.Value]
-		addrEv.LatestCorrection = corrections[addrKey]
-		domainEv.LatestCorrection = corrections[domainKey]
+		corrections[addrKey].applyTo(&addrEv)
+		corrections[domainKey].applyTo(&domainEv)
 		d := placement.Decide(addrKey, domainKey, addrEv, domainEv, own)
 		if !d.Act && d.Reason != placement.Thin {
 			continue
@@ -471,7 +471,10 @@ func (tx *UserTx) measureAuth(ctx context.Context, filings []placementFiling, op
 				out.Unreadable++
 				continue
 			}
-			refusal = senderChecks(s, warn)
+			// Trust-agnostic on purpose (nil): section 2 lists who learned sorting
+			// cannot believe on authentication, which is exactly the list a user
+			// would choose their trusted senders from.
+			refusal = senderChecks(s, warn, nil)
 		}
 		out.Read++
 		t.bucket.Messages++
@@ -529,9 +532,11 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 		if !ok {
 			continue
 		}
-		tf := placement.TimedFiling{Area: f.AreaID, At: f.At}
-		byAddr[a.Value] = append(byAddr[a.Value], tf)
-		if !placement.DomainFallbackBlocked(d.Value, own) {
+		tf := placement.TimedFiling{Area: f.AreaID, At: f.At, Address: a.Value}
+		if !f.HideAddr { // a forgotten filing is not evidence (learned_sender_forget.go)
+			byAddr[a.Value] = append(byAddr[a.Value], tf)
+		}
+		if !f.HideDomain && !placement.DomainFallbackBlocked(d.Value, own) {
 			byDom[d.Value] = append(byDom[d.Value], tf)
 		}
 	}
@@ -567,8 +572,8 @@ func (tx *UserTx) measureRecency(ctx context.Context, filings []placementFiling,
 	if err := rows.Err(); err != nil {
 		return addr, dom, fmt.Errorf("store: placement measure (recent): %w", err)
 	}
-	return placement.MeasureRecency(byAddr, recentAddr, placement.RecencyRuns),
-		placement.MeasureRecency(byDom, recentDom, placement.RecencyRuns), nil
+	return placement.MeasureRecency(byAddr, recentAddr, placement.RecencyRuns, 0),
+		placement.MeasureRecency(byDom, recentDom, placement.RecencyRuns, placement.MinDomainAddresses), nil
 }
 
 // ── sections 4 and 5: the per-message facts ──────────────────────────────────
