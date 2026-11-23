@@ -35,7 +35,7 @@ const loadEmails = vi.fn(async (_ids: Id[]) => ({ notFound: [] as Id[], failed: 
 // Stable, as the real ones are: a fresh client per render would re-run every
 // effect that depends on it.
 const client = { contactForAddress: vi.fn(async () => contact) };
-const actions = { relabel: vi.fn(), setContactMarkers };
+const actions = { relabel: vi.fn(), setContactMarkers, learnedSender: vi.fn(async () => null) };
 const sync = { loadEmails, allMatchingIds };
 vi.mock("../../state", () => ({
   useApp: () => ({

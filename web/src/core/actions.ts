@@ -47,6 +47,8 @@ import type {
   RuleCondition,
   RuleInduceResult,
   AreaRuleSuggestion,
+  LearnedSender,
+  LearnedSortingStatus,
   LearningStatus,
   RulePreview,
   RuleTightenResult,
@@ -2513,6 +2515,50 @@ export class MailActions {
     const accountId = this.store.getState().accountId;
     try {
       return await this.client.learnedPlacementGetStatus({ accountId });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * What learned sorting knows about one sender (LearnedSender/get). Null on any
+   * failure: the sender card simply draws no learned section, never an error.
+   */
+  async learnedSender(address: string): Promise<LearnedSender | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      const r = await this.client.learnedSenderGet({ accountId, senders: [address] });
+      return r.list[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Forget what was learned about a sender; the fresh state, or null on failure (the caller says so). */
+  async forgetLearnedSender(address: string, scope: "address" | "domain"): Promise<LearnedSender | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      return (await this.client.learnedSenderForget({ accountId, sender: address, scope })).forgotten;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Trust (or stop trusting) a sender for learned sorting; the fresh state, or null on failure. */
+  async trustLearnedSender(address: string, trusted: boolean): Promise<LearnedSender | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      return (await this.client.learnedSenderTrust({ accountId, sender: address, trusted })).updated;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Learned sorting's numbers for Settings (LearnedSorting/status). Null on any failure: a status line, never a toast. */
+  async learnedSortingStatus(): Promise<LearnedSortingStatus | null> {
+    const accountId = this.store.getState().accountId;
+    try {
+      return await this.client.learnedSortingStatus({ accountId });
     } catch {
       return null;
     }

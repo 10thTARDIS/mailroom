@@ -45,7 +45,7 @@ const toasts: string[] = [];
 
 vi.mock("../../state", () => ({
   useApp: () => ({
-    actions: { relabel: vi.fn(), setContactMarkers, moveToJunk, trash, archive: vi.fn(), restoreToInbox: vi.fn(), untrash: vi.fn(), settle: vi.fn(async () => true) },
+    actions: { relabel: vi.fn(), learnedSender: vi.fn(async () => null), setContactMarkers, moveToJunk, trash, archive: vi.fn(), restoreToInbox: vi.fn(), untrash: vi.fn(), settle: vi.fn(async () => true) },
     sync: { loadEmails, allMatchingIds },
     client: { contactForAddress: vi.fn(async () => contact) },
     store,

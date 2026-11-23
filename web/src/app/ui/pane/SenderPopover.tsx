@@ -78,6 +78,7 @@ import { useShell } from "../shellContext";
 import { PHONE_QUERY, useMediaQuery } from "../useMediaQuery";
 import { useApp, useMailState } from "../../state";
 import { t } from "../../i18n";
+import { LearnedSenderSection } from "./LearnedSenderSection";
 import { areaProvenanceKey, messageLabels } from "./labels";
 import { lineSideSentence } from "./lineSide";
 import { placePopover } from "./popover";
@@ -215,6 +216,9 @@ export function SenderPopover({ email }: { email: EffectiveEmail }): JSX.Element
     if (!open) return;
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key !== "Escape") return;
+      // The Forget question inside the card answers its own Escape (it cancels
+      // the question, not the card): let that one through to it.
+      if ((ev.target as Element | null)?.closest?.(".learned-sender-confirm")) return;
       ev.stopPropagation();
       close(true);
     };
@@ -645,6 +649,8 @@ export function SenderPopover({ email }: { email: EffectiveEmail }): JSX.Element
               </p>
             </section>
           ) : null}
+
+          {from.address ? <LearnedSenderSection address={from.address} messageId={email.id} /> : null}
 
           <div className="sender-popover-actions">
             {from.address ? (

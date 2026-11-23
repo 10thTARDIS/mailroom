@@ -9,6 +9,12 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Learned sorting on the sender card and in Settings
+
+- **The sender card now has a "Learned sorting" section.** It says in one plain sentence what Mailroom has learned about that sender from your moves, and whether it files their mail for you. You can make Mailroom forget a sender (it asks first), and for senders whose mail cannot be verified you can choose to trust them for sorting only. Warnings still show.
+- **Settings shows what Learned sorting has done.** Under the Learned sorting switch: how many messages it placed in the last 30 days and how many you corrected, the same per area (with a note when an area is paused after corrections), and how many messages it held back and why.
+- **The feature has one name, "Learned sorting",** in Settings, Activity and the tag on a filed message.
+
 ## [1.104.0-beta.1] — 2026-11-23
 
 **The first beta of v1.104 adds no new behaviour to where mail is sorted.** It adds a way to measure what

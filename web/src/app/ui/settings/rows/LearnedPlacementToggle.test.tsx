@@ -11,19 +11,20 @@ import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 
-import type { Area, DeskPreferences, LearningStatus } from "../../../../core/jmap/types";
+import type { Area, DeskPreferences, LearnedSortingStatus, LearningStatus } from "../../../../core/jmap/types";
 import { MailStore } from "../../../../core/store";
 import type { MailState } from "../../../../core/store";
 
 let state: MailState;
 const updateDeskPreferences = vi.fn(async () => true);
 const learningStatus = vi.fn(async (): Promise<LearningStatus | null> => null);
+const learnedSortingStatus = vi.fn(async (): Promise<LearnedSortingStatus | null> => null);
 const ruleSuggestion = vi.fn(async (): Promise<unknown> => ({ suggest: true, reason: "mixed", earlier: 0 }));
 const createRule = vi.fn(async (_input: unknown): Promise<unknown> => ({ id: "R1" }));
 const pushToast = vi.fn((_t: unknown) => 1);
 // One stable object: the component's effect depends on `actions`.
 const appValue = {
-  actions: { updateDeskPreferences, learningStatus, ruleSuggestion, createRule },
+  actions: { updateDeskPreferences, learningStatus, learnedSortingStatus, ruleSuggestion, createRule },
   store: { getState: () => state },
   sync: {},
   offerUndo: vi.fn(),
@@ -54,6 +55,8 @@ beforeEach(() => {
   updateDeskPreferences.mockClear();
   learningStatus.mockReset();
   learningStatus.mockImplementation(async () => null);
+  learnedSortingStatus.mockReset();
+  learnedSortingStatus.mockImplementation(async () => null);
   ruleSuggestion.mockClear();
   createRule.mockClear();
   pushToast.mockClear();
@@ -143,7 +146,7 @@ async function mountStatus(st: LearningStatus | null, on = true): Promise<void> 
 describe("the status block under the switch", () => {
   it("says how many messages it filed and how many the user moved", async () => {
     await mountStatus(status());
-    expect(host.textContent).toContain("In the last 30 days learned sorting filed 37 messages for you.");
+    expect(host.textContent).toContain("In the last 30 days Learned sorting filed 37 messages for you.");
     expect(host.textContent).toContain("You moved 2 of them somewhere else.");
   });
 
@@ -163,7 +166,7 @@ describe("the status block under the switch", () => {
     await mountStatus(status(), false);
     expect(learningStatus).not.toHaveBeenCalled();
     expect(host.querySelector(".learned-status")).toBeNull();
-    expect(host.textContent).not.toContain("learned sorting filed");
+    expect(host.textContent).not.toContain("Learned sorting filed");
   });
 
   it("is hidden when the server says it is off", async () => {
@@ -242,5 +245,56 @@ describe("senders you keep moving by hand", () => {
     flushSync(() => (host.querySelector("li button") as HTMLButtonElement).click());
     await settle();
     expect(host.querySelector("li")).not.toBeNull();
+  });
+});
+
+function sorting(over: Partial<LearnedSortingStatus> = {}): LearnedSortingStatus {
+  return {
+    enabled: true,
+    windowDays: 30,
+    placed: 572,
+    corrected: 1,
+    precision: 0.998,
+    lowerBound: 0.99,
+    sendersLearned: { address: 95, domain: 10 },
+    heldBack: { none: 10, thin: 3, unauthenticated: 1, mixed: 0, weird_new_code: 2 },
+    heldBackSince: "2026-11-23",
+    areas: [
+      { areaId: "A-ALERTS", placed: 400, corrected: 1, gate: "acting" },
+      { areaId: "A-NEWS", placed: 172, corrected: 0, gate: "stopped" },
+    ],
+    ...over,
+  };
+}
+
+describe("the Learned sorting status block (LearnedSorting/status)", () => {
+  it("says what it placed, per area, with the paused label and the held-back reasons", async () => {
+    learnedSortingStatus.mockImplementation(async () => sorting());
+    await mountStatus(null);
+    const text = host.textContent ?? "";
+    expect(text).toContain("Learned sorting placed 572 messages in the last 30 days; you corrected 1.");
+    expect(text).toContain("Alerts: placed 400, corrected 1");
+    expect(text).toContain("News: placed 172, corrected 0 · paused after corrections");
+    expect(text).not.toMatch(/Alerts[^]*paused after corrections[^]*News/);
+    expect(text).toContain("Held back (counting since 2026-11-23)");
+    expect(text).toContain("no earlier filings from the sender: 10");
+    expect(text).toContain("sender could not be verified: 1");
+    expect(text).toContain("other reasons: 2");
+    expect(text).not.toContain("mixed");
+  });
+
+  it("draws nothing when learned sorting is off or the call fails", async () => {
+    learnedSortingStatus.mockImplementation(async () => sorting({ enabled: false }));
+    await mountStatus(null);
+    expect(host.textContent).not.toContain("placed 572");
+    learnedSortingStatus.mockImplementation(async () => null);
+    await mountStatus(null);
+    expect(host.querySelector(".learned-status")).toBeNull();
+  });
+
+  it("the older filed line steps aside once this block has loaded", async () => {
+    learnedSortingStatus.mockImplementation(async () => sorting());
+    await mountStatus(status());
+    expect(host.textContent).not.toContain("In the last 30 days Learned sorting filed");
   });
 });

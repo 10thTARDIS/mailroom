@@ -74,6 +74,8 @@ import type {
   RuleCondition,
   RuleInduceResult,
   AreaRuleSuggestion,
+  LearnedSender,
+  LearnedSortingStatus,
   LearningStatus,
   RulePreview,
   RuleTightenResult,
@@ -780,6 +782,30 @@ export class JmapClient {
   /** urn:mailroom:desk: learned placement's 30-day status and unlearned senders. Read-only. */
   learnedPlacementGetStatus(args: { accountId: string }): Promise<LearningStatus> {
     return this.call("LearnedPlacement/getStatus", args as unknown as Record<string, unknown>) as Promise<LearningStatus>;
+  }
+  /** urn:mailroom:desk: what learned sorting knows about each sender (1 to 50 addresses). Read-only. */
+  learnedSenderGet(args: { accountId: string; senders: string[] }): Promise<{ list: LearnedSender[]; notFound: string[] }> {
+    return this.call("LearnedSender/get", args as unknown as Record<string, unknown>);
+  }
+  /** urn:mailroom:desk: stop counting filings made before now for this address or domain. */
+  learnedSenderForget(args: {
+    accountId: string;
+    sender: string;
+    scope: "address" | "domain";
+  }): Promise<{ forgotten: LearnedSender }> {
+    return this.call("LearnedSender/forget", args as unknown as Record<string, unknown>);
+  }
+  /** urn:mailroom:desk: let learned sorting act on this exact address without a trusted DMARC pass. */
+  learnedSenderTrust(args: {
+    accountId: string;
+    sender: string;
+    trusted: boolean;
+  }): Promise<{ updated: LearnedSender }> {
+    return this.call("LearnedSender/trust", args as unknown as Record<string, unknown>);
+  }
+  /** urn:mailroom:desk: learned sorting's 30-day numbers, per area and per held-back reason. Read-only. */
+  learnedSortingStatus(args: { accountId: string }): Promise<LearnedSortingStatus> {
+    return this.call("LearnedSorting/status", args as unknown as Record<string, unknown>);
   }
   /** urn:mailroom:desk: "Not now" for a rule offer; remembered for 30 days. */
   areaDismissRuleSuggestion(args: { accountId: string; areaId: string; address: string }): Promise<unknown> {
