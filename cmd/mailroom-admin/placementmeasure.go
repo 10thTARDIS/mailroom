@@ -24,8 +24,9 @@ import (
 )
 
 // `mailroom-admin placement-measure` (#28, #169): MEASURE learned sorting
-// before changing it. READ-ONLY, counts only (no addresses, names or
-// subjects), so the output can be pasted into an issue.
+// before changing it. READ-ONLY. Counts and your area names only (no addresses,
+// senders or subjects). Area names are yours: review them before pasting the
+// output anywhere public.
 //
 // It exists because the next changes to learned placement (act on a single
 // filing, learn from "opened and left alone" or "archived unread", key by
@@ -117,12 +118,12 @@ var measureReasonOrder = []struct{ reason, what string }{
 }
 
 // printPlacementMeasure renders the report. Separate from the run so a test can
-// read it without a database. Counts only.
+// read it without a database.
 func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []string) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
 	name := func(id ulid.ULID) string {
 		if n, ok := m.AreaNames[id]; ok {
-			return n
+			return safeText(n)
 		}
 		return id.String()
 	}
@@ -143,7 +144,7 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	day := func(t time.Time) string { return t.UTC().Format("2006-01-02") }
 
 	p("=== placement-measure (#28, #169): what learned sorting could do, measured before it is changed ===\n")
-	p("REPORT ONLY: counts, no addresses or subjects, and nothing here changes where mail goes.\n")
+	p("REPORT ONLY: counts and your area names only (no addresses, senders or subjects). Area names are yours: review them before pasting the output anywhere public.\nNothing here changes where mail goes.\n")
 	p("as of %s · split day D = %s (evidence judged before D, outcomes from D on, so no signal is scored on its own decisions)\n",
 		m.Now.UTC().Format("2006-01-02 15:04Z"), day(m.Split))
 	p("messages read for sections 4 and 5: created since %s (%d days); a message is judged once it is %d days old\n\n",
@@ -267,9 +268,9 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 
 	// 5.
 	ar, ac := m.Archived, m.ArchivedCover
-	p("5. THE \"ARCHIVED UNREAD\" SIGNAL (measured, never acted on): later mail in %s from senders whose mail the user archives unopened\n", m.PrimaryName)
+	p("5. THE \"ARCHIVED UNREAD\" SIGNAL (measured, never acted on): later mail in %s from senders whose mail the user archives unopened\n", safeText(m.PrimaryName))
 	p("   events before D: %d archive-unread event(s) on a message with an area (%d more had no area and were dropped)\n", ar.Events, ac.EventsNoArea)
-	p("   outcomes: %d later message(s) in %s from taught senders and %d from senders the signal did not teach\n", sumArchive(ar), m.PrimaryName, ar.Untaught)
+	p("   outcomes: %d later message(s) in %s from taught senders and %d from senders the signal did not teach\n", sumArchive(ar), safeText(m.PrimaryName), ar.Untaught)
 	ids := map[ulid.ULID]struct{}{}
 	for id := range ar.Keys.Confident {
 		ids[id] = struct{}{}
@@ -290,7 +291,7 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	}
 	p("   key verdicts: address %s · domain %s\n", reasonCounts(ar.Keys.Reasons[placement.KeyAddress]), reasonCounts(ar.Keys.Reasons[placement.KeyDomain]))
 	p("   (STRICT: of later mail in %s from these senders, how much was archived unread again, so the rest was opened or kept. ENGAGED: archived unread\n"+
-		"    against opened only. UNREAD/OPENED/KEPT/OTHER partition LATER: other = archived or trashed with no sign it was read.)\n\n", m.PrimaryName)
+		"    against opened only. UNREAD/OPENED/KEPT/OTHER partition LATER: other = archived or trashed with no sign it was read.)\n\n", safeText(m.PrimaryName))
 
 	// 6.
 	l := m.ListID

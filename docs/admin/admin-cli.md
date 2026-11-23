@@ -142,7 +142,7 @@ Keys, backup and DNS: [PGP keys](pgp-keys.md).
 
 ### `placement-measure`
 
-Read-only, counts only, and it changes nothing about where mail goes. Its six sections:
+Read-only, and it changes nothing about where mail goes. It prints counts and your area names only (no addresses, senders or subjects). Area names are yours: review them before pasting the output anywhere public. Its six sections:
 
 1. **Why arrivals were not placed.** The last 30 days, per reason, from a per-day tally kept at
    arrival. It records going forward, so the section says how many of the 30 days it covers.

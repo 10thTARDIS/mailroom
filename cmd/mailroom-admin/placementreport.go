@@ -27,8 +27,8 @@ import (
 // it is confident about, every placement's outcome, each area's precision with
 // the bottom of its Wilson interval and whether the correction gate has
 // stopped it, why keys abstain, and what applying it to EXISTING mail would
-// move. Counts only: no addresses, names or subjects, so the output can be
-// pasted into an issue (CLAUDE.md portability).
+// move. Counts and your area names only (no addresses, senders or subjects). Area
+// names are yours: review them before pasting the output anywhere public.
 //
 // --reset-gate AREA_ID is the one write, after the report has printed: the
 // operator's re-enable for an area the gate stopped. It starts the gate's
@@ -104,6 +104,7 @@ func runPlacementReport(ctx context.Context, args []string) error {
 func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []string) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
 	p("=== placement-report (#714): learned placement ===\n")
+	p("counts and your area names only (no addresses, senders or subjects). Area names are yours: review them before pasting the output anywhere public.\n")
 	if rep.Enabled {
 		p("learned placement: ON\n")
 	} else {
@@ -130,7 +131,7 @@ func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []stri
 		"AREA", "KEYS:ADDR", "KEYS:DOM", "OPEN", "KEPT", "CORRECTED", "PRECISION", "LCB95", "GATE")
 	for _, a := range rep.Areas {
 		p("%-20s %9d %9d %6d %6d %9d %10s %7s  %s\n",
-			a.Name, a.ConfidentAddresses, a.ConfidentDomains,
+			safeText(a.Name), a.ConfidentAddresses, a.ConfidentDomains,
 			a.Counts.Open, a.Counts.Kept, a.Counts.Corrected,
 			placementRatio(a.Gate.Precision), placementRatio(a.Gate.LCB), gateWord(a))
 		if c := a.Counts; c.BackfillOpen+c.BackfillKept+c.BackfillCorrected > 0 {
@@ -214,7 +215,7 @@ func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []stri
 
 func areaName(names map[ulid.ULID]string, id ulid.ULID) string {
 	if n, ok := names[id]; ok {
-		return n
+		return safeText(n) // a user-typed name never reaches the terminal raw
 	}
 	return id.String()
 }

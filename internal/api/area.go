@@ -15,6 +15,7 @@ import (
 
 	"mailroom/internal/store"
 	"mailroom/internal/tabs"
+	"mailroom/internal/textcheck"
 )
 
 // Area/* — the desk's own partition of mail (#442), wrapping the store layer
@@ -287,6 +288,11 @@ func createArea(ctx context.Context, tx *store.UserTx, raw json.RawMessage, next
 			Properties:  []string{"name"}}
 	}
 
+	if err := textcheck.CheckName(name); err != nil {
+		return nil, ulid.ULID{}, &SetError{Type: setInvalidProps,
+			Description: "name " + err.Error(), Properties: []string{"name"}}
+	}
+
 	row := store.AreaRow{Name: name}
 	if c.Position != nil {
 		row.Position = *c.Position
@@ -387,6 +393,10 @@ func updateArea(ctx context.Context, tx *store.UserTx, id ulid.ULID, raw json.Ra
 				return &SetError{Type: setInvalidProps,
 					Description: fmt.Sprintf("name must be at most %d characters", areaMaxNameRunes),
 					Properties:  []string{"name"}}
+			}
+			if err := textcheck.CheckName(s); err != nil {
+				return &SetError{Type: setInvalidProps,
+					Description: "name " + err.Error(), Properties: []string{"name"}}
 			}
 			p.Name = &s
 		case "position":

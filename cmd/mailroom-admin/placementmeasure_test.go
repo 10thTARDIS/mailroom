@@ -131,3 +131,32 @@ func TestPrintPlacementMeasure(t *testing.T) {
 		t.Errorf("an empty tally must say so:\n%s", buf.String())
 	}
 }
+
+// Area names are typed by the user, so they must reach the terminal without
+// escape sequences or bidi overrides, in both reports.
+func TestAreaNamesAreSafeOnTheTerminal(t *testing.T) {
+	m := sampleMeasure()
+	evil := "Work\u001b[2J\u202eevil"
+	for id := range m.AreaNames {
+		m.AreaNames[id] = evil
+	}
+	m.PrimaryName = evil
+	var buf bytes.Buffer
+	printPlacementMeasure(&buf, m, nil)
+	rep := store.PlacementReport{Enabled: true, Areas: []store.PlacementReportArea{{AreaID: ulid.Make(), Name: evil,
+		Gate: placement.Gate(placement.GateCounts{})}},
+		KeyReasons: map[placement.KeyKind]map[placement.Reason]int{placement.KeyAddress: {}, placement.KeyDomain: {}},
+		Moves:      map[store.PlacementMove]int{}, Abstain: map[placement.Reason]int{}}
+	printPlacementReport(&buf, rep, nil)
+	out := buf.String()
+	if strings.ContainsAny(out, "\u001b\u202e") {
+		t.Errorf("an area name reached the output raw:\n%q", out)
+	}
+	if !strings.Contains(out, "Work\ufffd[2J\ufffdevil") {
+		t.Errorf("the sanitised name should still be readable, with U+FFFD in place of the unsafe runes")
+	}
+	// Negative control: the same check on an unsanitised print must fail.
+	if !strings.ContainsAny(evil, "\u001b\u202e") {
+		t.Fatal("fixture: the name carries no unsafe rune")
+	}
+}

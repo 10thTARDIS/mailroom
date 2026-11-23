@@ -24,7 +24,7 @@ rather than from a guess. Nothing is moved, filed or learned differently.
 ### What's new: for the person running Mailroom
 
 - **A new read-only command, `mailroom-admin placement-measure`, answers six questions about a
-  real mailbox.** It prints counts only (no addresses or subjects) and writes nothing:
+  real mailbox.** It prints counts and your area names only (no addresses, senders or subjects; review the names before pasting the output anywhere public) and writes nothing:
   - why new mail was not filed, over the last thirty days;
   - how much filed-sender mail is refused only because the sender never passes authentication,
     and how much of that a rule already covers;
@@ -38,6 +38,13 @@ rather than from a guess. Nothing is moved, filed or learned differently.
   - how many senders send under more than one mailing list, and how many of your mixed senders
     a list-based key could separate.
   Every figure says when it is a lower or upper bound.
+
+### Fixes
+
+- **Area names are now checked when you save them.** A name containing a control or invisible
+  formatting character is refused, as rule and API key names already are. Names with accents,
+  other scripts or emoji are fine, and names you already have are untouched.
+- **The admin reports no longer print raw control characters from area names** to the terminal.
 
 ### Under the hood
 
