@@ -9,7 +9,9 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
-**This release adds no new behaviour to where mail is sorted.** It adds a way to measure what
+## [1.104.0-beta.1] — 2026-11-23
+
+**The first beta of v1.104 adds no new behaviour to where mail is sorted.** It adds a way to measure what
 learned sorting could do on your own mailbox, so the next changes are chosen from your numbers
 rather than from a guess. Nothing is moved, filed or learned differently.
 
