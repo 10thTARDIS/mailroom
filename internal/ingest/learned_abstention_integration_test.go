@@ -186,8 +186,10 @@ func TestPlacementMeasurePlacedCount(t *testing.T) {
 	if m.PlacedRecent != 2 {
 		t.Errorf("placed in the last 30 days = %d, want 2", m.PlacedRecent)
 	}
-	// The setup's own arrivals (alice's first two, 'none' and 'thin') were held back.
-	if m.Abstentions.ByReason["none"] != 1 || m.Abstentions.ByReason["thin"] != 1 {
-		t.Errorf("held back = %v, want none 1 and thin 1 (alice's first two arrivals)", m.Abstentions.ByReason)
+	// The seeding's own two arrivals were held back: lpFile switches learning off
+	// while it seeds (a single filing acts now, so a seeding loop would otherwise
+	// be placed by the very feature it is teaching).
+	if m.Abstentions.ByReason["off"] != 2 {
+		t.Errorf("held back = %v, want off 2 (the seeding's two arrivals)", m.Abstentions.ByReason)
 	}
 }

@@ -310,14 +310,16 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 	if op.Events != 10 || op.EventsByArea[u] != 7 || op.EventsByArea[r] != 3 {
 		t.Errorf("opened: events %d (U %d, R %d), want 10 (U 7, R 3)", op.Events, op.EventsByArea[u], op.EventsByArea[r])
 	}
-	if got := op.Keys.Confident[u]; got != (placement.KeyCounts{Addresses: 2}) {
-		t.Errorf("opened: confident U keys = %+v, want addresses a and e", got)
+	// A single filing acts for an address now (ADR-032 amendment), so the one
+	// thin address (j's one event) is confident too.
+	if got := op.Keys.Confident[u]; got != (placement.KeyCounts{Addresses: 3}) {
+		t.Errorf("opened: confident U keys = %+v, want addresses a, e and j", got)
 	}
-	if got := op.Keys.New[u]; got != (placement.KeyCounts{Addresses: 1}) || op.Keys.New[r] != (placement.KeyCounts{Addresses: 1}) {
-		t.Errorf("opened: new keys U %+v R %+v, want one address each (e is covered by the user)", got, op.Keys.New[r])
+	if got := op.Keys.New[u]; got != (placement.KeyCounts{Addresses: 2}) || op.Keys.New[r] != (placement.KeyCounts{Addresses: 1}) {
+		t.Errorf("opened: new keys U %+v R %+v, want U a and j, R one (e is covered by the user)", got, op.Keys.New[r])
 	}
-	if v := op.Keys.Reasons[placement.KeyAddress]; v[placement.Confident] != 3 || v[placement.Thin] != 1 || v[placement.Mixed] != 1 {
-		t.Errorf("opened: address verdicts = %v, want confident 3 thin 1 mixed 1", v)
+	if v := op.Keys.Reasons[placement.KeyAddress]; v[placement.Confident] != 4 || v[placement.Thin] != 0 || v[placement.Mixed] != 1 {
+		t.Errorf("opened: address verdicts = %v, want confident 4 thin 0 mixed 1", v)
 	}
 	if got := op.Areas[u]; got.Kept != 1 || got.Corrected != 3 || got.LabelRemoved != 1 || got.Agreement != 1 || got.Unresolved != 1 {
 		t.Errorf("opened: Updates = %+v, want kept 1, corrected 3 (1 label removed), agree 1, unresolved 1", got)
@@ -341,8 +343,8 @@ func TestPlacementMeasureLeftAlone(t *testing.T) {
 	if nm.Events != 13 || nm.EventsByArea[u] != 10 {
 		t.Errorf("not moved: events %d (U %d), want 13 (U 10): the opened condition removed 3", nm.Events, nm.EventsByArea[u])
 	}
-	if got := nm.Keys.New[u]; got != (placement.KeyCounts{Addresses: 2}) {
-		t.Errorf("not moved: new U keys = %+v, want a and j", got)
+	if got := nm.Keys.New[u]; got != (placement.KeyCounts{Addresses: 3}) {
+		t.Errorf("not moved: new U keys = %+v, want 3 (a, j and the address that was thin before a single filing acted)", got)
 	}
 	// j is taught here: o6 AGREE (desk U), o7 CORRECTED (filed into R).
 	if got := nm.Areas[u]; got.Kept != 1 || got.Corrected != 4 || got.LabelRemoved != 1 || got.Agreement != 2 || got.Unresolved != 1 {
@@ -474,26 +476,28 @@ func TestPlacementMeasureArchivedUnread(t *testing.T) {
 	if ar.Events != 7 || m.ArchivedCover.EventsNoArea != 1 || m.ArchivedCover.PrimaryOutcomes != 12 {
 		t.Errorf("events/no-area/outcomes = %d/%d/%d, want 7/1/12", ar.Events, m.ArchivedCover.EventsNoArea, m.ArchivedCover.PrimaryOutcomes)
 	}
-	// The BASE-RATE row: y (mixed origin), v (thin) and q are untaught: s7, s8, s9
-	// kept, s12 opened, q2 filed out of Primary = 5 messages.
-	if b := ar.Untaught; b.Messages != 5 || b.KeptUnopened != 3 || b.Opened != 1 || b.RefiledOut != 1 {
-		t.Errorf("base-rate row = %+v, want 5: kept 3, opened 1, refiled 1", b)
+	// The BASE-RATE row: y (mixed origin) and q are untaught (v's single filing
+	// teaches now, ADR-032 amendment): s7, s9 kept, s12 opened, q2 filed out of
+	// Primary = 4 messages (v's s8 moved to the taught side).
+	if b := ar.Untaught; b.Messages != 4 || b.KeptUnopened != 2 || b.Opened != 1 || b.RefiledOut != 1 {
+		t.Errorf("base-rate row = %+v, want 4: kept 2, opened 1, refiled 1", b)
 	}
-	mmNear(t, "base-rate strict precision", ar.Untaught.Strict.Precision, 0.2)
-	if got := ar.Keys.Reasons[placement.KeyAddress]; got[placement.Confident] != 2 || got[placement.Mixed] != 1 || got[placement.Thin] != 1 {
-		t.Errorf("address verdicts = %v, want confident 2 (x, w), mixed 1 (y), thin 1 (v)", got)
+	mmNear(t, "base-rate strict precision", ar.Untaught.Strict.Precision, 0.25)
+	if got := ar.Keys.Reasons[placement.KeyAddress]; got[placement.Confident] != 3 || got[placement.Mixed] != 1 || got[placement.Thin] != 0 {
+		t.Errorf("address verdicts = %v, want confident 3 (x, w, v), mixed 1 (y), thin 0", got)
 	}
-	if ar.Keys.Confident[r] != (placement.KeyCounts{Addresses: 1}) || ar.Keys.Confident[p] != (placement.KeyCounts{Addresses: 1}) {
-		t.Errorf("confident keys = %+v, want one address of origin R and one of origin P", ar.Keys.Confident)
+	if ar.Keys.Confident[r] != (placement.KeyCounts{Addresses: 2}) || ar.Keys.Confident[p] != (placement.KeyCounts{Addresses: 1}) {
+		t.Errorf("confident keys = %+v, want two addresses of origin R (x, v) and one of origin P", ar.Keys.Confident)
 	}
 	// x's later mail: s1 archived unread, s2 opened (event), s3 seen with NO event,
 	// s4 kept, s5 archived with no sign of reading, s10 re-filed out of Primary.
 	pr := ar.Areas[r]
-	if pr.Messages != 6 || pr.ArchivedUnread != 1 || pr.Opened != 1 || pr.SeenNoOpen != 1 || pr.KeptUnopened != 1 || pr.ArchivedOther != 1 || pr.RefiledOut != 1 {
-		t.Errorf("origin Promotions = %+v, want 6 later: 1 archived unread, 1 opened, 1 seen, 1 kept, 1 other, 1 refiled", pr)
+	// v's s8 (kept) is in now: 7 later.
+	if pr.Messages != 7 || pr.ArchivedUnread != 1 || pr.Opened != 1 || pr.SeenNoOpen != 1 || pr.KeptUnopened != 2 || pr.ArchivedOther != 1 || pr.RefiledOut != 1 {
+		t.Errorf("origin Promotions = %+v, want 7 later: 1 archived unread, 1 opened, 1 seen, 2 kept, 1 other, 1 refiled", pr)
 	}
-	mmNear(t, "Promotions strict precision", pr.Strict.Precision, 1.0/3) // (1 unread + 1 refiled) of 6
-	mmNear(t, "Promotions strict LCB95", pr.Strict.LCB, 0.0968)
+	mmNear(t, "Promotions strict precision", pr.Strict.Precision, 2.0/7) // (1 unread + 1 refiled) of 7
+	mmNear(t, "Promotions strict LCB95", pr.Strict.LCB, 0.0822)
 	mmNear(t, "Promotions engaged precision", pr.Engaged.Precision, 2.0/3) // 2 of (2 + 1 opened); seen-without-open is not a reading
 	mmNear(t, "Promotions engaged LCB95", pr.Engaged.LCB, 0.2077)
 	pp := ar.Areas[p]
@@ -629,10 +633,13 @@ func TestPlacementMeasureAuthRefusals(t *testing.T) {
 	if !a.Exact || a.Population != 10 || a.Read != 10 || a.Unreadable != 0 || a.Truncated {
 		t.Errorf("exact: %+v, want 10 messages, all read", a)
 	}
-	if want := (store.AuthBucket{Messages: 8, OK: 2, AuthOnly: 4, AuthAlso: 1, OtherOnly: 1, AuthOnlyKeys: 2, CoveredKeys: 1, CoveredMessages: 2}); a.Confident != want {
+	// The thin population (thin@wide, one filing) is confident now that a single
+	// filing acts: its 2 messages join the confident bucket (8+2, OK 2+1,
+	// AuthOnly 4+1, keys 2+1).
+	if want := (store.AuthBucket{Messages: 10, OK: 3, AuthOnly: 5, AuthAlso: 1, OtherOnly: 1, AuthOnlyKeys: 3, CoveredKeys: 1, CoveredMessages: 2}); a.Confident != want {
 		t.Errorf("exact confident = %+v\nwant           %+v", a.Confident, want)
 	}
-	if want := (store.AuthBucket{Messages: 2, OK: 1, AuthOnly: 1, AuthOnlyKeys: 1}); a.Thin != want {
+	if want := (store.AuthBucket{}); a.Thin != want {
 		t.Errorf("exact thin = %+v\nwant       %+v", a.Thin, want)
 	}
 

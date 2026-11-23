@@ -44,7 +44,7 @@ func TestPrintPlacementBackfill(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"checks: EXACT",
-		"learned placement: ON",
+		"learned sorting: ON",
 		"move 2",
 		fmt.Sprintf("  %-42s %6d", "sender not authenticated", 2),
 		fmt.Sprintf("  %-42s %6d", "ambiguous From", 0),

@@ -1494,6 +1494,47 @@ components:
         returned, and `sendersTruncated` is `true` when the 25 cut candidates
         off, making `moreSenders` a lower bound. Closed to API keys.
 
+        **LearnedSender/get** — what learned sorting knows about senders:
+        `{accountId, senders}` (1 to 50 From addresses, lowercased
+        server-side) → `{accountId, list, notFound}`, `notFound` always empty
+        (an address never filed still gets an entry with `filings: 0`). Each
+        entry: `{sender, address: {areaId, filings, verdict, acting, reason,
+        forgottenAt}, domain: {domain, areaId, filings, verdict, acting,
+        reason, forgottenAt}, decidedBy, trusted, forgottenAt}`. `verdict` is
+        `confident`, `thin`, `mixed`, `contradicted` or `none`; `decidedBy` is
+        `address`, `domain` or `none`; `acting` means learned sorting would
+        place the sender's next AUTHENTICATED message (the same decision as
+        ingest, including the area's correction gate); `reason` says why not
+        (`none`, `thin`, `mixed`, `contradicted`, `blocked`, `gated`, `off`,
+        `address_decides`). It does not read a message, so it cannot say
+        `unauthenticated`: `trusted` says whether unauthenticated mail would
+        also be acted on. Read-only. Closed to API keys.
+
+        **LearnedSender/forget** — `{accountId, sender, scope}` (`scope`
+        `address` or `domain`) → `{accountId, forgotten}` (the fresh entry).
+        Filings and corrections for that key made before now stop counting as
+        evidence; nothing is deleted and later filings count again. Writes an
+        Activity entry. Closed to API keys.
+
+        **LearnedSender/trust** — `{accountId, sender, trusted}` →
+        `{accountId, updated}`. For one exact ASCII From address, learned
+        sorting skips only the trusted-DMARC requirement: a failure reported
+        by the trusted Authentication-Results, an ambiguous From and every
+        sender warning still stop it. A domain cannot be trusted; a non-ASCII
+        address is `invalidArguments`. Writes an Activity entry when the state
+        changes. Closed to API keys.
+
+        **LearnedSorting/status** — `{accountId}` → `{accountId, enabled,
+        windowDays, placed, corrected, precision, lowerBound, sendersLearned:
+        {address, domain}, heldBack, heldBackSince, areas}`. Counts are
+        arrival placements decided in the last `windowDays` (30). `precision`
+        and `lowerBound` (95% Wilson) are over the resolved ones and `null`
+        with none. `heldBack` counts arrivals not filed, per reason, and is
+        recorded going forward only: `heldBackSince` is the first day it
+        covers, so earlier days are a lower bound. `areas` lists each area's
+        `placed`, `corrected` and correction `gate` (`acting`, `stopped` or
+        `not_judged`). Read-only. Closed to API keys.
+
         **DeskPreferences** — the desk-wide settings SINGLETON:
         `{id, lineThreshold, drawerDefaultDays, trayNagDays,
         drawerSweepEnabled, setupCompletedAt, learnedPlacementEnabled}`,

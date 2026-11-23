@@ -103,7 +103,7 @@ func TestPrintPlacementMeasure(t *testing.T) {
 		"filed by hand into ANY area: taught senders 3 of 9 later message(s), untaught senders 2 of 4",
 		"6 later message(s) in Primary (or filed out of it) from taught senders and 5 from senders the signal did not teach",
 		"(base rate)",
-		"placed by learned placement in the same 30 days: 20  ->  held back 75.3% of the 81 it considered",
+		"placed by learned sorting in the same 30 days: 20  ->  held back 75.3% of the 81 it considered",
 		"9 of them reached Mailroom more than a day after they were received",
 		"UNDETERMINED",
 		"1 message(s) the user moved on or after D would have been events",

@@ -321,7 +321,7 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// correspondents, not merely a setting.
 	exec(`INSERT INTO app.remote_allows (id, user_id, kind, value)
 	      VALUES ($1, $2, 'address', $3)`,
-		NewULID().String(), u.ID, tag+"-trusted@example.net")
+		NewULID().String(), u.ID, strings.ToLower(tag)+"-trusted@example.net")
 
 	// A saved signature (#56), so the RLS inventory has a compose_snippets row. Its
 	// body is text the user wrote, so a leak is closer to reading a draft.
@@ -393,12 +393,12 @@ func seedUser(t *testing.T, super *pgxpool.Pool, tag string) fixtureUser {
 	// One trusted sender (migration 00101): a leak would tell one user which
 	// senders another has told learned sorting to believe without a DMARC pass.
 	exec(`INSERT INTO app.learned_sender_trust (user_id, address) VALUES ($1, $2)`,
-		u.ID, tag+"-trusted@example.net")
+		u.ID, strings.ToLower(tag)+"-trusted@example.net")
 
 	// One forget mark (migration 00102): a leak would tell one user which
 	// senders another has asked learned sorting to forget.
 	exec(`INSERT INTO app.learned_sender_forgotten (user_id, key_kind, key_value) VALUES ($1, 'address', $2)`,
-		u.ID, tag+"-forgotten@example.net")
+		u.ID, strings.ToLower(tag)+"-forgotten@example.net")
 
 	// One learned-sorting activity event (migration 00104): a leak would tell one
 	// user which senders another has forgotten or trusted.

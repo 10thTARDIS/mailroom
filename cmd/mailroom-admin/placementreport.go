@@ -103,12 +103,12 @@ func runPlacementReport(ctx context.Context, args []string) error {
 // authentication rule applies on arrival, and the report says which.
 func printPlacementReport(w io.Writer, rep store.PlacementReport, trusted []string) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
-	p("=== placement-report (#714): learned placement ===\n")
+	p("=== placement-report (#714): learned sorting ===\n")
 	p("counts and your area names only (no addresses, senders or subjects). Area names are yours: review them before pasting the output anywhere public.\n")
 	if rep.Enabled {
-		p("learned placement: ON\n")
+		p("learned sorting: ON\n")
 	} else {
-		p("learned placement: OFF for this login (nothing is placed at ingest)\n")
+		p("learned sorting: OFF for this login (nothing is placed at ingest)\n")
 	}
 	if len(trusted) > 0 {
 		p("authentication: on arrival, acts only on a DMARC pass from a trusted authserv-id (%s)\n", strings.Join(trusted, ","))

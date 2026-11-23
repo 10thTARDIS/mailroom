@@ -180,9 +180,9 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 		p("   %-16s %7d   (not in this report's vocabulary)\n", r, t.ByReason[r])
 	}
 	p("   %-16s %7d\n", "held back, total", t.Total())
-	p("   placed by learned placement in the same %d days: %d  ->  held back %s of the %d it considered\n", t.Days, m.PlacedRecent,
+	p("   placed by learned sorting in the same %d days: %d  ->  held back %s of the %d it considered\n", t.Days, m.PlacedRecent,
 		measurePct(t.Total(), t.Total()+m.PlacedRecent), t.Total()+m.PlacedRecent)
-	p("   (mail synced from Sent or Drafts is not counted as an arrival: learned placement runs on it, and has no evidence about the user's own address.)\n\n")
+	p("   (mail synced from Sent or Drafts is not counted as an arrival: learned sorting runs on it, and has no evidence about the user's own address.)\n\n")
 
 	// 2.
 	a := m.Auth
@@ -241,7 +241,7 @@ func printPlacementMeasure(w io.Writer, m store.PlacementMeasure, trusted []stri
 	}
 	p("   not observable: %d message(s) the user filed more than %d days after they arrived, before or after D (the desk's label, which named the original area, was\n"+
 		"   deleted by the move), so the events lack the failures that happened late; that can only flatter the signal.\n", c.UnobservableMoved, store.MeasureLeftAloneDays)
-	p("   outcomes: %d message(s) arrived since D and old enough to judge; left out because a rule decided them %d, learned placement %d, day-one setup or the classifier %d\n",
+	p("   outcomes: %d message(s) arrived since D and old enough to judge; left out because a rule decided them %d, learned sorting %d, day-one setup or the classifier %d\n",
 		c.Outcomes, c.ExcludedRule, c.ExcludedLearned, c.ExcludedOther)
 	p("   existing evidence before D: %d filing(s) by the user; a key they already cover is not new reach\n", m.UserEvidence)
 	for _, v := range []struct {

@@ -2222,7 +2222,8 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 	// status must (the control that proves the probe can see the row).
 	"LearnedPlacement/getStatus": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		superExec(t, h, `INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)`,
+		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)
+		                 ON CONFLICT DO NOTHING`,
 			b.UserID.String(), b.MessageID.String(), b.AreaID.String())
 		res, mErr := invokeAs(t, h, "LearnedPlacement/getStatus", a.UserID, map[string]any{})
 		if mErr != nil {
@@ -2316,7 +2317,8 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 	},
 	"LearnedSorting/status": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
 		superExec(t, h, `INSERT INTO app.learned_placements (user_id, message_id, key_kind, key_value, area_id)
-		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)`,
+		                 VALUES ($1, $2, 'address', 'friend@example.com', $3)
+		                 ON CONFLICT DO NOTHING`,
 			b.UserID.String(), b.MessageID.String(), b.AreaID.String())
 		res, mErr := invokeAs(t, h, "LearnedSorting/status", a.UserID, map[string]any{})
 		if mErr != nil {

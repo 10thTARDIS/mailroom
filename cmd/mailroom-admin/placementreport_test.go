@@ -40,7 +40,7 @@ func TestPrintPlacementReport(t *testing.T) {
 	printPlacementReport(&buf, rep, []string{"mx.example"})
 	out := buf.String()
 	for _, want := range []string{
-		"learned placement: ON",
+		"learned sorting: ON",
 		"STOPPED (20 resolved",
 		"would move 7 desk message(s)",
 		"Primary              Updates                     5",
@@ -78,5 +78,38 @@ func TestPrintPlacementReport(t *testing.T) {
 	}
 	if strings.Contains(primaryLine, "0.000") || !strings.Contains(primaryLine, " - ") {
 		t.Errorf("an area with nothing resolved must print '-' for precision, got %q", primaryLine)
+	}
+}
+
+// The weaker rules are their own rows, each with its own outcomes, so a poor
+// precision cannot hide inside a good aggregate (ADR-032 amendment).
+func TestPrintPlacementReportSplitsTheWeakerRules(t *testing.T) {
+	rep := store.PlacementReport{
+		KeyReasons: map[placement.KeyKind]map[placement.Reason]int{placement.KeyAddress: {}, placement.KeyDomain: {}},
+		ConfidentBasis: map[placement.KeyKind]map[placement.Basis]int{
+			placement.KeyAddress: {placement.BasisEvidence: 4, placement.BasisSingle: 3, placement.BasisRecency: 2},
+		},
+		Origins: store.PlacementOrigins{
+			Arrival: map[string]int{"kept": 30, "corrected": 5},
+			ArrivalByBasis: map[placement.Basis]map[string]int{
+				placement.BasisEvidence: {"kept": 25, "corrected": 1},
+				placement.BasisSingle:   {"kept": 4, "open": 2, "corrected": 3},
+				placement.BasisRecency:  {"kept": 1, "corrected": 1},
+			},
+		},
+		Moves: map[store.PlacementMove]int{}, Abstain: map[placement.Reason]int{},
+	}
+	var buf bytes.Buffer
+	printPlacementReport(&buf, rep, nil)
+	out := buf.String()
+	for _, want := range []string{
+		"arrival: SINGLE FILING (one filing of an address)  open 2 · kept 4 · corrected 3",
+		"arrival: RECENCY (newest run on a mixed key)       open 0 · kept 1 · corrected 1",
+		"arrival: two or more agreeing filings              open 0 · kept 25 · corrected 1",
+		"confident by evidence: 4 ordinary · 3 single filing · 2 recency run",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
 	}
 }

@@ -207,11 +207,11 @@ func printPlacementBackfill(w io.Writer, plan store.PlacementBackfillPlan,
 	batches []store.PlacementBackfillBatch, trusted []string, apply bool) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
 	names := plan.AreaNames
-	p("=== placement-backfill (#714): learned placement for mail already on the desk ===\n")
+	p("=== placement-backfill (#714): learned sorting for mail already on the desk ===\n")
 	if plan.Enabled {
-		p("learned placement: ON\n")
+		p("learned sorting: ON\n")
 	} else {
-		p("learned placement: OFF for this login: --apply is refused; the plan below is what it would do\n")
+		p("learned sorting: OFF for this login: --apply is refused; the plan below is what it would do\n")
 	}
 	if len(trusted) > 0 {
 		p("authentication: a DMARC pass bound to the From domain, from a trusted authserv-id (%s)\n", strings.Join(trusted, ","))

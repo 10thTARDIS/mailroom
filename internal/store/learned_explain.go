@@ -164,6 +164,7 @@ func (tx *UserTx) learnedArrival(ctx context.Context, msgID ulid.ULID, sender pl
 	} else {
 		area := d.Area
 		out.AreaID = &area
+		out.Basis = d.Basis
 	}
 
 	// 4b. THE SENDER MUST BE WHO IT CLAIMS: senderRefusal, the one function

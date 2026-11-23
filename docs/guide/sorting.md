@@ -15,16 +15,31 @@ To move everything from one sender, choose **Move all from … to…** on a mess
 
 ## Learned sorting
 
-Once you have moved a sender's mail to the same area at least twice, and never anywhere else, Mailroom files that sender's new mail there too. There is nothing to set up.
+Once you have moved a sender's mail to an area, Mailroom files that sender's next mail there too. There is nothing to set up. It acts on:
+
+- **One move.** After you move a sender's mail to an area **once**, and never anywhere else, new mail from that exact address goes there. If you then correct it (move a learned message elsewhere), that sender stays unsorted until you have moved **two more** of its messages to the same place.
+- **A recent run.** A sender whose older mail you filed in more than one area is sorted by your **latest** habit: when your three most recent moves of that sender all went to the same area, with none elsewhere in between, new mail goes there. Two moves are not enough.
+- **A whole company, carefully.** Mail from an address you have never moved follows its domain only when you have filed at least two different addresses at that domain the same way. This is never done for shared providers such as Gmail or Outlook, or for your own domains.
+
+Learned mail is marked **Learned sorting** on the message and its sender card, so you can always tell it from a rule or from your own move.
 
 It is deliberately careful:
 
 - **Your rules always win.**
-- **Only genuine senders.** A message is sorted this way only if its sender is confirmed as genuine. Mail that cannot be authenticated, or that carries a [sender warning](reading.md#sender-warnings), is never sorted by learning.
+- **Only genuine senders.** A message is sorted this way only if its sender is confirmed as genuine. Mail that cannot be authenticated, or that carries a [sender warning](reading.md#sender-warnings), is never sorted by learning, unless you trust the sender (below), and even then a sender warning still stops it.
 - **Not for shared providers.** Learning never spreads from one Gmail or Outlook address to every address at that provider.
 - **It backs off when you correct it.** If you move a learned message elsewhere, the sender is no longer sorted automatically, and an area where it was corrected often is paused.
 
-To undo or correct it, simply move the message to the right area. To turn it off, go to Settings → **Areas and drawers** and switch off **Sort new mail into areas by learning from your moves**. That section also shows how many messages learned sorting filed in the last 30 days and how many you moved again, and lists **Senders you keep moving by hand** with a **Make a rule** button for each.
+### See and change what it learned
+
+Open a sender's card to see what learned sorting has learned about that sender: which area it files them in, how many of your moves it is based on, and whether it will act on their next message. From there you can:
+
+- **Forget this sender.** Learned sorting ignores everything you did with that sender before now (it deletes nothing, and your messages stay where they are). Moves you make afterwards count again. You can forget just the address, or the whole domain.
+- **Trust this sender.** Some senders can never be confirmed as genuine, for example automatic mail from your own server. For one exact address you can tell learned sorting to sort it without that confirmation. It does not turn off sender warnings, and it does not apply to a message whose check clearly failed. A whole domain cannot be trusted.
+
+Forget, trust and stop-trusting each leave a line in **Activity**.
+
+To undo or correct a learned message, simply move it to the right area. To turn learned sorting off, go to Settings → **Areas and drawers** and switch off **Sort new mail into areas by learning from your moves**. That section also shows how many messages learned sorting filed in the last 30 days and how many you moved again, and lists **Senders you keep moving by hand** with a **Make a rule** button for each.
 
 ## Rules
 

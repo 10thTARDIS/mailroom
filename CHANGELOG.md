@@ -9,6 +9,40 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+**The second beta of v1.104: learned sorting now files mail for more senders, and you can see what it learned, make it forget, and trust a sender it cannot verify.** Read this one before you upgrade: learned sorting acts on the mail it files without asking, and these changes make it act sooner and on more senders. Every change below is held back by the same safety brake as before, which pauses an area whose recent placements you keep correcting, and every placement it makes this way is counted on its own so you can judge it.
+
+### What's new: for you
+
+- **Learned sorting now acts after you have moved a sender's mail once.** It used to need two moves. Now new mail from that exact address goes to the same area after a single move, as long as you have never moved it anywhere else. If you correct one of these (move it elsewhere), that sender stays unsorted until you have moved two more of its messages to the same place, which is stricter than the usual rule.
+- **A recent habit now wins over an old one.** If you used to file a sender's mail in one area and have moved it to another three times in a row since, with nothing in between, new mail follows your latest habit. Two moves are not enough, and a move somewhere else in between starts the count again.
+- **See what it learned about a sender.** A sender's card shows which area learned sorting files them in, how many of your moves that rests on, and whether it will act on their next message.
+- **Make it forget a sender (or a whole domain).** Everything you did with that sender before now stops counting. Nothing is deleted and your messages stay where they are, and moves you make afterwards count again.
+- **Trust a sender it cannot verify.** Learned sorting only files mail whose sender it can confirm as genuine, which automatic mail from your own server often cannot be. You can now trust one exact address so that missing confirmation no longer stops it. It does not switch off sender warnings, and it does not help a message whose check clearly failed. A whole domain cannot be trusted.
+- **A status view for learned sorting.** How many messages it filed in the last 30 days, how many you moved again, how reliable it has been, how many senders it has learned, and why it held other mail back.
+- **Forget, trust and stop-trusting appear in Activity.**
+- **One name.** The feature is now called **Learned sorting** everywhere, including the label on a sorted message.
+
+### How to see it and undo it
+
+- Learned mail is marked **Learned sorting**. Move a message to the right area to correct it; that sender is then paused.
+- Use **Forget** on a sender's card to start that sender again from scratch.
+- To switch the whole feature off, untick **Sort new mail into areas by learning from your moves** in Settings.
+
+### What's new: for the person running Mailroom
+
+- **`placement-report` lists the new kinds of placement on their own rows.** Placements made on a single move and on a recent habit each get their own open, kept and corrected counts, so a weaker rule cannot hide inside a good overall figure. Read this report before and after you upgrade.
+- **`placement-explain` says which rule a decision rests on,** whether the sender is trusted and whether trust is what let the message through, and whether a Forget applies. `placement-measure` says that the recency rows are now acted on.
+- **`placement-backfill` uses the same decision,** so it can find more existing mail to move. Read its report before applying it.
+
+### Safety
+
+- Trust skips one check only, the missing confirmation of the sender. It never overrides a failure reported by your mail server, a sender warning or an unclear From header, and it only ever applies to plain ASCII addresses matched exactly.
+- Sender addresses behind the Activity lines are stored with your account data and removed with it; they are never written to the audit log.
+
+### Upgrading
+
+- Three new database tables and one new column are added by the migrations that run on start (no data is rewritten).
+
 ## [1.104.0-beta.1] — 2026-11-23
 
 **The first beta of v1.104 adds no new behaviour to where mail is sorted.** It adds a way to measure what

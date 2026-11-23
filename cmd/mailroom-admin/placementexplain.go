@@ -149,7 +149,7 @@ type explainedMessage struct {
 
 func printPlacementExplain(w io.Writer, msgs []explainedMessage, names map[ulid.ULID]string) {
 	p := func(format string, a ...any) { _, _ = fmt.Fprintf(w, format, a...) }
-	p("=== placement-explain (#840): why learned placement did or did not place a message ===\n")
+	p("=== placement-explain (#840): why learned sorting did or did not place a message ===\n")
 	p("READ ONLY: nothing was written. Evidence is evaluated NOW unless --as-of; the correction gate, the user's own\n")
 	p("domains, the sender-warning index and the tab verdict are always read as of now.\n")
 	for i, m := range msgs {
@@ -204,7 +204,7 @@ func printExplanation(w io.Writer, ex ingest.LearnedExplanation, names map[ulid.
 		p("  no usable address or domain: the message has no key\n")
 	}
 	p("  ambiguous From (not exactly one mailbox in one header): %s\n", yesNo(tr.Ambiguous))
-	p("  learned placement switch: %s\n", map[bool]string{true: "ON", false: "OFF"}[tr.Enabled])
+	p("  learned sorting switch: %s\n", map[bool]string{true: "ON", false: "OFF"}[tr.Enabled])
 
 	if !tr.KeysOK {
 		printExplainOutcome(w, tr, names)

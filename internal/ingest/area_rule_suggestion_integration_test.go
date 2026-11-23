@@ -75,8 +75,12 @@ func (f *fixture) rsMixedSeed(t *testing.T, n int) map[string]store.AreaView {
 	t.Helper()
 	areas := f.lpAreas(t)
 	f.lpSwitch(t, false)
+	// Interleaved (one Updates, the Promotions one, then the rest of Updates), so
+	// the newest run is never three into one area: a run of three on a mixed key
+	// acts (recency, ADR-032 amendment), and this seed is for a key that does not.
+	f.lpFile(t, rsSender, 1, areas, "Updates")
 	f.lpFile(t, rsSender, 1, areas, "Promotions")
-	f.lpFile(t, rsSender, n, areas, "Updates")
+	f.lpFile(t, rsSender, n-1, areas, "Updates")
 	f.lpSwitch(t, true)
 	f.lpWantFilings(t, rsSender, areas["Updates"], n)
 	f.lpWantFilings(t, rsSender, areas["Promotions"], 1)
