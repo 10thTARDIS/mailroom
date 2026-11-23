@@ -297,4 +297,34 @@ describe("the Learned sorting status block (LearnedSorting/status)", () => {
     await mountStatus(status());
     expect(host.textContent).not.toContain("In the last 30 days Learned sorting filed");
   });
+
+  it("handles the null and zero cases: no precision text, no date, only non-zero reasons and active areas", async () => {
+    learnedSortingStatus.mockImplementation(async () =>
+      sorting({
+        precision: null,
+        lowerBound: null,
+        heldBackSince: null,
+        heldBack: { none: 0, thin: 0, mixed: 0 },
+        areas: [
+          { areaId: "A-ALERTS", placed: 0, corrected: 0, gate: "not_judged" },
+          { areaId: "A-NEWS", placed: 0, corrected: 0, gate: "stopped" },
+        ],
+      }),
+    );
+    await mountStatus(null);
+    const text = host.textContent ?? "";
+    expect(text).not.toMatch(/precision|counting since|Held back/i);
+    expect(text).not.toContain("Alerts:");
+    expect(text).toContain("News: placed 0, corrected 0 · paused after corrections");
+  });
+
+  it("shows the held-back list without a date when nothing has a date but something is counted", async () => {
+    learnedSortingStatus.mockImplementation(async () => sorting({ heldBackSince: null, heldBack: { thin: 2, none: 0 } }));
+    await mountStatus(null);
+    const text = host.textContent ?? "";
+    expect(text).toContain("Held back");
+    expect(text).not.toContain("counting since");
+    expect(text).toContain("too few filings from the sender: 2");
+    expect(text).not.toContain("no earlier filings");
+  });
 });

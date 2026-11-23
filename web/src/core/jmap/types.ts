@@ -272,7 +272,8 @@ export type ActivityKind =
   | "sign_in"
   | "sign_out"
   | "placement"
-  | "rule_apply";
+  | "rule_apply"
+  | "learned_sender";
 
 /** One entry. Fields a kind does not have are null. Never message content. */
 export interface ActivityEntry {
@@ -2946,6 +2947,8 @@ export interface LearnedSenderEvidence {
   acting: boolean;
   /** The abstention code when not acting (none, thin, mixed, contradicted, blocked, unauthenticated, gated, off, ...). */
   reason: string | null;
+  /** When this key was forgotten (newer of the two is the top-level value). Absent on older servers. */
+  forgottenAt?: string | null;
 }
 
 /** LearnedSender/get, /forget and /trust (#167). */

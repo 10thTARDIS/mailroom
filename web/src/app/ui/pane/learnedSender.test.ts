@@ -82,3 +82,27 @@ describe("forgetScope and showTrust", () => {
     expect(showTrust(sender({ address: { acting: true, reason: null } }))).toBe(false);
   });
 });
+
+describe("server additions (beta 2)", () => {
+  it("address_decides on the domain never produces a not-sorted sentence; the address speaks", () => {
+    const s = sender({
+      decidedBy: "address",
+      address: { areaId: "AU", filings: 4, verdict: "confident", acting: true, reason: null },
+      domain: { areaId: "AN", filings: 9, verdict: "confident", acting: false, reason: "address_decides" },
+    });
+    expect(learnedSenderSentence(s, name)).toBe("Files new mail from this sender to Updates (learned from 4 of your moves).");
+    // Even if decidedBy were absent, the marker alone picks the address.
+    expect(learnedSenderSentence({ ...s, decidedBy: "none" }, name)).toBe(
+      "Files new mail from this sender to Updates (learned from 4 of your moves).",
+    );
+  });
+  it("a forgotten sender with no filings since says so instead of 'Nothing learned'", () => {
+    const s = sender({ forgottenAt: "2026-11-20T10:00:00Z" });
+    expect(learnedSenderSentence(s, name)).toMatch(/^You asked Mailroom to forget this sender on .*2026/);
+    expect(learnedSenderSentence(s, name)).not.toContain("Nothing learned");
+  });
+  it("filings since the forget fall back to the normal sentence", () => {
+    const s = sender({ forgottenAt: "2026-11-20T10:00:00Z", address: { filings: 1, verdict: "thin", reason: "thin" } });
+    expect(learnedSenderSentence(s, name)).toBe("Not sure yet: you've filed this sender once.");
+  });
+});

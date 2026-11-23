@@ -248,19 +248,21 @@ function LearnedSortingStatusBlock({ onLoaded }: { onLoaded: (loaded: boolean) =
           ))}
         </ul>
       ) : null}
-      {status.heldBackSince ? (
-        held.length > 0 ? (
-          <>
-            <h4>{t("learnedStatus.held.heading", { date: status.heldBackSince })}</h4>
-            <ul>
-              {held.map((h) => (
-                <li key={h.key}>{t("learnedStatus.held.line", { reason: h.label, count: h.count })}</li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="field-hint">{t("learnedStatus.held.none", { date: status.heldBackSince })}</p>
-        )
+      {held.length > 0 ? (
+        <>
+          <h4>
+            {status.heldBackSince
+              ? t("learnedStatus.held.heading", { date: status.heldBackSince })
+              : t("learnedStatus.held.heading.plain")}
+          </h4>
+          <ul>
+            {held.map((h) => (
+              <li key={h.key}>{t("learnedStatus.held.line", { reason: h.label, count: h.count })}</li>
+            ))}
+          </ul>
+        </>
+      ) : status.heldBackSince ? (
+        <p className="field-hint">{t("learnedStatus.held.none", { date: status.heldBackSince })}</p>
       ) : null}
     </div>
   );

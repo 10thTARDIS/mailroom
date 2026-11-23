@@ -4,16 +4,27 @@
 // every verdict and reason can be tested against a fake LearnedSender/get answer.
 
 import type { LearnedSender, LearnedSenderEvidence } from "../../../core/jmap/types";
+import { keyDateLong } from "../../../core/userKeys";
 import { t, tCount } from "../../i18n";
 
 /** The key learned sorting would decide this sender by. */
 export function decidingEvidence(s: LearnedSender): LearnedSenderEvidence {
   if (s.decidedBy === "domain") return s.domain;
-  if (s.decidedBy === "address") return s.address;
+  // address_decides on the domain means the address key is the one that matters.
+  if (s.decidedBy === "address" || s.domain.reason === "address_decides") return s.address;
   // Nothing decided: report the first key with a reason, address first.
   if (s.address.reason) return s.address;
   if (s.domain.reason) return s.domain;
   return s.address;
+}
+
+/** "Nothing learned", or, when the user asked to forget and nothing has been filed since, say so. */
+function nothingLearned(s: LearnedSender): string {
+  const at = s.forgottenAt ?? null;
+  if (at && s.address.filings === 0 && s.domain.filings === 0) {
+    return t("learnedSender.forgotten", { date: keyDateLong(at) });
+  }
+  return t("learnedSender.none");
 }
 
 /** One short plain sentence for the state. `areaName` maps an area id to its name. */
@@ -28,9 +39,9 @@ export function learnedSenderSentence(s: LearnedSender, areaName: (id: string) =
   }
   switch (e.reason) {
     case "none":
-      return t("learnedSender.none");
+      return nothingLearned(s);
     case "thin":
-      return e.filings > 0 ? tCount("learnedSender.thin", e.filings) : t("learnedSender.none");
+      return e.filings > 0 ? tCount("learnedSender.thin", e.filings) : nothingLearned(s);
     case "mixed":
       return t("learnedSender.mixed");
     case "contradicted":
@@ -44,7 +55,7 @@ export function learnedSenderSentence(s: LearnedSender, areaName: (id: string) =
     case "off":
       return t("learnedSender.off");
     default:
-      return e.filings === 0 && e.verdict === "none" ? t("learnedSender.none") : t("learnedSender.other");
+      return e.filings === 0 && e.verdict === "none" ? nothingLearned(s) : t("learnedSender.other");
   }
 }
 
