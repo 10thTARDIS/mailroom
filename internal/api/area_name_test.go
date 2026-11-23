@@ -27,7 +27,7 @@ func reachesStore(fn func() *SetError) (refused *SetError, reached bool) {
 // an international name with an emoji (the positive control: without it the
 // refusal could be refusing everything).
 func TestAreaSetRefusesUnsafeNames(t *testing.T) {
-	for _, bad := range []string{"Work\u001b[31m", "Re‮vil", "zero​width", "tab\tname"} {
+	for _, bad := range []string{"Work\u001b[31m", "Re\u202evil", "zero\u200bwidth", "tab\tname"} {
 		raw, _ := json.Marshal(map[string]any{"name": bad})
 		pos := 0
 		_, _, serr := createArea(context.Background(), nil, raw, &pos)
@@ -66,7 +66,7 @@ func TestSetupPlanRefusesUnsafeNames(t *testing.T) {
 	plan := func(area, label string) setupPlanArgs {
 		return setupPlanArgs{Folders: []setupFolderChoiceArgs{{MailboxID: mailbox, Action: "bringToDesk", AreaName: area, LabelName: label}}}
 	}
-	for _, bad := range []string{"Work\u001b[2J", "A‮B"} {
+	for _, bad := range []string{"Work\u001b[2J", "A\u202eB"} {
 		if _, merr := parseSetupPlan(plan(bad, "")); merr == nil {
 			t.Errorf("area name %q was accepted", bad)
 		}

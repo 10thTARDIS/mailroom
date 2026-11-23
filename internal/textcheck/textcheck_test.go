@@ -44,3 +44,25 @@ func TestCheckNameMessageDoesNotEchoTheCharacter(t *testing.T) {
 		t.Fatalf("message %v", err)
 	}
 }
+
+func TestSanitizeName(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Receipts", "Receipts"},
+		{"  padded  ", "padded"},
+		{"Work\u001b[2J", "Work[2J"},
+		{"A\u202eB\u200bC", "ABC"},
+		{"line\nbreak\ttab", "linebreaktab"},
+		{"Café 日本 ✉️", "Café 日本 ✉️"},
+		{"fam\u200d\u200cily", "fam\u200d\u200cily"}, // the two allowed joiners stay
+		{"bad\xffbyte", "badbyte"},
+		{"\u202e\u0007  ", ""},
+	} {
+		got := SanitizeName(tc.in)
+		if got != tc.want {
+			t.Errorf("SanitizeName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if tc.want != "" && CheckName(got) != nil {
+			t.Errorf("SanitizeName(%q) = %q still fails CheckName", tc.in, got)
+		}
+	}
+}

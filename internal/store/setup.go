@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+
+	"mailroom/internal/textcheck"
 )
 
 // DAY-ONE SETUP: THE BULK IMPORT, ITS PREVIEW, AND ITS UNDO (#446, migration
@@ -335,7 +337,15 @@ func (tx *UserTx) resolveSetupPlan(ctx context.Context, plan SetupPlan) ([]setup
 		if c.Role != "inbox" && ch.Action != SetupActionLeave {
 			name := strings.TrimSpace(ch.LabelName)
 			if name == "" {
-				name = c.Name
+				// The default is the provider's folder name, which may carry
+				// control or bidi characters. A typed labelName is checked at the
+				// API; this one is derived, so it is sanitised, never refused
+				// for the folder's sake.
+				name = textcheck.SanitizeName(c.Name)
+				if name == "" {
+					return nil, fmt.Errorf("%w: folder %s has no usable name (it holds only control or invisible characters); give it a labelName",
+						ErrSetupPlanInvalid, ch.MailboxID)
+				}
 			}
 			f.Choice.LabelName = name
 			if id, ok := labels[strings.ToLower(name)]; ok {

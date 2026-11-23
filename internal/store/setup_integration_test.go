@@ -1305,3 +1305,68 @@ func TestDeskPreferencesSetupCompletedAt(t *testing.T) {
 
 func isSetupBusy(err error) bool        { return errors.Is(err, ErrSetupRunBusy) }
 func isSetupPlanInvalid(err error) bool { return errors.Is(err, ErrSetupPlanInvalid) }
+
+// A folder the user leaves unnamed in the plan takes the provider's folder name
+// as its label. That name is not the user's typing and may carry control or bidi
+// characters: it is sanitised into a clean label, and a folder whose name is
+// ONLY such characters is refused with a request for a labelName.
+//
+// NEGATIVE CONTROL: with textcheck.SanitizeName removed from the default, the
+// first test fails (the label is saved with the ESC and U+202E in it).
+func TestSetupDefaultLabelNameIsSanitised(t *testing.T) {
+	h := newHarness(t)
+	s := h.appStore()
+	ctx := context.Background()
+	u := seedUser(t, h.super, "setupname-"+NewULID().String())
+	userID := mustULID(t, u.ID)
+	mailbox := func(name string) ulid.ULID {
+		id := NewULID()
+		mustExec(t, h, `INSERT INTO app.mailboxes (id, user_id, account_id, imap_name, display_name)
+			VALUES ($1,$2,$3,$4,$4)`, id.String(), u.ID, u.AccountID, name)
+		return id
+	}
+	dirty := mailbox("Receipts\u001b[2J\u202eevil")
+	plan := SetupPlan{WindowDays: 30, Folders: []SetupFolderChoice{{MailboxID: dirty, Action: SetupActionLabelArchive}}}
+	var runID ulid.ULID
+	if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
+		counts, e := tx.SetupPreview(ctx, plan)
+		if e != nil {
+			return e
+		}
+		runID, e = tx.CreateSetupRun(ctx, plan, counts)
+		return e
+	}); err != nil {
+		t.Fatalf("preview/create: %v", err)
+	}
+	for done := false; !done; {
+		if err := s.UserTx(ctx, userID, func(tx *UserTx) error {
+			p, e := tx.SetupApplyChunk(ctx, runID, 100)
+			done = p.Done
+			return e
+		}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+	}
+	var n int
+	if err := h.super.QueryRow(ctx, `SELECT count(*) FROM app.labels WHERE user_id = $1 AND name = 'Receipts[2Jevil'`, u.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("clean label 'Receipts[2Jevil' count = %d, want 1", n)
+	}
+	if err := h.super.QueryRow(ctx, `SELECT count(*) FROM app.labels WHERE user_id = $1 AND (name ~ '[[:cntrl:]]' OR name LIKE '%' || chr(8238) || '%')`, u.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d label(s) saved with a control or bidi character", n)
+	}
+
+	only := mailbox("\u202e\u0007")
+	err := s.UserTx(ctx, userID, func(tx *UserTx) error {
+		_, e := tx.SetupPreview(ctx, SetupPlan{WindowDays: 30, Folders: []SetupFolderChoice{{MailboxID: only, Action: SetupActionLabelArchive}}})
+		return e
+	})
+	if !isSetupPlanInvalid(err) {
+		t.Errorf("a folder named only with unsafe characters: %v, want ErrSetupPlanInvalid", err)
+	}
+}

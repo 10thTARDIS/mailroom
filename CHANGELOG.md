@@ -44,6 +44,9 @@ rather than from a guess. Nothing is moved, filed or learned differently.
 - **Area and label names are now checked when you save them, including in the day-one setup.** A name containing a control or invisible
   formatting character is refused, as rule and API key names already are. Names with accents,
   other scripts or emoji are fine, and names you already have are untouched.
+- **Day-one setup no longer saves folder names with hidden control characters as labels.** When you
+  leave a folder's label name blank, the folder's own name is used with any such characters removed;
+  a folder whose name is only such characters asks you to type a label name.
 - **The admin reports no longer print raw control characters from area names** to the terminal.
 
 ### Under the hood

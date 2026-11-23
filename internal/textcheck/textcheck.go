@@ -11,6 +11,7 @@ package textcheck
 
 import (
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -35,6 +36,23 @@ func IsUnsafeRune(r rune) bool {
 		return false
 	}
 	return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029'
+}
+
+// SanitizeName derives a safe name from one Mailroom did not type: it drops every
+// rune IsUnsafeRune rejects and trims spaces. It is for a DEFAULT taken from
+// somewhere else (an IMAP folder name the provider chose), where refusing would
+// refuse the user's own folder; a name the user types still goes through
+// CheckName and is refused. The result may be empty, which the caller must
+// treat as "no usable name". Invalid UTF-8 bytes are dropped too.
+func SanitizeName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == utf8.RuneError || IsUnsafeRune(r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // CheckName returns nil for a name made only of ordinary characters (any script,
