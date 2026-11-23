@@ -40,7 +40,8 @@ func TestJudge(t *testing.T) {
 		want Reason
 	}{
 		{"none", KeyAddress, Evidence{}, NoEvidence},
-		{"one filing is thin", KeyAddress, ev(1, t0, map[ulid.ULID]int{updates: 1}), Thin},
+		{"one filing acts for an address", KeyAddress, ev(1, t0, map[ulid.ULID]int{updates: 1}), Confident},
+		{"one filing is thin for a domain", KeyDomain, ev(2, t0, map[ulid.ULID]int{updates: 1}), Thin},
 		{"two agreeing filings act", KeyAddress, ev(1, t0, map[ulid.ULID]int{updates: 2}), Confident},
 		{"mixed abstains", KeyAddress, ev(1, t0, map[ulid.ULID]int{updates: 5, promotions: 1}), Mixed},
 		{"domain over one address is thin", KeyDomain, ev(1, t0, map[ulid.ULID]int{updates: 9}), Thin},
@@ -78,12 +79,12 @@ func TestDecideAddressBeatsDomain(t *testing.T) {
 	addr, dom, _ := KeysFor("alice@example.com")
 	domainEv := ev(3, t0, map[ulid.ULID]int{updates: 10})
 
-	// The address's one filing AGREES with the domain (it is one of the
-	// domain's own), which is the only way the domain can be confident while
-	// the address has evidence at all.
-	d := Decide(addr, dom, ev(1, t0, map[ulid.ULID]int{updates: 1}), domainEv, nil)
-	if d.Act || d.Key != addr || d.Reason != Thin {
-		t.Errorf("thin address in a confident domain = %+v, want abstain on the address (thin)", d)
+	// An address with ONE filing into Promotions, in a domain confidently filed
+	// into Updates: the address decides (a single filing acts for an address,
+	// ADR-032 amendment), and it never follows the domain.
+	d := Decide(addr, dom, ev(1, t0, map[ulid.ULID]int{promotions: 1}), domainEv, nil)
+	if !d.Act || d.Key != addr || d.Area != promotions || d.Basis != BasisSingle {
+		t.Errorf("single-filing address in a confident domain = %+v, want Promotions by the address on a single filing", d)
 	}
 	corrected := ev(1, t0, map[ulid.ULID]int{updates: 2})
 	corrected.LatestCorrection = t0.Add(time.Minute)
@@ -192,5 +193,121 @@ func TestNewSender(t *testing.T) {
 		if hasGroup(raw) {
 			t.Errorf("hasGroup(%q) = true; a ':' in quotes, a comment or angle brackets is not a group", raw)
 		}
+	}
+}
+
+// tl is an Evidence built from a timeline, the way the store builds it.
+func tl(addresses int, fs ...TimedFiling) Evidence {
+	e := Evidence{Filings: map[ulid.ULID]int{}, Addresses: addresses, Timeline: fs}
+	for _, f := range fs {
+		e.Filings[f.Area]++
+		if f.At.After(e.LatestFiling) {
+			e.LatestFiling = f.At
+		}
+	}
+	return e
+}
+
+func fil(a ulid.ULID, mins int) TimedFiling {
+	return TimedFiling{Area: a, At: t0.Add(time.Duration(mins) * time.Minute)}
+}
+
+// A single filing of an address acts and says so; two agreeing are the
+// ordinary evidence; a domain never acts on one.
+func TestJudgeBasis(t *testing.T) {
+	if v := Judge(KeyAddress, tl(1, fil(updates, 0))); v.Reason != Confident || v.Basis != BasisSingle {
+		t.Errorf("one filing = %+v, want confident on a single filing", v)
+	}
+	if v := Judge(KeyAddress, tl(1, fil(updates, 0), fil(updates, 1))); v.Reason != Confident || v.Basis != BasisEvidence {
+		t.Errorf("two filings = %+v, want confident on the ordinary evidence", v)
+	}
+	if v := Judge(KeyDomain, tl(3, fil(updates, 0))); v.Reason != Thin {
+		t.Errorf("domain with one filing = %+v, want thin", v)
+	}
+}
+
+// The stricter undo: a correction of a single-filing placement blocks its key
+// until SingleRelearnFilings filings strictly newer than the correction.
+func TestJudgeSingleCorrectionNeedsTwoMoreFilings(t *testing.T) {
+	corr := t0.Add(10 * time.Minute)
+	base := []TimedFiling{fil(updates, 0)}
+	mk := func(extra ...TimedFiling) Evidence {
+		e := tl(1, append(append([]TimedFiling{}, base...), extra...)...)
+		e.LatestCorrection, e.LatestSingleCorrection = corr, corr
+		return e
+	}
+	if v := Judge(KeyAddress, mk()); v.Reason != Contradicted {
+		t.Errorf("after the correction, nothing newer: %+v, want contradicted", v)
+	}
+	// One newer filing lifts the ORDINARY contradiction, but not this one.
+	if v := Judge(KeyAddress, mk(fil(updates, 11))); v.Reason != Contradicted {
+		t.Errorf("one newer filing after a single-filing correction: %+v, want still contradicted", v)
+	}
+	// A filing AT the correction's instant (the re-file that is the correction) never counts.
+	if v := Judge(KeyAddress, mk(fil(updates, 10), fil(updates, 11))); v.Reason != Contradicted {
+		t.Errorf("one newer plus one at the correction's instant: %+v, want contradicted", v)
+	}
+	if v := Judge(KeyAddress, mk(fil(updates, 11), fil(updates, 12))); v.Reason != Confident {
+		t.Errorf("two newer agreeing filings: %+v, want confident", v)
+	}
+	// Control: the same history after an ORDINARY correction is lifted by one filing.
+	e := tl(1, fil(updates, 0), fil(updates, 11))
+	e.LatestCorrection = corr
+	if v := Judge(KeyAddress, e); v.Reason != Confident {
+		t.Errorf("one newer filing after an ordinary correction: %+v, want confident", v)
+	}
+}
+
+// Recency: a mixed key's newest three filings into one area act, two do not,
+// an interleaved filing in another area stops it, and a shared instant never
+// counts.
+func TestJudgeRecency(t *testing.T) {
+	old := []TimedFiling{fil(promotions, 0), fil(promotions, 1)}
+	run := func(n int) Evidence {
+		fs := append([]TimedFiling{}, old...)
+		for i := 0; i < n; i++ {
+			fs = append(fs, fil(updates, 10+i))
+		}
+		return tl(1, fs...)
+	}
+	if v := Judge(KeyAddress, run(3)); v.Reason != Confident || v.Basis != BasisRecency || *v.Area != updates {
+		t.Errorf("a run of 3 = %+v, want confident on recency into Updates", v)
+	}
+	if v := Judge(KeyAddress, run(2)); v.Reason != Mixed {
+		t.Errorf("a run of 2 = %+v, want mixed", v)
+	}
+	// An interleaved filing elsewhere inside the last three.
+	inter := tl(1, fil(promotions, 0), fil(updates, 10), fil(promotions, 11), fil(updates, 12), fil(updates, 13))
+	if v := Judge(KeyAddress, inter); v.Reason != Mixed {
+		t.Errorf("an interleaved filing = %+v, want mixed", v)
+	}
+	// Three filings, but the newest instant is shared with the other area, and
+	// two of the three share an instant with it: the shared instants never count.
+	shared := tl(1, fil(promotions, 0), fil(updates, 10), fil(promotions, 10), fil(updates, 12), fil(updates, 13))
+	if v := Judge(KeyAddress, shared); v.Reason != Mixed {
+		t.Errorf("a shared instant = %+v, want mixed (the tied filing is not provably newer)", v)
+	}
+	// A correction still blocks a recency placement by the ordinary rule.
+	c := run(3)
+	c.LatestCorrection = t0.Add(time.Hour)
+	if v := Judge(KeyAddress, c); v.Reason != Contradicted {
+		t.Errorf("a corrected recency key = %+v, want contradicted", v)
+	}
+	// A domain needs MinDomainAddresses addresses behind its run.
+	if v := Judge(KeyDomain, run(3)); v.Reason != Mixed {
+		t.Errorf("a domain run over one address = %+v, want mixed", v)
+	}
+	d := run(3)
+	d.Addresses = 2
+	if v := Judge(KeyDomain, d); v.Reason != Confident || v.Basis != BasisRecency {
+		t.Errorf("a domain run over two addresses = %+v, want confident on recency", v)
+	}
+	// Decide reaches it: the user's own and freemail domains stay blocked.
+	addr, dom, _ := KeysFor("new@mine.example")
+	if dc := Decide(addr, dom, Evidence{}, d, map[string]bool{"mine.example": true}); dc.Act {
+		t.Errorf("recency on a blocked own domain acted: %+v", dc)
+	}
+	if dc := Decide(addr, dom, Evidence{}, d, nil); !dc.Act || dc.Basis != BasisRecency {
+		t.Errorf("recency on an ordinary domain = %+v, want act on recency", dc)
 	}
 }

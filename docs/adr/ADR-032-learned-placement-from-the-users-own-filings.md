@@ -682,6 +682,19 @@ feature knows the answer.
    even for a trusted address: trust waives a missing pass, not a failure.
    A domain cannot be trusted wholesale. Trust changes learning only; the
    warnings shown to the user are unchanged.
+
+   **The rule: trust waives the ABSENCE of a trusted pass, never the PRESENCE of a trusted failure, and never a sender warning.**
+   In code: the waiver is refused when the TOPMOST TRUSTED
+   Authentication-Results header carries `dmarc=fail`, or both `spf=fail` and
+   `dkim=fail` (`SenderAuth.TrustedFail`, an explicit presence test read from
+   the trusted header only, so a forged untrusted `dmarc=pass` beside it
+   cannot cancel it), and whenever `AuthFail` is set. The self-spoof warning is
+   suppressed only by an affirmative pass learned sorting itself believes
+   (`AffirmativePass && Authenticated`), so an unaligned DKIM pass cannot switch
+   it off while DMARC is waived. Trust is ASCII only: an address with any
+   non-ASCII character cannot be trusted, and at match time the raw From must be
+   ASCII and equal the stored address after ASCII lowercasing, so Unicode case
+   folding (the KELVIN SIGN folds to `k`) cannot collide with a trusted address.
 2. **Single filing (the threshold).** An ADDRESS key with exactly one filing
    and no contrary evidence may act. Domain keys keep their threshold
    (`MinFilings`, and `MinDomainAddresses`). The placement is recorded with

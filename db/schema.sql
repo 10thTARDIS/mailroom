@@ -4163,6 +4163,10 @@ CREATE TABLE app.learned_placements (
   corrected_at timestamptz,
   -- Migration 00076: LAST, in ADD COLUMN order (migrate-check compares order).
   withdrawn_at timestamptz,
+  -- Migration 00103, ADD COLUMN order again: what evidence the placement was
+  -- made on. 'single' and 'recency' are the weaker rules (ADR-032 amendment),
+  -- reported apart and, for 'single', undone more strictly.
+  basis        text NOT NULL DEFAULT 'evidence' CHECK (basis IN ('evidence', 'single', 'recency')),
   PRIMARY KEY (user_id, message_id),
   CONSTRAINT learned_placements_kept_stamped
     CHECK ((outcome = 'kept') = (kept_at IS NOT NULL AND kept_by IS NOT NULL)),

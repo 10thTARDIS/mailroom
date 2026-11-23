@@ -85,3 +85,61 @@ func TestSenderChecksTrustDoesNotWaiveAnyOtherCheck(t *testing.T) {
 		t.Fatalf("trusted with a clear failure: refusal %q, want unauthenticated", got)
 	}
 }
+
+// SECURITY FIX 1: trust waives the absence of a trusted pass, never the
+// presence of a trusted failure.
+func TestSenderChecksTrustRefusedOnATrustedFailure(t *testing.T) {
+	ix := senderwarn.NewIndex(nil, nil)
+	trusted := map[string]bool{"robot@example.org": true}
+	// AuthFail false: the shape a forged untrusted pass leaves behind, while the
+	// trusted header says dmarc=fail.
+	s := trustSender("robot@example.org", placement.SenderAuth{TrustConfigured: true, TrustedFail: true})
+	if got := senderChecks(s, ix, trusted).Refusal; got != placement.Unauthenticated {
+		t.Fatalf("trusted sender, trusted dmarc=fail, AuthFail false: refusal %q, want unauthenticated", got)
+	}
+	// Control: without TrustedFail the waiver applies.
+	s = trustSender("robot@example.org", placement.SenderAuth{TrustConfigured: true})
+	if got := senderChecks(s, ix, trusted).Refusal; got != "" {
+		t.Fatalf("control: refusal %q, want none", got)
+	}
+}
+
+// SECURITY FIX 2: an unaligned affirmative pass must not switch the self-spoof
+// warning off while DMARC is being waived.
+func TestSenderChecksTrustedOwnDomainStillWarnsWithAnUnalignedPass(t *testing.T) {
+	own := senderwarn.NewIndex([]string{"mail.example.net"}, nil)
+	trusted := map[string]bool{"boss@mail.example.net": true}
+	s := trustSender("boss@mail.example.net", placement.SenderAuth{TrustConfigured: true, AffirmativePass: true, DMARCPass: false})
+	c := senderChecks(s, own, trusted)
+	if c.Refusal != placement.SenderWarned {
+		t.Fatalf("trusted own-domain address with an unaligned pass: refusal %q (warnings %v), want warned", c.Refusal, c.Warnings)
+	}
+	// Control: a real aligned pass legitimately suppresses it.
+	ok := trustSender("boss@mail.example.net", placement.SenderAuth{TrustConfigured: true, AffirmativePass: true, DMARCPass: true})
+	if got := senderChecks(ok, own, trusted).Refusal; got != "" {
+		t.Fatalf("control with an aligned pass: refusal %q, want none", got)
+	}
+}
+
+// SECURITY FIX 3: trust is ASCII only and matched exactly.
+func TestTrustIsASCIIOnly(t *testing.T) {
+	if _, ok := normaliseTrustAddress("ké@example.org"); ok {
+		t.Fatal("a non-ASCII address was accepted for trust")
+	}
+	if _, ok := normaliseTrustAddress("Kevin@example.org"); ok { // KELVIN SIGN
+		t.Fatal("a KELVIN SIGN address was accepted for trust")
+	}
+	if k, ok := normaliseTrustAddress("  Kevin@Example.org "); !ok || k != "kevin@example.org" {
+		t.Fatalf("control: %q %v", k, ok)
+	}
+	ix := senderwarn.NewIndex(nil, nil)
+	trusted := map[string]bool{"kevin@example.org": true}
+	good := trustSender("Kevin@example.org", noPass)
+	if c := senderChecks(good, ix, trusted); !c.Trusted || c.Refusal != "" {
+		t.Fatalf("control: ASCII sender with a differing case = %+v, want trusted", c)
+	}
+	spoof := trustSender("Kevin@example.org", noPass)
+	if c := senderChecks(spoof, ix, trusted); c.Trusted || c.Refusal != placement.Unauthenticated {
+		t.Fatalf("KELVIN SIGN sender = %+v, want not trusted and unauthenticated", c)
+	}
+}

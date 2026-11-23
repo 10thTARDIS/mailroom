@@ -173,6 +173,7 @@ func AggregateEvents(events []Event) (byAddr, byDomain map[string]Evidence) {
 			ev.Filings = map[ulid.ULID]int{}
 		}
 		ev.Filings[e.Area]++
+		ev.Timeline = append(ev.Timeline, TimedFiling{Area: e.Area, At: e.At})
 		if e.At.After(ev.LatestFiling) {
 			ev.LatestFiling = e.At
 		}

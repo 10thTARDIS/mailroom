@@ -119,10 +119,11 @@ func TestEvaluateLeftAlone(t *testing.T) {
 	if r.EventsByArea[u] != 9 || r.EventsByArea[p] != 4 {
 		t.Errorf("events by area = %v, want Updates 9, Primary 4", r.EventsByArea)
 	}
-	// Confident keys: addresses a (U), f (P), g (U); domain corp.example (U).
-	// New (the user has no filing on the key): a, f, corp.example, not g.
-	wantConf := map[ulid.ULID]KeyCounts{u: {Addresses: 2, Domains: 1}, p: {Addresses: 1}}
-	wantNew := map[ulid.ULID]KeyCounts{u: {Addresses: 1, Domains: 1}, p: {Addresses: 1}}
+	// Confident keys, with a single filing now enough for an address (ADR-032
+	// amendment): addresses a, b, d1, d2, g (U), f (P); domain corp.example (U).
+	// New (the user has no filing on the key): a, b, d1, d2, f, corp.example, not g.
+	wantConf := map[ulid.ULID]KeyCounts{u: {Addresses: 5, Domains: 1}, p: {Addresses: 1}}
+	wantNew := map[ulid.ULID]KeyCounts{u: {Addresses: 4, Domains: 1}, p: {Addresses: 1}}
 	for a, w := range wantConf {
 		if r.Keys.Confident[a] != w {
 			t.Errorf("confident keys for %v = %+v, want %+v", a, r.Keys.Confident[a], w)
@@ -131,20 +132,21 @@ func TestEvaluateLeftAlone(t *testing.T) {
 			t.Errorf("new keys for %v = %+v, want %+v", a, r.Keys.New[a], wantNew[a])
 		}
 	}
-	if got := r.Keys.Reasons[KeyAddress]; got[Confident] != 3 || got[Thin] != 3 || got[Mixed] != 1 {
-		t.Errorf("address verdicts = %v, want confident 3, thin 3 (b, d1, d2), mixed 1 (c)", got)
+	if got := r.Keys.Reasons[KeyAddress]; got[Confident] != 6 || got[Thin] != 0 || got[Mixed] != 1 {
+		t.Errorf("address verdicts = %v, want confident 6 (a, b, d1, d2, f, g), thin 0, mixed 1 (c)", got)
 	}
 	if got := r.Keys.Reasons[KeyDomain]; got[Confident] != 1 || got[Thin] != 4 || got[Mixed] != 1 {
 		t.Errorf("domain verdicts = %v, want confident 1 (corp), thin 4, mixed 1 (list)", got)
 	}
 
 	// Outcomes. U: kept 1 (a->U); corrected 3 (a->P, d3->P, a label removed, 1 of
-	// them LabelRemoved); agree 1 (a, desk U); unresolved 1 (d3, desk P): later 6.
+	// them LabelRemoved); agree 1 (a, desk U); unresolved 2 (d3, desk P; d1, desk P:
+	// d1's own single filing now decides, where it used to abstain): later 7.
 	// P: kept 0; corrected 1 (f->U); agree 1 (f, desk P); unresolved 1 (f, desk U).
 	// PRECISION is over kept + corrected only: U 1/4, P 0/1, total 1/5.
-	if got := r.Areas[u]; got.Kept != 1 || got.Corrected != 3 || got.LabelRemoved != 1 || got.Agreement != 1 || got.Unresolved != 1 ||
-		got.Later() != 6 || got.Resolved() != 4 || got.Gate.Judged {
-		t.Errorf("Updates = %+v, want kept 1, corrected 3 (1 label removed), agree 1, unresolved 1", got)
+	if got := r.Areas[u]; got.Kept != 1 || got.Corrected != 3 || got.LabelRemoved != 1 || got.Agreement != 1 || got.Unresolved != 2 ||
+		got.Later() != 7 || got.Resolved() != 4 || got.Gate.Judged {
+		t.Errorf("Updates = %+v, want kept 1, corrected 3 (1 label removed), agree 1, unresolved 2", got)
 	}
 	near(t, "Updates precision", r.Areas[u].Gate.Precision, 0.25)
 	near(t, "Updates LCB95", r.Areas[u].Gate.LCB, 0.0456)
@@ -152,13 +154,13 @@ func TestEvaluateLeftAlone(t *testing.T) {
 		t.Errorf("Primary = %+v, want kept 0, corrected 1, agree 1, unresolved 1", got)
 	}
 	near(t, "Primary LCB95", r.Areas[p].Gate.LCB, 0)
-	if r.Total.Kept != 1 || r.Total.Corrected != 4 || r.Total.Agreement != 2 || r.Total.Unresolved != 2 || r.Total.WouldChange() != 2 {
-		t.Errorf("total = %+v, want kept 1, corrected 4, agree 2, unresolved 2 (would change 2)", r.Total)
+	if r.Total.Kept != 1 || r.Total.Corrected != 4 || r.Total.Agreement != 2 || r.Total.Unresolved != 3 || r.Total.WouldChange() != 3 {
+		t.Errorf("total = %+v, want kept 1, corrected 4, agree 2, unresolved 3 (would change 3)", r.Total)
 	}
 	near(t, "total precision", r.Total.Gate.Precision, 0.2)
 	near(t, "total LCB95", r.Total.Gate.LCB, 0.0362)
-	if r.Served != 1 || r.Untaught != 4 {
-		t.Errorf("served/untaught = %d/%d, want 1/4 (d1, z, z, c)", r.Served, r.Untaught)
+	if r.Served != 1 || r.Untaught != 3 {
+		t.Errorf("served/untaught = %d/%d, want 1/3 (z, z, c)", r.Served, r.Untaught)
 	}
 	// The base rate: of the untaught, z->P and c->U were filed by hand (2 of 4);
 	// of the taught, a->P, a->U, d3->P, f->U (4 of 10).
@@ -194,25 +196,27 @@ func TestEvaluateArchivedUnread(t *testing.T) {
 	if r.Events != 7 {
 		t.Errorf("events = %d, want 7", r.Events)
 	}
-	// The BASE-RATE row: y (mixed), v (thin), q, r are untaught: opened 2, archived unread 1, refiled 1.
-	if b := r.Untaught; b.Messages != 4 || b.Opened != 2 || b.ArchivedUnread != 1 || b.RefiledOut != 1 {
-		t.Errorf("base-rate row = %+v, want 4 messages: opened 2, archived unread 1, refiled 1", b)
+	// The BASE-RATE row: y (mixed), q, r are untaught (v's single filing now
+	// teaches, ADR-032 amendment): opened 2 (y, q), refiled 1 (r).
+	if b := r.Untaught; b.Messages != 3 || b.Opened != 2 || b.ArchivedUnread != 0 || b.RefiledOut != 1 {
+		t.Errorf("base-rate row = %+v, want 3 messages: opened 2, refiled 1", b)
 	}
-	near(t, "base-rate strict precision", r.Untaught.Strict.Precision, 0.5) // (1+1) of 4
-	if r.Keys.Confident[promo] != (KeyCounts{Addresses: 1}) || r.Keys.Confident[primary] != (KeyCounts{Addresses: 1}) {
-		t.Errorf("confident keys = %+v, want one address per origin area", r.Keys.Confident)
+	near(t, "base-rate strict precision", r.Untaught.Strict.Precision, 1.0/3) // (0+1) of 3
+	if r.Keys.Confident[promo] != (KeyCounts{Addresses: 2}) || r.Keys.Confident[primary] != (KeyCounts{Addresses: 1}) {
+		t.Errorf("confident keys = %+v, want Promotions x and v, Primary w", r.Keys.Confident)
 	}
-	if got := r.Keys.Reasons[KeyAddress]; got[Confident] != 2 || got[Mixed] != 1 || got[Thin] != 1 {
-		t.Errorf("address verdicts = %v, want confident 2, mixed 1, thin 1", got)
+	if got := r.Keys.Reasons[KeyAddress]; got[Confident] != 3 || got[Mixed] != 1 || got[Thin] != 0 {
+		t.Errorf("address verdicts = %v, want confident 3 (x, w, v), mixed 1, thin 0", got)
 	}
 	pr := r.Areas[promo]
-	if pr.Messages != 7 || pr.ArchivedUnread != 2 || pr.Opened != 1 || pr.SeenNoOpen != 1 || pr.KeptUnopened != 1 || pr.ArchivedOther != 1 || pr.RefiledOut != 1 {
-		t.Errorf("Promotions = %+v, want 7: 2 archived unread, 1 opened, 1 seen, 1 kept, 1 other, 1 refiled", pr)
+	// v's one archived-unread message now counts (its single filing teaches).
+	if pr.Messages != 8 || pr.ArchivedUnread != 3 || pr.Opened != 1 || pr.SeenNoOpen != 1 || pr.KeptUnopened != 1 || pr.ArchivedOther != 1 || pr.RefiledOut != 1 {
+		t.Errorf("Promotions = %+v, want 8: 3 archived unread, 1 opened, 1 seen, 1 kept, 1 other, 1 refiled", pr)
 	}
-	near(t, "Promotions strict precision", pr.Strict.Precision, 3.0/7) // (2 unread + 1 refiled) of 7
-	near(t, "Promotions strict LCB95", pr.Strict.LCB, 0.1582)
-	near(t, "Promotions engaged precision", pr.Engaged.Precision, 0.75) // 3 of (3 + 1 opened); SEEN is not a person's reading
-	near(t, "Promotions engaged LCB95", pr.Engaged.LCB, 0.3006)
+	near(t, "Promotions strict precision", pr.Strict.Precision, 4.0/8) // (3 unread + 1 refiled) of 8
+	near(t, "Promotions strict LCB95", pr.Strict.LCB, 0.2152)
+	near(t, "Promotions engaged precision", pr.Engaged.Precision, 0.8) // 4 of (4 + 1 opened); SEEN is not a person's reading
+	near(t, "Promotions engaged LCB95", pr.Engaged.LCB, 0.3755)
 }
 
 func TestMeasureListID(t *testing.T) {

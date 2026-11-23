@@ -48,6 +48,42 @@ import (
 // safeguard is the live correction gate below (GateMinResolved, GateMinLCB).
 const MinFilings = 2
 
+// MinAddressFilings is how many filings an ADDRESS key needs: ONE (ADR-032
+// amendment, v1.104). A single filing is the smallest evidence there is, and
+// the amendment accepts it for an address only, behind two safeguards: the
+// placement is recorded as BasisSingle so its precision is read apart from the
+// rest, and a correction of it blocks the key until SingleRelearnFilings more
+// agreeing filings arrive (Judge). Domain keys keep MinFilings and
+// MinDomainAddresses.
+const MinAddressFilings = 1
+
+// SingleRelearnFilings is how many agreeing filings, strictly newer than the
+// correction, a key needs before it may act again after the user corrected a
+// placement that was made on a single filing. The ordinary rule after a
+// correction is "blocked until anything newer is filed"; this one is stricter
+// because a single filing is the weakest evidence acted on.
+const SingleRelearnFilings = 2
+
+// RecencyRun is how many of a mixed key's newest filings must all go to one
+// area, with no filing elsewhere at or after them, for the key to act on that
+// area (ADR-032 amendment). It is the run section 3 of `placement-measure`
+// measures (TailRun), at N = 3: the measurement's own numbers showed 2 would
+// act on a slip and a pair.
+const RecencyRun = 3
+
+// Basis is the evidence a decision was made on. It is recorded with the
+// placement so the report can read the weaker rules apart from the stronger.
+type Basis string
+
+const (
+	// BasisEvidence: the ordinary rule, MinFilings (or more) agreeing filings.
+	BasisEvidence Basis = "evidence"
+	// BasisSingle: an address key with exactly one filing.
+	BasisSingle Basis = "single"
+	// BasisRecency: a mixed key whose newest RecencyRun filings agree.
+	BasisRecency Basis = "recency"
+)
+
 // MinDomainAddresses is how many DISTINCT From addresses a domain's filings
 // must span before the domain may act as a fallback for an address with no
 // evidence of its own.
@@ -136,6 +172,15 @@ type Evidence struct {
 	// LatestCorrection is when a learned placement on this key was last
 	// corrected, or zero if never.
 	LatestCorrection time.Time
+	// LatestSingleCorrection is when a learned placement on this key that was
+	// made on BasisSingle was last corrected, or zero if never. It blocks the
+	// key until SingleRelearnFilings newer filings arrive.
+	LatestSingleCorrection time.Time
+	// Timeline is every filing with its area and time, in any order: what the
+	// recency run and the single-correction block are read from. It holds the
+	// same filings as Filings; an Evidence built without it can still be judged
+	// but never acts on recency.
+	Timeline []TimedFiling
 }
 
 // Total is the number of filings across every area.
@@ -205,6 +250,13 @@ type SenderAuth struct {
 	// AffirmativePass: the same topmost trusted header says DKIM or DMARC
 	// passed: the selfSpoof warning's input (ml.AuthResults.AffirmativelyPassed).
 	AffirmativePass bool
+	// TrustedFail: the topmost TRUSTED Authentication-Results header carries a
+	// `dmarc=fail`, or both `spf=fail` and `dkim=fail` (ml.AuthResults.Has, an
+	// explicit presence test rather than Failed(), which another result in the
+	// same header can cancel). Read from the trusted header only, so a forged
+	// header from an untrusted id can neither set nor clear it. A trusted
+	// sender's waiver is refused whenever it is true.
+	TrustedFail bool
 	// AuthFail: authentication CLEARLY failed across all headers
 	// (ml.AuthResultsFail, the conservative rule; stored as messages.auth_fail).
 	AuthFail bool
@@ -235,6 +287,9 @@ type FromHeaders struct {
 // Its fields are unexported so no caller can assemble one from separate
 // parses.
 type Sender struct {
+	// from is the From address exactly as handed to NewSender, kept only for
+	// TrustKey.
+	from            string
 	address, domain Key
 	ok              bool
 	ambiguous       bool
@@ -255,7 +310,7 @@ type Sender struct {
 // (what its DMARC verdict is about) and Mailroom's to differ.
 func NewSender(from string, hdr FromHeaders, authFor func(domain string) SenderAuth) Sender {
 	a, d, ok := KeysFor(from)
-	s := Sender{address: a, domain: d, ok: ok}
+	s := Sender{from: from, address: a, domain: d, ok: ok}
 	switch {
 	case hdr.Fields != 1, len(hdr.Raw) != 1, hasGroup(hdr.Raw[0]), len(hdr.Parsed) != 1:
 		s.ambiguous = true
@@ -272,6 +327,31 @@ func NewSender(from string, hdr FromHeaders, authFor func(domain string) SenderA
 // Keys returns the sender's address and domain keys; ok is false when the
 // address has no usable domain.
 func (s Sender) Keys() (address, domain Key, ok bool) { return s.address, s.domain, s.ok }
+
+// ASCIIKey is the identity a user's trust for a sender is matched on: addr
+// trimmed and lowercased ASCII-only, and ok only when addr is entirely ASCII.
+// Unicode case folding (strings.ToLower) maps compatibility characters such as
+// the KELVIN SIGN onto ASCII letters, so a lookalike From could otherwise
+// collide with a trusted ASCII address; trust never matches, and can never be
+// stored for, a non-ASCII address.
+func ASCIIKey(addr string) (string, bool) {
+	a := strings.TrimSpace(addr)
+	b := []byte(a)
+	for i, c := range b {
+		if c >= 0x80 {
+			return "", false
+		}
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 32
+		}
+	}
+	return string(b), a != ""
+}
+
+// TrustKey is the key the sender's trust is looked up by: ASCIIKey of the RAW
+// From address NewSender was given. ok is false for a non-ASCII From, which
+// no trust applies to.
+func (s Sender) TrustKey() (string, bool) { return ASCIIKey(s.from) }
 
 // Ambiguous reports a From that is not one mailbox in one header.
 func (s Sender) Ambiguous() bool { return s.ambiguous }
@@ -376,8 +456,11 @@ type Verdict struct {
 	Reason Reason
 	// Area is the area every filing went into. Set for Confident and Thin,
 	// and for Contradicted when the evidence is otherwise consistent; nil
-	// for Mixed and NoEvidence.
+	// for Mixed and NoEvidence. For a Confident verdict on BasisRecency it is
+	// the area of the newest run.
 	Area *ulid.ULID
+	// Basis is the evidence a Confident verdict rests on ("" otherwise).
+	Basis Basis
 }
 
 // Judge decides one key on its own evidence.
@@ -413,13 +496,46 @@ func Judge(kind KeyKind, e Evidence) Verdict {
 	if !e.LatestCorrection.IsZero() && !e.LatestFiling.After(e.LatestCorrection) {
 		return Verdict{Reason: Contradicted, Area: area}
 	}
+	// THE STRICTER UNDO for a placement made on a single filing: its key stays
+	// blocked until SingleRelearnFilings filings, strictly newer than the
+	// correction, have arrived. They agree by construction when the evidence is
+	// consistent (one area) or reach the recency run below (the newest run).
+	if !e.LatestSingleCorrection.IsZero() && e.filingsAfter(e.LatestSingleCorrection) < SingleRelearnFilings {
+		return Verdict{Reason: Contradicted, Area: area}
+	}
 	if area == nil {
+		// MIXED. A recent run into one area still acts (recency, ADR-032
+		// amendment): the same run section 3 of placement-measure counts.
+		// A domain key additionally needs the addresses MinDomainAddresses
+		// asks of any domain evidence.
+		if a, run := TailRun(e.Timeline); run >= RecencyRun && (kind != KeyDomain || e.Addresses >= MinDomainAddresses) {
+			return Verdict{Reason: Confident, Area: &a, Basis: BasisRecency}
+		}
 		return Verdict{Reason: Mixed}
 	}
-	if total < MinFilings || (kind == KeyDomain && e.Addresses < MinDomainAddresses) {
+	min := MinFilings
+	if kind == KeyAddress {
+		min = MinAddressFilings
+	}
+	if total < min || (kind == KeyDomain && e.Addresses < MinDomainAddresses) {
 		return Verdict{Reason: Thin, Area: area}
 	}
-	return Verdict{Reason: Confident, Area: area}
+	basis := BasisEvidence
+	if kind == KeyAddress && total < MinFilings {
+		basis = BasisSingle
+	}
+	return Verdict{Reason: Confident, Area: area, Basis: basis}
+}
+
+// filingsAfter counts the filings strictly newer than t.
+func (e Evidence) filingsAfter(t time.Time) int {
+	n := 0
+	for _, f := range e.Timeline {
+		if f.At.After(t) {
+			n++
+		}
+	}
+	return n
 }
 
 // Decision is what learned placement does with one new message.
@@ -432,6 +548,8 @@ type Decision struct {
 	// otherwise why not (the address's reason when it has evidence, else the
 	// domain's).
 	Reason Reason
+	// Basis is the evidence the decision rests on, set when Act.
+	Basis Basis
 }
 
 // Decide applies the key precedence: the ADDRESS decides whenever it has any
@@ -447,7 +565,7 @@ type Decision struct {
 func Decide(address, domain Key, addrEv, domainEv Evidence, own map[string]bool) Decision {
 	if v := Judge(KeyAddress, addrEv); v.Reason != NoEvidence {
 		if v.Reason == Confident {
-			return Decision{Act: true, Key: address, Area: *v.Area, Reason: Confident}
+			return Decision{Act: true, Key: address, Area: *v.Area, Reason: Confident, Basis: v.Basis}
 		}
 		return Decision{Key: address, Reason: v.Reason}
 	}
@@ -459,7 +577,7 @@ func Decide(address, domain Key, addrEv, domainEv Evidence, own map[string]bool)
 	}
 	v := Judge(KeyDomain, domainEv)
 	if v.Reason == Confident {
-		return Decision{Act: true, Key: domain, Area: *v.Area, Reason: Confident}
+		return Decision{Act: true, Key: domain, Area: *v.Area, Reason: Confident, Basis: v.Basis}
 	}
 	return Decision{Key: domain, Reason: v.Reason}
 }

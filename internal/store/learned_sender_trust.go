@@ -31,7 +31,13 @@ func normaliseTrustAddress(addr string) (string, bool) {
 	if !ok || strings.ContainsAny(a.Value, " \t\r\n<>,;") {
 		return "", false
 	}
-	return a.Value, true
+	// ASCII only (security review): Unicode case folding can map a lookalike
+	// From onto a trusted ASCII address.
+	k, ok := placement.ASCIIKey(addr)
+	if !ok || k != a.Value {
+		return "", false
+	}
+	return k, true
 }
 
 // ErrSenderInvalid is returned for a sender that is not one usable From address.
@@ -65,10 +71,14 @@ func (tx *UserTx) SetSenderTrusted(ctx context.Context, addr string, trusted boo
 // trusted. THE ONE READ the ingest path, the explain path, the backfill and
 // LearnedSender/get share.
 func (tx *UserTx) SenderTrusted(ctx context.Context, addr string) (bool, error) {
+	k, asciiOK := placement.ASCIIKey(addr)
+	if !asciiOK {
+		return false, nil
+	}
 	var ok bool
 	if err := tx.tx.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM app.learned_sender_trust WHERE user_id = $1 AND address = $2)`,
-		tx.userID.String(), strings.ToLower(strings.TrimSpace(addr))).Scan(&ok); err != nil {
+		tx.userID.String(), k).Scan(&ok); err != nil {
 		return false, fmt.Errorf("store: sender trusted: %w", err)
 	}
 	return ok, nil

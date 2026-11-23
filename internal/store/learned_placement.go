@@ -275,6 +275,11 @@ type SenderChecks struct {
 // documented order. trusted is the user's set of trusted From addresses (nil =
 // none).
 //
+// THE RULE: trust waives the ABSENCE of a trusted pass, never the PRESENCE of a
+// trusted failure, and never a sender warning. A failure the TRUSTED
+// Authentication-Results header reports (auth.TrustedFail) or that clearly
+// failed anywhere (auth.AuthFail) refuses the waiver.
+//
 // TRUST SKIPS EXACTLY ONE CHECK (#169): the trusted-DMARC requirement, for the
 // one exact From address the user named. The ambiguous-From refusal and the
 // warnings (self-spoof, look-alike) are evaluated and refuse exactly as they do
@@ -283,11 +288,16 @@ type SenderChecks struct {
 func senderChecks(sender placement.Sender, warn *senderwarn.Index, trusted map[string]bool) SenderChecks {
 	auth := sender.Auth()
 	c := SenderChecks{Ambiguous: sender.Ambiguous(), Auth: auth, Authenticated: auth.Authenticated()}
-	addrKey, domainKey, _ := sender.Keys()
-	c.Trusted = trusted[addrKey.Value]
-	c.Warnings = warn.Check(senderwarn.Sender{Domain: domainKey.Value, AuthPassed: auth.AffirmativePass})
+	_, domainKey, _ := sender.Keys()
+	if k, ok := sender.TrustKey(); ok { // ASCII From only, matched exactly (placement.ASCIIKey)
+		c.Trusted = trusted[k]
+	}
+	// An affirmative pass suppresses the self-spoof warning only when it is a
+	// pass learned sorting would itself believe: an unaligned DKIM pass beside a
+	// waived DMARC must not switch the warning off.
+	c.Warnings = warn.Check(senderwarn.Sender{Domain: domainKey.Value, AuthPassed: auth.AffirmativePass && c.Authenticated})
 	authOK := c.Authenticated
-	if !authOK && c.Trusted && !auth.AuthFail {
+	if !authOK && c.Trusted && !auth.AuthFail && !auth.TrustedFail {
 		authOK, c.TrustApplied = true, true
 	}
 	switch {
@@ -423,6 +433,7 @@ func aggregatePlacementEvidence(filings []placementFiling) (byAddr, byDomain map
 			e.Filings = map[ulid.ULID]int{}
 		}
 		e.Filings[f.AreaID]++
+		e.Timeline = append(e.Timeline, placement.TimedFiling{Area: f.AreaID, At: f.At})
 		if f.At.After(e.LatestFiling) {
 			e.LatestFiling = f.At
 		}
