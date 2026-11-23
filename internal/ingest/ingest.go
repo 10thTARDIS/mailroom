@@ -672,6 +672,10 @@ func (in *Ingestor) applyGmail(ctx context.Context, tx *store.UserTx, msgID ulid
 			"message_id", msgID.String(), "err", err)
 		return nil
 	}
+	if r.LabelsSkipped > 0 {
+		slog.WarnContext(ctx, "ingest: Gmail labels with no usable name were skipped",
+			"message_id", msgID.String(), "labels_skipped", r.LabelsSkipped)
+	}
 	*out = r
 	return nil
 }

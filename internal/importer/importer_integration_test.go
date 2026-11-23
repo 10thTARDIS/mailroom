@@ -708,3 +708,48 @@ func TestImportMaildir(t *testing.T) {
 	}
 	t.Logf("maildir import: %+v", stats)
 }
+
+// A label whose name carries control or bidi characters is saved under its
+// clean name, found again under that name (no duplicate on the next message or
+// the next run), and a label with NOTHING usable in its name is skipped and
+// counted rather than aborting the import.
+//
+// NEGATIVE CONTROL: with labelIDs comparing the RAW archive name again, the
+// "one label after two runs" assertion fails (the clean copy is never found,
+// so each message tries to create it again) — run and recorded in the PR.
+func TestImportLabelWithUnsafeCharacters(t *testing.T) {
+	f := newFixture(t)
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString(mboxEntry(1, "One", "X-Gmail-Labels: Work\x1b[2J\u202eevil"))
+	b.WriteString(mboxEntry(2, "Two", "X-Gmail-Labels: Work\x1b[2J\u202eevil"))
+	b.WriteString(mboxEntry(3, "Three", "X-Gmail-Labels: \u202e\x07"))
+	archive := filepath.Join(dir, "All mail Including Spam and Trash.mbox")
+	if err := os.WriteFile(archive, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stats := f.run(t, archive, f.options(t, filepath.Join(dir, "state1.json")))
+	if stats.Imported != 3 || stats.Failed != 0 {
+		t.Fatalf("import = %+v, want all 3 messages imported, none failed", stats)
+	}
+	if stats.LabelsSkipped < 1 {
+		t.Errorf("labels skipped = %d, want the only-unsafe label counted", stats.LabelsSkipped)
+	}
+	count := func() int {
+		return f.scalar(t, `SELECT count(*) FROM app.labels WHERE user_id=$1 AND name = 'Work[2Jevil'`, f.userID.String())
+	}
+	if got := count(); got != 1 {
+		t.Fatalf("clean label count = %d after the first run, want 1", got)
+	}
+	// A second run (a fresh state file, as a re-run would) creates nothing new.
+	stats2 := f.run(t, archive, f.options(t, filepath.Join(dir, "state2.json")))
+	if stats2.Failed != 0 {
+		t.Errorf("second run = %+v, want no failures", stats2)
+	}
+	if got := f.scalar(t, `SELECT count(*) FROM app.labels WHERE user_id=$1`, f.userID.String()); got != 1 {
+		t.Errorf("labels after two runs = %d, want exactly one (no duplicate, nothing for the only-unsafe name)", got)
+	}
+	if got := f.scalar(t, `SELECT count(*) FROM app.message_labels WHERE user_id=$1`, f.userID.String()); got != 2 {
+		t.Errorf("message_labels = %d, want 2 (the clean label on messages one and two)", got)
+	}
+}

@@ -275,6 +275,9 @@ func printSummary(s importer.Stats, im *importer.Importer, dry bool) {
 	}
 	fmt.Fprintf(os.Stderr, "items=%d imported=%d deduped=%d left-alone=%d skipped=%d failed=%d bytes=%s\n",
 		s.Items, s.Imported, s.Deduped, s.LeftAlone, s.Skipped, s.Failed, humanBytes(s.Bytes))
+	if s.LabelsSkipped > 0 {
+		fmt.Fprintf(os.Stderr, "labels-skipped=%d (no usable name once control characters were removed)\n", s.LabelsSkipped)
+	}
 	if rss := peakRSS(); rss > 0 {
 		fmt.Fprintf(os.Stderr, "peak rss=%s\n", humanBytes(rss))
 	}

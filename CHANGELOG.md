@@ -47,6 +47,11 @@ rather than from a guess. Nothing is moved, filed or learned differently.
 - **Day-one setup no longer saves folder names with hidden control characters as labels.** When you
   leave a folder's label name blank, the folder's own name is used with any such characters removed;
   a folder whose name is only such characters asks you to type a label name.
+- **Labels with hidden control characters in their names no longer cause trouble on import or
+  Gmail sync.** They are saved, found again and re-used under their clean name (no duplicates on
+  the next run); a label with nothing left once those characters are removed is skipped and
+  counted instead of stopping the import. A Gmail label renamed this way is kept local, so Mailroom
+  never writes a changed name back to Gmail.
 - **The admin reports no longer print raw control characters from area names** to the terminal.
 
 ### Under the hood

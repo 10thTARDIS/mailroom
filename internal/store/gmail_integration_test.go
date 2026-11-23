@@ -436,3 +436,53 @@ func TestApplyGmailObservationIsolated(t *testing.T) {
 		t.Errorf("another user's reading reached the message: %+v", r)
 	}
 }
+
+// A Gmail label whose name carries control or bidi characters maps to its clean
+// local copy by that name (found again, not duplicated), is removed by the same
+// name, and a name with nothing usable left is skipped and counted without
+// failing the observation. The local copy is LOCAL-ONLY: the mapping stores no
+// provider name, so a mirrored label would write the sanitised name back to
+// Gmail as a different label; a plain label is mirrored as before (control).
+//
+// NEGATIVE CONTROL: with the lookup comparing raw names again, the second
+// observation creates a duplicate or fails, and this test goes red.
+func TestApplyGmailObservationSanitisedLabelNames(t *testing.T) {
+	f := newGmailFixture(t)
+	m1, m2 := f.message(t, "one", "<one@example.com>"), f.message(t, "two", "<two@example.com>")
+	f.prov(t, m1, f.gmail, f.inbox, 1)
+	f.prov(t, m2, f.gmail, f.inbox, 2)
+
+	r := f.observe(t, m1, f.inbox, 1, "Work\x1b[2J\u202eevil", "\u202e\x07", "Plain")
+	if r.LabelsCreated != 2 || r.LabelsSkipped != 1 {
+		t.Errorf("first observation: created %d skipped %d, want 2 and 1", r.LabelsCreated, r.LabelsSkipped)
+	}
+	r = f.observe(t, m2, f.inbox, 2, "Work\x1b[2J\u202eevil")
+	if r.LabelsCreated != 0 || r.LabelsSkipped != 0 || r.LabelsAdded != 1 {
+		t.Errorf("second observation: %+v, want the existing clean label reused (0 created, 1 added)", r)
+	}
+	if got := f.count(t, `SELECT count(*) FROM app.labels WHERE user_id = $1 AND name = 'Work[2Jevil'`, f.user.String()); got != 1 {
+		t.Errorf("clean label count = %d, want 1", got)
+	}
+	if got := f.count(t, `SELECT count(*) FROM app.labels WHERE user_id = $1`, f.user.String()); got != 2 {
+		t.Errorf("labels = %d, want 2 (the clean one and Plain; nothing for the only-unsafe name)", got)
+	}
+	if _, ok := f.labelsOf(t, m2)["Work[2Jevil"]; !ok {
+		t.Errorf("message two lacks the clean label: %v", f.labelsOf(t, m2))
+	}
+	// Writeback identity: only the label whose saved name IS the provider's is mirrored.
+	mirrored := func(name string) int {
+		return f.count(t, `SELECT count(*) FROM app.label_keyword_map k JOIN app.labels l ON l.id = k.label_id
+		                    WHERE l.user_id = $1 AND l.name = $2`, f.user.String(), name)
+	}
+	if mirrored("Work[2Jevil") != 0 {
+		t.Errorf("the sanitised label has a keyword atom: it would be written back to Gmail under a name the provider never had")
+	}
+	if mirrored("Plain") != 1 {
+		t.Errorf("a plain Gmail label must still be mirrored (positive control)")
+	}
+	// Removal by the provider's raw name removes the clean copy.
+	f.observe(t, m2, f.inbox, 2)
+	if _, ok := f.labelsOf(t, m2)["Work[2Jevil"]; ok {
+		t.Errorf("the label was not removed when Gmail dropped it")
+	}
+}

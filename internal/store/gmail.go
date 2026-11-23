@@ -13,6 +13,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/gmaillabel"
+	"mailroom/internal/textcheck"
 )
 
 // THE GMAIL READ PATH'S STORE SURFACE (#52, ADR-047, increment 5a).
@@ -104,6 +105,10 @@ type GmailApplyResult struct {
 	LabelsAdded   int  // message_labels rows inserted
 	LabelsRemoved int  // message_labels rows deleted
 	LabelsCreated int  // Mailroom labels created for a Gmail label first seen
+	// LabelsSkipped counts Gmail labels left out because nothing usable remained
+	// of the name after textcheck.SanitizeName (only control or invisible
+	// characters). Counted and logged by the ingest path; never an error.
+	LabelsSkipped int
 	FolderChanged bool // moved_mailbox_id changed
 	Changed       bool // something JMAP-visible changed (an Email change_log row was appended)
 }
@@ -202,11 +207,12 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 	// --- user labels: apply the difference --------------------------------
 	added, removed := gmaillabel.Diff(prior, labels)
 	if len(added) > 0 {
-		ids, created, err := tx.ensureLabelsByName(ctx, added)
+		ids, created, skipped, err := tx.ensureLabelsByName(ctx, added)
 		if err != nil {
 			return res, err
 		}
 		res.LabelsCreated = created
+		res.LabelsSkipped = skipped
 		appliedBy, _ := LabelSource{Kind: LabelByUser}.columns()
 		tag, err := tx.tx.Exec(ctx, `
 			INSERT INTO app.message_labels (user_id, message_id, label_id, applied_by)
@@ -224,7 +230,7 @@ func (tx *UserTx) applyGmailObservation(ctx context.Context, msgID ulid.ULID, ob
 			 USING app.labels l
 			 WHERE ml.user_id = $1 AND ml.message_id = $2
 			   AND l.user_id = ml.user_id AND l.id = ml.label_id AND l.name = ANY($3)`,
-			tx.userID.String(), msgID.String(), removed)
+			tx.userID.String(), msgID.String(), canonicalNames(removed))
 		if err != nil {
 			return res, fmt.Errorf("store: gmail observation (remove labels): %w", err)
 		}
@@ -401,56 +407,96 @@ func (tx *UserTx) gmailFolderMailbox(ctx context.Context, accountID, folder stri
 	return id, nil
 }
 
-// ensureLabelsByName returns the ids of the user's labels with these exact
-// names, creating each missing one (mirrored to IMAP, as the Takeout importer
-// creates them: ADR-047 writes a mirrored label back as X-GM-LABELS in 5b).
-// Labels are user-wide: a Gmail label named like an existing Mailroom label
-// IS that label (ADR-047 §2).
-func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string) ([]string, int, error) {
+// canonicalNames is the labels' SAVED names: each through
+// textcheck.SanitizeName, the store's backstop (labels.go cleanName), with the
+// ones that leave nothing dropped. Every by-name lookup of a provider's label
+// compares in this form, since the saved name is the sanitised one.
+func canonicalNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if c := textcheck.SanitizeName(n); c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ensureLabelsByName returns the ids of the user's labels with these names
+// (compared in their saved, sanitised form), creating each missing one
+// (mirrored to IMAP, as the Takeout importer creates them: ADR-047 writes a
+// mirrored label back as X-GM-LABELS in 5b). Labels are user-wide: a Gmail
+// label named like an existing Mailroom label IS that label (ADR-047 §2).
+//
+// A name with nothing usable left is SKIPPED and counted, never an error: one
+// odd label must not stop a sync.
+//
+// WRITEBACK IDENTITY. The mapping stores no provider name beside the local
+// label, and writeback sends the LOCAL name as X-GM-LABELS. So a label whose
+// saved name differs from the provider's (sanitising changed it) is created
+// LOCAL-ONLY (MirrorToIMAP false): it has no keyword atom, so nothing is ever
+// written back, and a sanitised name can never create or rename a label at the
+// provider. The provider's own name stays the identity in
+// message_provenance.gm_labels.
+func (tx *UserTx) ensureLabelsByName(ctx context.Context, names []string) (ids []string, created, skipped int, err error) {
 	have, err := tx.LabelIDsByName(ctx, names)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	created := 0
-	ids := make([]string, 0, len(names))
+	ids = make([]string, 0, len(names))
 	for _, n := range names {
+		c := textcheck.SanitizeName(n)
+		if c == "" {
+			skipped++
+			continue
+		}
 		if id, ok := have[n]; ok {
 			ids = append(ids, id.String())
 			continue
 		}
-		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: true})
+		id, err := tx.CreateLabel(ctx, LabelRow{Name: n, MirrorToIMAP: c == n})
 		if errors.Is(err, ErrLabelNameTaken) {
 			// Created concurrently (another account's sync, a client): re-read.
 			again, rerr := tx.LabelIDsByName(ctx, []string{n})
 			if rerr != nil {
-				return nil, 0, rerr
+				return nil, 0, 0, rerr
 			}
 			got, ok := again[n]
 			if !ok {
-				return nil, 0, fmt.Errorf("store: label %q exists but cannot be found", n)
+				return nil, 0, 0, fmt.Errorf("store: label %q exists but cannot be found", c)
 			}
 			ids = append(ids, got.String())
 			continue
 		}
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, 0, err
 		}
 		created++
 		ids = append(ids, id.String())
 	}
-	return ids, created, nil
+	return ids, created, skipped, nil
 }
 
 // LabelIDsByName maps each of names that is an existing label of the user to
 // its id (exact, case-sensitive match: app.labels' UNIQUE (user_id, name)).
+//
+// The match is on the SAVED name: each requested name goes through
+// textcheck.SanitizeName first, and the result is keyed by the name as asked,
+// so a provider's label with a control character finds its clean local copy.
+// A name with nothing usable left is absent from the result.
 func (tx *UserTx) LabelIDsByName(ctx context.Context, names []string) (map[string]ulid.ULID, error) {
 	out := map[string]ulid.ULID{}
 	if len(names) == 0 {
 		return out, nil
 	}
+	asked := map[string][]string{} // canonical -> the names that canonicalise to it
+	for _, n := range names {
+		if c := textcheck.SanitizeName(n); c != "" {
+			asked[c] = append(asked[c], n)
+		}
+	}
 	rows, err := tx.tx.Query(ctx, `
 		SELECT id, name FROM app.labels WHERE user_id = $1 AND name = ANY($2)`,
-		tx.userID.String(), names)
+		tx.userID.String(), canonicalNames(names))
 	if err != nil {
 		return nil, fmt.Errorf("store: labels by name: %w", err)
 	}
@@ -464,7 +510,9 @@ func (tx *UserTx) LabelIDsByName(ctx context.Context, names []string) (map[strin
 		if err != nil {
 			return nil, fmt.Errorf("store: parse label id %q: %w", id, err)
 		}
-		out[name] = u
+		for _, raw := range asked[name] {
+			out[raw] = u
+		}
 	}
 	return out, rows.Err()
 }

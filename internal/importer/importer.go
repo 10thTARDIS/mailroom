@@ -17,6 +17,7 @@ import (
 
 	"mailroom/internal/ingest"
 	"mailroom/internal/store"
+	"mailroom/internal/textcheck"
 )
 
 // DefaultMaxMessageBytes bounds the one message held in memory at a time. It
@@ -92,6 +93,10 @@ type Stats struct {
 	Failed int64 `json:"failed"`
 	// Bytes is how much of the archive has been consumed.
 	Bytes int64 `json:"bytes"`
+	// LabelsSkipped is archive labels left out because nothing usable remained of
+	// the name once control and invisible characters were removed. Counted, never
+	// fatal: the message itself is still imported.
+	LabelsSkipped int64 `json:"labelsSkipped"`
 }
 
 // Progress is one progress report.
@@ -169,6 +174,19 @@ func New(st *store.Store, ing *ingest.Ingestor, opt Options) (*Importer, error) 
 // 25 GB import WOULD make before committing three hours to it.
 func (im *Importer) Tallies() (folders, labels []Tally) {
 	return sortTally(im.folderTally), sortTally(im.labelTally)
+}
+
+// tallyLabels counts a message's labels under their canonical (saved) names, so
+// the dry run reports what the import would create and never prints a raw
+// control character; a label with no usable name is counted as skipped.
+func (im *Importer) tallyLabels(labels []string) {
+	for _, l := range labels {
+		if c := textcheck.SanitizeName(l); c != "" {
+			im.labelTally[c]++
+		} else {
+			im.stats.LabelsSkipped++
+		}
+	}
 }
 
 // Tally is one row of a dry run's mapping report.
@@ -406,9 +424,7 @@ func (im *Importer) ingestOne(ctx context.Context, item *Item) (err error) {
 
 	if im.opt.DryRun {
 		im.folderTally[folder]++
-		for _, l := range labels {
-			im.labelTally[l]++
-		}
+		im.tallyLabels(labels)
 		im.stats.Imported++
 		return nil
 	}
@@ -436,9 +452,7 @@ func (im *Importer) ingestOne(ctx context.Context, item *Item) (err error) {
 	case res.Created:
 		im.stats.Imported++
 		im.folderTally[folder]++
-		for _, l := range labels {
-			im.labelTally[l]++
-		}
+		im.tallyLabels(labels)
 	case res.LeftAlone:
 		im.stats.LeftAlone++
 	default:
@@ -589,9 +603,24 @@ func (im *Importer) labelIDs(ctx context.Context, names []string) ([]ulid.ULID, 
 		return nil, nil
 	}
 	out := make([]ulid.ULID, 0, len(names))
-	for _, name := range names {
+	have := make(map[ulid.ULID]bool, len(names))
+	for _, raw := range names {
+		// THE CANONICAL NAME, computed once: it is the cache key, the lookup and
+		// what is created, because it is what the store saves (the store
+		// sanitises every label name). Comparing the raw name instead would
+		// never match the saved copy, so the label would be re-created or
+		// error on every message of every run.
+		name := textcheck.SanitizeName(raw)
+		if name == "" {
+			im.stats.LabelsSkipped++
+			im.log.Warn("importer: an archive label has no usable name and was skipped", "labelsSkipped", im.stats.LabelsSkipped)
+			continue
+		}
 		if id, ok := im.labels[name]; ok {
-			out = append(out, id)
+			if !have[id] {
+				have[id] = true
+				out = append(out, id)
+			}
 			continue
 		}
 		var id ulid.ULID
@@ -625,7 +654,10 @@ func (im *Importer) labelIDs(ctx context.Context, names []string) ([]ulid.ULID, 
 			return nil, err
 		}
 		im.labels[name] = id
-		out = append(out, id)
+		if !have[id] {
+			have[id] = true
+			out = append(out, id)
+		}
 	}
 	return out, nil
 }

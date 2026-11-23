@@ -16,6 +16,7 @@ import (
 	"mailroom/internal/areas"
 	"mailroom/internal/store"
 	"mailroom/internal/tabs"
+	"mailroom/internal/textcheck"
 )
 
 // `mailroom-admin area-plan` — load an area plan through the ONE place that
@@ -478,6 +479,11 @@ func applyAreaPlanDiff(ctx context.Context, st *store.Store, userID ulid.ULID, d
 		for i, l := range diff.Lines {
 			if l.Kind != planLineCreate {
 				continue
+			}
+			// A typed plan name is refused, not silently changed (the store would
+			// otherwise save a different name than the one the diff showed).
+			if err := textcheck.CheckName(l.Name); err != nil {
+				return fmt.Errorf("create %q: name %w", l.Name, err)
 			}
 			ownLabel, err := findOrNilLabelByName(ctx, tx, l.Name)
 			if err != nil {
