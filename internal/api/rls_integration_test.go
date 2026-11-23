@@ -2247,7 +2247,7 @@ var crossUserProbes = map[string]func(t *testing.T, h *rlsHarness, a, b rlsUser)
 	// 00102). B trusts one address and has forgotten it; none of that is A's to
 	// see or change, and each probe has the control that A's own row works.
 	"LearnedSender/get": func(t *testing.T, h *rlsHarness, a, b rlsUser) {
-		const addr = "b-secret-trusted@example.net"
+		const addr = "b-secret-trusted@b-private.example"
 		superExec(t, h, `INSERT INTO app.learned_sender_trust (user_id, address) VALUES ($1, $2)`, b.UserID.String(), addr)
 		superExec(t, h, `INSERT INTO app.learned_sender_forgotten (user_id, key_kind, key_value) VALUES ($1, 'address', $2)`, b.UserID.String(), addr)
 		res, mErr := invokeAs(t, h, "LearnedSender/get", a.UserID, map[string]any{"senders": []string{addr}})
