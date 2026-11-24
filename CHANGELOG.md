@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+## [1.104.0-beta.3] — 2026-11-24
+
+**The third beta of v1.104 makes trusting a sender work from their card, and fixes the Enter key on focused buttons.** Open a message from a sender whose mail can't be verified: their card now says so and offers to trust them for sorting, but only when trusting would actually help.
+
 ### Fixes
 
 - **You can now trust a sender from their card when their mail can't be verified.** The "Trust this sender for sorting" switch never appeared on a sender's card, because the card did not look at any particular message and so could not tell the sender's mail was unverified. The card now looks at the message you opened it from. If that message was held back only because its sender could not be verified, the card says so and shows the switch. If the message failed its sender check, or carries a sender warning, trusting would not help, so the switch stays hidden, and the card says plainly that the message failed its check. Open a message from the sender to see the switch.
