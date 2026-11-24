@@ -265,6 +265,22 @@ button must make axe report `button-name`; a glyph-only button losing its
 `aria-activedescendant` must fail the cursor check. A control that stays green
 fails the run, so a green job also says the checks can fail.
 
+**The sender card's Learned sorting section** (and Settings' status block) is
+covered by the same lane, in three themes, on three synthetic senders filed
+through the real `Email/set` path: the exact sentence the server's answer
+produces, the section's name, the trust switch as a named `switch`, the Forget
+question opening with focus on **Keep it**, Escape closing only the question
+(the card and the message stay, focus returns to Forget), and the status block
+read against `LearnedSorting/status`. Six in-run controls (an emptied sentence, a
+switch whose label text is removed, a nameless switch added, a pale sentence,
+Escape pressed from outside the question, and the status sentence emptied) must
+each go red. The card is measured moved out from under the message header: axe
+reads the card's lower half as clipped by it (the card is `position: fixed` but a
+DOM child of the header) and checked no contrast there at all, a blind spot the
+older sender-popover surface still has. The trust switch is exercised on a
+*trusted* sender: the server never calls an untrusted sender unverified, so that
+is the one state that draws it.
+
 The lane was probed the same way, by deleting `aria-rowindex` from
 `ui/desk/VirtualList.tsx` and rebuilding the image: **all thirty-three axe passes
 stayed green** and the lane went red on `NOACTIVE move: aria-rowindex went 0 -> 0`.

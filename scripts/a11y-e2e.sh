@@ -1177,7 +1177,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       ["Email/query", { accountId, filter: {}, calculateTotal: true, limit: 60 }, "q"],
     ]);
     ids = q[1].ids || [];
-    if (ids.length >= WANT) break;
+    // ⚠ THE DESK'S MESSAGES ARE THE INBOX'S. A count over every mailbox is satisfied
+    // by the Archive fixtures alone when the account syncs Archive first, and the
+    // fixture then fails on a subject that simply has not arrived yet (seen three
+    // runs in a row on a loaded host). Wait for WANT in the Inbox itself.
+    const [mbx] = await jmap([["Mailbox/get", { accountId, ids: null }, "mbx"]]);
+    const inboxBox = (mbx[1].list || []).find((m) => m.role === "inbox");
+    let inboxCount = 0;
+    if (inboxBox) {
+      const [iq0] = await jmap([
+        ["Email/query", { accountId, filter: { inMailbox: inboxBox.id }, calculateTotal: true, limit: 1 }, "iq0"],
+      ]);
+      inboxCount = iq0[1].total || 0;
+    }
+    if (ids.length >= WANT && inboxCount >= WANT) break;
     if (Date.now() - started > 180000) {
       console.log("NOFIXTURE only " + ids.length + " of " + WANT + " messages synced in 180s");
       process.exit(5);
@@ -2031,6 +2044,229 @@ KC_SQL="$(pgq "
 kc_node assert
 [ -s "$WORK/keychange.json" ] || { echo "A11Y E2E FAILED: the rotated-key fixture wrote no manifest" >&2; exit 5; }
 
+# ---------------------------------------------------------------------------
+# LEARNED SORTING ON THE SENDER CARD (#167): the fixtures, through the real paths.
+# ---------------------------------------------------------------------------
+#
+# Three senders, all at reserved `.example` domains and none at the login's own
+# domain, delivered into ARCHIVE (the desk counts INBOX only, so no count this
+# lane asserts moves). The user's FILINGS are Email/set labelIds writes, the verb
+# the client's own "Change area" sends, and are read back through
+# LearnedSender/get before the browser stage sees them:
+#
+#   records@filings.example   filed into Updates twice   -> "...learned from 2 of your moves"
+#   parcels@single.example    filed into Social once     -> "...learned from 1 of your moves"
+#   robot@feed.example        filed into Promotions twice, then TRUSTED by
+#                             LearnedSender/trust        -> the trust switch, on
+#
+# ⚠ WHY THE THIRD IS TRUSTED RATHER THAN MERELY UNVERIFIED. The card draws the
+# trust switch for an address whose learned reason is "unauthenticated", or one
+# that is already trusted. The server's LearnedSender/get never reports
+# "unauthenticated" (its view has no authentication to consult: see
+# internal/store/learned_sender_view.go), so an untrusted sender cannot be made
+# to show the switch by any real path; a trusted one can, and that is the one
+# state that draws it today.
+#
+# THEN, AFTER the filings, one more message from each of the first and third is
+# delivered, so Settings' status block has real numbers to show: both are placed
+# by learned sorting at ingest (this stack configures no trusted authentication
+# server, so ingest's floor is "did not clearly fail", which both meet), and every
+# other message the stack ingested is held back as "no earlier filings from the
+# sender". All of it goes through ingest, not through SQL.
+mkdir -p "$WORK/learned"
+lmail() {
+  # $1 file, $2 From, $3 Subject
+  {
+    printf 'From: %s\n' "$2"
+    printf 'To: Reader <%s>\n' "$TESTUSER"
+    printf 'Subject: %s\n' "$3"
+    printf 'Message-ID: <learned-%s@example.test>\n' "$1"
+    printf 'Date: Wed, 09 Sep 2026 09:00:00 +0000\n'
+    printf 'MIME-Version: 1.0\n'
+    printf 'Content-Type: text/plain; charset=utf-8\n'
+    printf '\n'
+    printf 'A synthetic message for the learned sorting fixture.\n'
+  } > "$WORK/learned/$1.eml"
+}
+lmail rec1 'Records Office <records@filings.example>' 'Learned fixture: ledger, first'
+lmail rec2 'Records Office <records@filings.example>' 'Learned fixture: ledger, second'
+lmail one1 'Parcel Desk <parcels@single.example>' 'Learned fixture: parcel'
+lmail feed1 'Status Feed <robot@feed.example>' 'Learned fixture: feed, first'
+lmail feed2 'Status Feed <robot@feed.example>' 'Learned fixture: feed, second'
+lmail rec3 'Records Office <records@filings.example>' 'Learned fixture: ledger, later'
+lmail feed3 'Status Feed <robot@feed.example>' 'Learned fixture: feed, later'
+
+# ls_deliver <file>...: into Archive, then wait until each has SYNCED (a row with
+# its subject exists), the same way kc_deliver waits.
+ls_deliver() {
+  docker exec "$DV" rm -rf /tmp/learned >/dev/null 2>&1 || true
+  docker cp "$WORK_HOST/learned" "$DV:/tmp/learned" >/dev/null
+  for _f in "$@"; do
+    docker exec "$DV" sh -c "doveadm save -u '$TESTUSER' -m Archive < /tmp/learned/$_f.eml" ||
+      { echo "A11Y E2E FAILED: could not deliver the learned fixture $_f" >&2; exit 5; }
+  done
+  for _f in "$@"; do
+    _subj="$(sed -n 's/^Subject: \(.*\)$/\1/p' "$WORK/learned/$_f.eml" | head -1)"
+    _i=0
+    while [ "$_i" -lt 60 ]; do
+      _n="$(pgq "SELECT count(*) FROM app.messages WHERE subject = '$_subj'" 2>/dev/null | tr -d ' \r\n')"
+      [ "$_n" = "1" ] && break
+      _i=$((_i + 1)); sleep 2
+    done
+    [ "$_n" = "1" ] || { echo "A11Y E2E FAILED: learned fixture $_f never synced (subject $_subj)" >&2; exit 5; }
+  done
+  echo "delivered and synced: $*"
+}
+
+cat > "$WORK/a11y-learned.cjs" <<'LSEOF'
+"use strict";
+const fs = require("fs");
+const BASE = "http://mailroom:8080";
+const USING = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:mailroom:desk"];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const die = (m) => { console.log("NOFIXTURE learned: " + m); process.exit(5); };
+
+async function jmap(calls) {
+  const res = await fetch(BASE + "/jmap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ using: USING, methodCalls: calls }),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error("jmap HTTP " + res.status + ": " + text.slice(0, 400));
+  const body = JSON.parse(text);
+  for (const r of body.methodResponses) if (r[0] === "error") throw new Error("jmap method error: " + JSON.stringify(r));
+  return body.methodResponses;
+}
+
+const SUBJECTS = {
+  rec1: "Learned fixture: ledger, first",
+  rec2: "Learned fixture: ledger, second",
+  one1: "Learned fixture: parcel",
+  feed1: "Learned fixture: feed, first",
+  feed2: "Learned fixture: feed, second",
+};
+const ADDR = { records: "records@filings.example", single: "parcels@single.example", feed: "robot@feed.example" };
+
+(async () => {
+  const mode = process.argv[2];
+  const sess = await (await fetch(BASE + "/jmap/session")).json();
+  const accountId = Object.values(sess.primaryAccounts || {})[0];
+  if (!accountId) die("the session names no primary account");
+
+  if (mode === "file") {
+    // ---- wait for the five messages to sync ------------------------------
+    const byKey = {};
+    for (const t0 = Date.now(); Object.keys(byKey).length < 5; ) {
+      const [q] = await jmap([["Email/query", { accountId, filter: {}, limit: 200 }, "q"]]);
+      const [g] = await jmap([["Email/get", { accountId, ids: q[1].ids || [], properties: ["subject"] }, "g"]]);
+      for (const m of g[1].list || []) {
+        for (const [k, s] of Object.entries(SUBJECTS)) if (m.subject === s) byKey[k] = m.id;
+      }
+      if (Object.keys(byKey).length >= 5) break;
+      if (Date.now() - t0 > 120000) die("only " + Object.keys(byKey).join(",") + " synced");
+      await sleep(2000);
+    }
+
+    // ---- the areas: the default plan's, by the tab that feeds them --------
+    const [ag] = await jmap([["Area/get", { accountId, ids: null }, "ag"]]);
+    const areas = (ag[1].list || []).map((a) => ({ id: a.id, name: a.name, labelId: a.labelId, tabs: a.tabs }));
+    const areaFor = (tab) => areas.find((a) => (a.tabs || []).indexOf(tab) >= 0);
+    // Never Primary: a message the desk already resolves there is not "moved" by being
+    // filed there, and its filing counted for nothing (measured: filings=0).
+    const want = { updates: areaFor("updates"), social: areaFor("social"), promotions: areaFor("promotions") };
+    for (const [k, v] of Object.entries(want)) if (!v) die("no area is fed by " + k);
+
+    // ---- the user's filings: the verb the client's "Change area" sends ----
+    const file = (key, area) => ({ [byKey[key]]: { ["labelIds/" + area.labelId]: true } });
+    const update = Object.assign({},
+      file("rec1", want.updates), file("rec2", want.updates),
+      file("one1", want.social),
+      file("feed1", want.promotions), file("feed2", want.promotions));
+    const [es] = await jmap([["Email/set", { accountId, update }, "es"]]);
+    if (Object.keys(es[1].notUpdated || {}).length) die("Email/set refused: " + JSON.stringify(es[1].notUpdated));
+
+    // ---- trust the third sender, the one state that draws the switch ------
+    const [tr] = await jmap([["LearnedSender/trust", { accountId, sender: ADDR.feed, trusted: true }, "tr"]]);
+    if (!tr[1].updated || tr[1].updated.trusted !== true) die("LearnedSender/trust: " + JSON.stringify(tr[1]));
+
+    // ---- READ IT BACK: what the server says the card will be told ---------
+    const [lg] = await jmap([["LearnedSender/get", { accountId, senders: Object.values(ADDR) }, "lg"]]);
+    const got = {};
+    for (const e of lg[1].list || []) got[e.sender] = e;
+    const expect = {
+      records: { filings: 2, area: want.updates, trusted: false },
+      single: { filings: 1, area: want.social, trusted: false },
+      feed: { filings: 2, area: want.promotions, trusted: true },
+    };
+    const cases = {};
+    for (const [name, x] of Object.entries(expect)) {
+      const e = got[ADDR[name]];
+      const a = e && e.address;
+      if (!e || e.decidedBy !== "address" || a.filings !== x.filings || a.areaId !== x.area.id || a.acting !== true ||
+          e.trusted !== x.trusted || e.trustUseful !== true) {
+        die(name + " is not what the browser stage expects: " + JSON.stringify(e));
+      }
+      console.log("learned " + name + ": " + ADDR[name] + " filings=" + a.filings + " area=" + x.area.name + " acting=" + a.acting + " trusted=" + e.trusted);
+      cases[name] = { address: ADDR[name], filings: a.filings, area: x.area.name, trusted: e.trusted };
+    }
+    cases.records.id = byKey.rec1; cases.records.subject = SUBJECTS.rec1;
+    cases.single.id = byKey.one1; cases.single.subject = SUBJECTS.one1;
+    cases.feed.id = byKey.feed1; cases.feed.subject = SUBJECTS.feed1;
+    fs.writeFileSync("/tmp/learned.json", JSON.stringify({ accountId, cases }, null, 1));
+    console.log("learned OK: three senders, filed and read back through LearnedSender/get");
+    return;
+  }
+
+  // mode === "status": wait for the two arrivals delivered AFTER the filings to
+  // show in the numbers the Settings block is drawn from.
+  let st = null;
+  for (const t0 = Date.now(); ; ) {
+    const [s] = await jmap([["LearnedSorting/status", { accountId }, "s"]]);
+    st = s[1];
+    if (st.placed >= 1 && Object.values(st.heldBack).some((n) => n > 0)) break;
+    if (Date.now() - t0 > 120000) break;
+    await sleep(2000);
+  }
+  const held = JSON.stringify(st.heldBack);
+  const settled = st.placed >= 1 && Object.values(st.heldBack).some((n) => n > 0);
+  console.log("learned status: enabled=" + st.enabled + " placed=" + st.placed + " corrected=" + st.corrected + " heldBack=" + held + " settled=" + settled);
+  if (!settled) {
+    // Not fatal: the browser stage asserts the block against whatever the server
+    // says, and prints it. But it must never be silent that the fixture fell short.
+    console.log("learned status: WARNING the arrivals after the filings did not show as placed (and some held back) in 120s");
+  }
+})().catch((e) => {
+  console.log("ERR learned fixture " + (e && e.message ? e.message : String(e)));
+  process.exit(2);
+});
+LSEOF
+
+# ls_node <mode>: one phase of the node half, in the browser image on the stack's network.
+ls_node() {
+  _lc=$(docker create --network "$NET" --entrypoint node "$CHROME_IMAGE" /tmp/a11y-learned.cjs "$1")
+  docker cp "$WORK_HOST/a11y-learned.cjs" "$_lc:/tmp/a11y-learned.cjs" >/dev/null
+  set +e
+  docker start -a "$_lc" 2>&1
+  _lc_rc=$?
+  set -e
+  if [ "$1" = "file" ] && [ "$_lc_rc" = "0" ]; then
+    docker cp "$_lc:/tmp/learned.json" "$WORK_HOST/learned.json" >/dev/null
+  fi
+  docker rm -fv "$_lc" >/dev/null 2>&1 || true
+  if [ "$_lc_rc" != "0" ]; then
+    echo "A11Y E2E FAILED: the learned sorting fixture ($1) failed (exit $_lc_rc)" >&2
+    exit 5
+  fi
+}
+
+echo "--- learned sorting (#167): three senders filed through Email/set, one trusted, then the arrivals"
+ls_deliver rec1 rec2 one1 feed1 feed2
+ls_node file
+[ -s "$WORK/learned.json" ] || { echo "A11Y E2E FAILED: the learned sorting fixture wrote no manifest" >&2; exit 5; }
+ls_deliver rec3 feed3
+ls_node status
+
 echo
 echo "=== axe + the accessibility tree, in the pinned Chromium ===================="
 # docker cp the script and the linter IN rather than bind-mounting a host path (see
@@ -2061,6 +2297,7 @@ docker cp "$REPO_HOST/scripts/a11y-contrast.allow" "$CHKC:/tmp/a11y-contrast.all
 docker cp "$REPO_HOST/$AXE_JS" "$CHKC:/tmp/axe.min.js" >/dev/null
 docker cp "$WORK_HOST/fixture.json" "$CHKC:/tmp/fixture.json" >/dev/null
 docker cp "$WORK_HOST/keychange.json" "$CHKC:/tmp/keychange.json" >/dev/null
+docker cp "$WORK_HOST/learned.json" "$CHKC:/tmp/learned.json" >/dev/null
 # ⚠ THE EXIT CODE COMES FROM `docker wait`, NOT FROM THE PIPELINE. Piping
 # `docker start -a` into `tee` (which is what streams a multi-minute run rather
 # than holding it all back to the end) throws the container's status away and
