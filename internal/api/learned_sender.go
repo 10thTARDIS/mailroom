@@ -57,13 +57,14 @@ func strOrNullPtr(s string) any {
 
 func learnedSenderJSON(v store.LearnedSenderView) map[string]any {
 	return map[string]any{
-		"sender":      v.Sender,
-		"address":     learnedSenderSideJSON(v.Address, nil),
-		"domain":      learnedSenderSideJSON(v.Domain, map[string]any{"domain": v.DomainName}),
-		"decidedBy":   v.DecidedBy,
-		"trusted":     v.Trusted,
-		"trustUseful": v.TrustUseful,
-		"forgottenAt": jmapDateOrNil(v.ForgottenAt),
+		"sender":         v.Sender,
+		"address":        learnedSenderSideJSON(v.Address, nil),
+		"domain":         learnedSenderSideJSON(v.Domain, map[string]any{"domain": v.DomainName}),
+		"decidedBy":      v.DecidedBy,
+		"trusted":        v.Trusted,
+		"trustUseful":    v.TrustUseful,
+		"trustWouldHelp": v.TrustWouldHelp,
+		"forgottenAt":    jmapDateOrNil(v.ForgottenAt),
 	}
 }
 
@@ -88,6 +89,9 @@ func (a *API) learnedSenderGet(ctx context.Context, userID ulid.ULID, rawArgs js
 	var args struct {
 		AccountID string   `json:"accountId"`
 		Senders   []string `json:"senders"`
+		// MessageID, optional: the message the card was opened from. It adds that
+		// message's own authentication to its sender's entry.
+		MessageID string `json:"messageId"`
 	}
 	if mErr := a.learnedSenderArgs(userID, rawArgs, &args, func() string { return args.AccountID }); mErr != nil {
 		return nil, mErr
@@ -97,6 +101,17 @@ func (a *API) learnedSenderGet(ctx context.Context, userID ulid.ULID, rawArgs js
 	}
 	list := make([]map[string]any, 0, len(args.Senders))
 	mErr := a.withUserTx(ctx, userID, func(tx *store.UserTx) *MethodError {
+		// The message context. A message that is not the user's (RLS and the
+		// user_id predicate), unreadable, or not from one of the senders is
+		// ignored without an error: nothing says whether it exists.
+		var msgSender *placement.Sender
+		if id, err := ulid.Parse(args.MessageID); err == nil && args.MessageID != "" {
+			if cands, err := tx.ExplainCandidates(ctx, &id, "", 1); err == nil && len(cands) == 1 {
+				if sd, err := a.ruleSuggestionSender(userID)(ctx, cands[0]); err == nil {
+					msgSender = &sd
+				}
+			}
+		}
 		seen := map[string]bool{}
 		for _, s := range args.Senders {
 			s = strings.ToLower(strings.TrimSpace(s))
@@ -104,7 +119,13 @@ func (a *API) learnedSenderGet(ctx context.Context, userID ulid.ULID, rawArgs js
 				continue
 			}
 			seen[s] = true
-			v, err := tx.LearnedSenderViewOf(ctx, s)
+			var v store.LearnedSenderView
+			var err error
+			if msgSender != nil {
+				v, err = tx.LearnedSenderViewOfMessage(ctx, s, *msgSender)
+			} else {
+				v, err = tx.LearnedSenderViewOf(ctx, s)
+			}
 			if errors.Is(err, store.ErrSenderInvalid) {
 				// One input that cannot be keyed does not fail the batch.
 				v, err = store.LearnedSenderEmpty(s), nil

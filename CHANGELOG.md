@@ -9,6 +9,10 @@ version.) `[Unreleased]` accumulates changes since the last tag.
 
 ## [Unreleased]
 
+### Fixes
+
+- **You can now trust a sender from their card when their mail can't be verified.** The "Trust this sender for sorting" switch never appeared on a sender's card, because the card did not look at any particular message and so could not tell the sender's mail was unverified. The card now looks at the message you opened it from. If that message was held back only because its sender could not be verified, the card says so and shows the switch. If the message failed its sender check, or carries a sender warning, trusting would not help, so the switch stays hidden, and the card says plainly that the message failed its check. Open a message from the sender to see the switch.
+
 ## [1.104.0-beta.2] — 2026-11-24
 
 **The second beta of v1.104: learned sorting now files mail for more senders, and you can see what it learned, make it forget, and trust a sender it cannot verify.** Read this one before you upgrade: learned sorting acts on the mail it files without asking, and these changes make it act sooner and on more senders. Every change below is held back by the same safety brake as before, which pauses an area whose recent placements you keep correcting, and every placement it makes this way is counted on its own so you can judge it.

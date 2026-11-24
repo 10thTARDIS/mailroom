@@ -2796,7 +2796,9 @@ const en = {
   "learnedSender.mixed": "You've filed this sender into more than one area, so it waits for you.",
   "learnedSender.mixed.named": "You've filed this sender into {areas}, so it waits for you.",
   "learnedSender.contradicted": "You moved mail from this sender out of where it was placed, so it waits for you.",
-  "learnedSender.unauthenticated": "Mail from this sender can't be verified, so it isn't sorted automatically.",
+  "learnedSender.unauthenticated":
+    "Mail from this sender can't be verified, so it isn't sorted automatically. If you know them, you can trust them for sorting.",
+  "learnedSender.failed": "This message failed its sender check, so it isn't sorted automatically.",
   "learnedSender.blocked": "This domain is shared by many people, so its mail isn't sorted automatically.",
   "learnedSender.gated": "Learned sorting is paused for {area} after corrections, so this sender waits for you.",
   "learnedSender.gated.plain": "Learned sorting is paused for this area after corrections, so this sender waits for you.",

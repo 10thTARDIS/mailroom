@@ -12,6 +12,7 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"mailroom/internal/placement"
+	"mailroom/internal/senderwarn"
 )
 
 // WHAT LEARNED SORTING KNOWS ABOUT A SENDER (#167): LearnedSender/get, forget
@@ -35,6 +36,11 @@ const (
 	// SenderReasonAddressDecides: the sender's address has evidence of its own, so
 	// its domain is not consulted.
 	SenderReasonAddressDecides = "address_decides"
+	// SenderReasonFailed: with a message in hand, its authentication FAILED (the
+	// trusted Authentication-Results header reports a failure, or one clearly
+	// failed anywhere). A view-only code: trust cannot help, and the message is
+	// not sorted automatically.
+	SenderReasonFailed = "failed"
 )
 
 // LearnedSenderSide is one key's line of LearnedSenderView.
@@ -68,6 +74,12 @@ type LearnedSenderView struct {
 	// domains: mail claiming to be from there is always checked (the self-spoof
 	// warning refuses it whatever trust says), so trusting it cannot help.
 	TrustUseful bool
+	// TrustWouldHelp is true only when a message was given (LearnedSenderViewOfMessage)
+	// and it was refused ONLY for the missing trusted pass: no ambiguous From, no
+	// TrustedFail, no AuthFail, no warning, an ASCII address not at an own
+	// identity domain, and not trusted yet. That is when trusting would change
+	// the outcome.
+	TrustWouldHelp bool
 	// ForgottenAt is the newer of the address's and the domain's marks.
 	ForgottenAt *time.Time
 }
@@ -84,8 +96,22 @@ func LearnedSenderEmpty(sender string) LearnedSenderView {
 	}
 }
 
-// LearnedSenderViewOf computes the view of one From address.
+// LearnedSenderViewOf computes the view of one From address, with no message
+// context: authentication is a property of a message, so it reports "acting" as
+// if authenticated and never reports "unauthenticated".
 func (tx *UserTx) LearnedSenderViewOf(ctx context.Context, sender string) (LearnedSenderView, error) {
+	return tx.learnedSenderView(ctx, sender, nil)
+}
+
+// LearnedSenderViewOfMessage is LearnedSenderViewOf with a message's sender
+// (built as ingest builds it, from the message's raw headers): the SAME sender
+// checks the arrival path runs (senderChecks) refine "acting" and "reason", and
+// TrustWouldHelp is set. msg is ignored when its From address is not sender.
+func (tx *UserTx) LearnedSenderViewOfMessage(ctx context.Context, sender string, msg placement.Sender) (LearnedSenderView, error) {
+	return tx.learnedSenderView(ctx, sender, &msg)
+}
+
+func (tx *UserTx) learnedSenderView(ctx context.Context, sender string, msg *placement.Sender) (LearnedSenderView, error) {
 	addrKey, domainKey, ok := placement.KeysFor(sender)
 	if !ok {
 		return LearnedSenderView{}, ErrSenderInvalid
@@ -117,12 +143,48 @@ func (tx *UserTx) LearnedSenderViewOf(ctx context.Context, sender string) (Learn
 		gated = g.Stopped
 	}
 	acting := enabled && d.Act && !gated
+	// With a message: the arrival path's own sender checks.
+	refusal := ""
+	if msg != nil {
+		if a, _, ok := msg.Keys(); ok && a == addrKey {
+			sd, err := tx.SenderDomainsFor(ctx)
+			if err != nil {
+				return out, err
+			}
+			trusted, err := tx.trustedSenderSet(ctx)
+			if err != nil {
+				return out, err
+			}
+			c := senderChecks(*msg, senderwarn.NewIndex(sd.Own, sd.Corresponded), trusted)
+			_, asciiOK := msg.TrustKey()
+			out.TrustWouldHelp = c.Refusal == placement.Unauthenticated && !c.Trusted &&
+				!c.Auth.AuthFail && !c.Auth.TrustedFail && len(c.Warnings) == 0 && asciiOK && out.TrustUseful
+			if c.Refusal != "" {
+				refusal = string(c.Refusal)
+				if c.Refusal == placement.Unauthenticated {
+					// The arrival path reports the first refusal (unauthenticated);
+					// the card says the stronger thing when trust cannot help.
+					switch {
+					case c.Auth.AuthFail || c.Auth.TrustedFail:
+						refusal = SenderReasonFailed
+					case len(c.Warnings) > 0:
+						refusal = string(placement.SenderWarned)
+					}
+				}
+			}
+		}
+	}
+	if acting && refusal != "" {
+		acting = false
+	}
 	why := func() string { // why the DECIDING key is not acting
 		switch {
 		case !enabled:
 			return string(LearnedOff)
 		case d.Act && gated:
 			return string(LearnedGated)
+		case d.Act && refusal != "":
+			return refusal
 		}
 		return string(d.Reason)
 	}

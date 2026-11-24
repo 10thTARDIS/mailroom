@@ -48,6 +48,8 @@ export function learnedSenderSentence(s: LearnedSender, areaName: (id: string) =
       return t("learnedSender.contradicted");
     case "unauthenticated":
       return t("learnedSender.unauthenticated");
+    case "failed":
+      return t("learnedSender.failed");
     case "blocked":
       return t("learnedSender.blocked");
     case "gated":
@@ -67,9 +69,13 @@ export function forgetScope(s: LearnedSender): "address" | "domain" | null {
   return null;
 }
 
-/** Trust is offered only where it can matter: refused as unverified, or already on. */
+/**
+ * Trust is offered only where it can matter: the server says trusting would
+ * change the outcome for the message the card was opened from (trustWouldHelp),
+ * or it is already on (so it can be turned off).
+ */
 export function showTrust(s: LearnedSender): boolean {
-  return s.trusted || s.address.reason === "unauthenticated";
+  return s.trusted || s.trustWouldHelp === true;
 }
 
 /**
