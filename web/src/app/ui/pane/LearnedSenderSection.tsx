@@ -30,13 +30,13 @@ export function LearnedSenderSection({ address, messageId }: { address: string; 
   useEffect(() => {
     let live = true;
     if (!address) return;
-    void actions.learnedSender(address).then((s) => {
+    void actions.learnedSender(address, messageId).then((s) => {
       if (live) setState(s);
     });
     return () => {
       live = false;
     };
-  }, [actions, address]);
+  }, [actions, address, messageId]);
 
   useEffect(() => {
     if (confirming) keepRef.current?.focus();
@@ -52,14 +52,18 @@ export function LearnedSenderSection({ address, messageId }: { address: string; 
   const scope = forgetScope(state);
   const areaName = (id: string): string | null => areas[id]?.name ?? null;
 
+  // forget and trust answer without a message, so the card reads again WITH its
+  // message: the switch must not vanish the moment it is turned off.
+  const reread = async (fresh: LearnedSender): Promise<LearnedSender> => (await actions.learnedSender(address, messageId)) ?? fresh;
+
   const forget = (): void => {
     if (scope === null) return;
     setBusy(true);
     void actions
       .forgetLearnedSender(address, scope)
-      .then((fresh) => {
+      .then(async (fresh) => {
         if (fresh) {
-          setState(fresh);
+          setState(await reread(fresh));
           setConfirming(false);
         } else {
           pushToast({ kind: "error", message: t("learnedSender.forget.failed") });
@@ -73,8 +77,8 @@ export function LearnedSenderSection({ address, messageId }: { address: string; 
     setBusy(true);
     void actions
       .trustLearnedSender(address, value)
-      .then((fresh) => {
-        if (fresh) setState(fresh);
+      .then(async (fresh) => {
+        if (fresh) setState(await reread(fresh));
         else pushToast({ kind: "error", message: t("learnedSender.trust.failed") });
       })
       .finally(() => setBusy(false));

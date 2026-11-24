@@ -1437,6 +1437,9 @@ const SURFACES = [
   },
   {
     name: "sender-popover-pinned",
+    // The card is position: fixed inside the message header, so axe saw nothing
+    // below the header's bottom edge: measure it under <body> (lsMeasured).
+    measured: true,
     async open(page) {
       await openTheAttachmentMessage(page);
       await page.click("button.message-from-button");
@@ -8426,8 +8429,8 @@ const LS_HELD_WORDS = {
  * So the card is moved under <body> for the measurement and put back exactly
  * where it was afterwards (never left moved: React owns that node and removes it
  * from its original parent). It is the same box with the same styles, over the
- * same page. The existing "sender-popover-pinned" surface has the same blind spot
- * and is not wrapped here; its denominators say what it did not measure.
+ * same page. The "sender-popover-pinned" surface had the same blind spot and is
+ * wrapped the same way (its `measured` flag in SURFACES).
  */
 async function lsMeasured(page, fn) {
   await page.evaluate(() => {
@@ -8994,8 +8997,12 @@ async function main() {
         // Re-injected per surface: a hash route change does not reload the
         // document, but `page.goto`/`reload` does, and `window.axe` goes with it.
         await injectAxe(page);
-        await axeAA(page, surface.name, theme.name);
-        await axeContrastAAA(page, surface.name, theme.name);
+        // A surface marked `measured` is a position: fixed card that axe cannot
+        // see below its ancestor's box; lsMeasured moves it under <body> for the
+        // measurement only (see its doc).
+        const measure = surface.measured ? (fn) => lsMeasured(page, fn) : (fn) => fn();
+        await measure(() => axeAA(page, surface.name, theme.name));
+        await measure(() => axeContrastAAA(page, surface.name, theme.name));
         // Every surface, on the synthetic fixture: the README's screenshots come
         // from here, so they never show anyone's real mail.
         if (SHOTS) await page.screenshot({ path: "/tmp/shots/surface-" + theme.name + "-" + surface.name + ".png" });

@@ -2523,11 +2523,13 @@ export class MailActions {
   /**
    * What learned sorting knows about one sender (LearnedSender/get). Null on any
    * failure: the sender card simply draws no learned section, never an error.
+   * messageId, the message the card was opened from, lets the server judge that
+   * message's own authentication (trustWouldHelp, the real reason).
    */
-  async learnedSender(address: string): Promise<LearnedSender | null> {
+  async learnedSender(address: string, messageId?: string): Promise<LearnedSender | null> {
     const accountId = this.store.getState().accountId;
     try {
-      const r = await this.client.learnedSenderGet({ accountId, senders: [address] });
+      const r = await this.client.learnedSenderGet({ accountId, senders: [address], ...(messageId ? { messageId } : {}) });
       return r.list[0] ?? null;
     } catch {
       return null;

@@ -11,7 +11,11 @@ package api
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/oklog/ulid/v2"
+
+	"mailroom/internal/compose"
 	"mailroom/internal/store"
 )
 
@@ -225,5 +229,131 @@ func TestLearnedSenderAddressNeverReachesTheAuditLog(t *testing.T) {
 	if err := h.super.QueryRow(context.Background(),
 		`SELECT count(*) FROM app.learned_sender_events WHERE address = $1`, addr).Scan(&left); err != nil || left != 0 {
 		t.Errorf("learned_sender_events rows left after hard delete = %d (%v), want 0", left, err)
+	}
+}
+
+// ── LearnedSender/get with a message (#169) ──────────────────────────────────
+
+const trust3MX = "mx.example.test"
+
+func trust3Entry(t *testing.T, h *composeHarness, user ulid.ULID, args map[string]any) map[string]any {
+	t.Helper()
+	res := call(t, h.api.learnedSenderGet, user, args)
+	list := asArr(res["list"])
+	if len(list) != 1 {
+		t.Fatalf("list = %v, want one entry", res["list"])
+	}
+	return list[0].(map[string]any)
+}
+
+func trust3Reason(e map[string]any) any { return e["address"].(map[string]any)["reason"] }
+
+// The card passes the message it was opened from; the server runs the arrival
+// path's sender checks on that message's own headers.
+func TestLearnedSenderGetWithAMessage(t *testing.T) {
+	ah := newAgentHarness(t)
+	h := ah.composeHarness
+	h.api = New(h.store, WithComposer(compose.NewComposer(h.blobs, fakeKeys{}, time.Millisecond)),
+		WithTrustedAuthservIDs([]string{trust3MX}))
+	a, b := seedTwo(t, h.super)
+	seedSendable(t, h.super, a, "me@mine-own.example", "")
+
+	noPass := seedMessageWithAuth(t, h, a, "alice@example.com")
+	pass := seedMessageWithAuth(t, h, a, "alice@example.com", trust3MX+"; dmarc=pass header.from=example.com")
+	fail := seedMessageWithAuth(t, h, a, "alice@example.com", trust3MX+"; dmarc=fail header.from=example.com")
+	spoof := seedMessageWithAuth(t, h, a, "me@mine-own.example")
+	get := func(user ulid.ULID, sender string, msg ulid.ULID) map[string]any {
+		args := map[string]any{"senders": []string{sender}}
+		if msg != (ulid.ULID{}) {
+			args["messageId"] = msg.String()
+		}
+		return trust3Entry(t, h, user, args)
+	}
+	// Evidence: the user filed one message from alice into an area, so the
+	// decision acts and a refusal is what stops it.
+	filed := seedMessageWithAuth(t, h, a, "alice@example.com", "elsewhere.example; dkim=none") // distinct bytes: one blob per content hash
+	label := ah.areasOf(t, a.UserID)["Updates"].LabelID
+	if _, err := h.super.Exec(context.Background(),
+		`INSERT INTO app.message_labels (user_id, message_id, label_id, applied_by) VALUES ($1, $2, $3, 'user')`,
+		a.UserID.String(), filed.String(), label.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	// No messageId: unchanged. No reason "unauthenticated", no trustWouldHelp.
+	e := get(a.UserID, "alice@example.com", ulid.ULID{})
+	if e["trustWouldHelp"] != false || trust3Reason(e) == "unauthenticated" {
+		t.Errorf("without messageId: %v", e)
+	}
+
+	// No trusted pass: refused only for authentication; trust would help.
+	e = get(a.UserID, "alice@example.com", noPass)
+	if trust3Reason(e) != "unauthenticated" || e["trustWouldHelp"] != true || e["address"].(map[string]any)["acting"] != false {
+		t.Errorf("no trusted pass: %v", e)
+	}
+	// CONTROL: a trusted pass is acted on, and trust would not change anything.
+	e = get(a.UserID, "alice@example.com", pass)
+	if e["trustWouldHelp"] != false || trust3Reason(e) != nil || e["address"].(map[string]any)["acting"] != true {
+		t.Errorf("trusted pass: %v", e)
+	}
+	// A trusted failure: not helped by trust, and reported as failed.
+	e = get(a.UserID, "alice@example.com", fail)
+	if e["trustWouldHelp"] != false || trust3Reason(e) != "failed" {
+		t.Errorf("trusted dmarc=fail: %v", e)
+	}
+	// A self-spoof warning: not helped by trust (and trust cannot help at an
+	// own domain at all).
+	e = get(a.UserID, "me@mine-own.example", spoof)
+	if e["trustWouldHelp"] != false {
+		t.Errorf("self-spoof: %v", e)
+	}
+	// A trusted failure BESIDE a forged pass (the forged header cancels the
+	// all-headers failure flag; only TrustedFail still sees it).
+	forged := seedMessageWithAuth(t, h, a, "alice@example.com", "evil.example; dmarc=pass header.from=example.com", trust3MX+"; dmarc=fail header.from=example.com")
+	if e = get(a.UserID, "alice@example.com", forged); e["trustWouldHelp"] != false || trust3Reason(e) != "failed" {
+		t.Errorf("trusted fail beside a forged pass: %v", e)
+	}
+	// A look-alike (punycode) domain carries a sender warning: trust would not
+	// help, and the card must not offer it. The control above shows the same
+	// shape of message WITHOUT the warning offers trust.
+	puny := seedMessageWithAuth(t, h, a, "robot@xn--e1afmkfd.example")
+	e = get(a.UserID, "robot@xn--e1afmkfd.example", puny)
+	if e["trustWouldHelp"] != false {
+		t.Errorf("punycode warning: %v", e)
+	}
+	plain := seedMessageWithAuth(t, h, a, "robot@plain.example")
+	if e = get(a.UserID, "robot@plain.example", plain); e["trustWouldHelp"] != true {
+		t.Errorf("control, no warning: %v", e)
+	}
+	// A message from another sender is ignored: unchanged behaviour.
+	e = get(a.UserID, "carol@example.com", noPass)
+	if e["trustWouldHelp"] != false || trust3Reason(e) == "unauthenticated" {
+		t.Errorf("message from a different sender: %v", e)
+	}
+	// Another user's message id is ignored, with no error.
+	other := seedMessageWithAuth(t, h, b, "alice@example.com")
+	e = get(a.UserID, "alice@example.com", other)
+	if e["trustWouldHelp"] != false || trust3Reason(e) == "unauthenticated" {
+		t.Errorf("another user's message honoured: %v", e)
+	}
+	// CONTROL for the above: the owner reads the same message fine.
+	if e = get(b.UserID, "alice@example.com", other); e["trustWouldHelp"] != true {
+		t.Errorf("control: owner's own message: %v", e)
+	}
+	// A garbage id is ignored too.
+	e = trust3Entry(t, h, a.UserID, map[string]any{"senders": []string{"alice@example.com"}, "messageId": "nope"})
+	if e["trustWouldHelp"] != false {
+		t.Errorf("garbage id: %v", e)
+	}
+
+	// After trusting: trusted is true and the no-pass message is acted on.
+	call(t, h.api.learnedSenderTrust, a.UserID, map[string]any{"sender": "alice@example.com", "trusted": true})
+	e = get(a.UserID, "alice@example.com", noPass)
+	if e["trusted"] != true || e["trustWouldHelp"] != false || e["address"].(map[string]any)["acting"] != true {
+		t.Errorf("after trusting: %v", e)
+	}
+	// Trust waives the absence of a pass, never a trusted failure.
+	e = get(a.UserID, "alice@example.com", fail)
+	if e["address"].(map[string]any)["acting"] != false || trust3Reason(e) != "failed" {
+		t.Errorf("trusted sender, trusted dmarc=fail: %v", e)
 	}
 }

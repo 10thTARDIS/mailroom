@@ -15,7 +15,7 @@ import { MailStore } from "../../../core/store";
 
 const store = new MailStore(null);
 let current: LearnedSender | null;
-const learnedSender = vi.fn(async (_a: string) => current);
+const learnedSender = vi.fn(async (_a: string, _m?: string) => current);
 const forgetLearnedSender = vi.fn(async (_a: string, _s: "address" | "domain"): Promise<LearnedSender | null> => null);
 const trustLearnedSender = vi.fn(async (_a: string, _t: boolean): Promise<LearnedSender | null> => null);
 const pushToast = vi.fn((_t: unknown) => 1);
@@ -98,6 +98,7 @@ describe("LearnedSenderSection", () => {
   it("confirmed Forget uses the address scope and shows the fresh state", async () => {
     forgetLearnedSender.mockResolvedValueOnce(mk({}));
     await mount(acting("address"));
+    learnedSender.mockResolvedValueOnce(mk({})); // the re-read with the message
     await click(button("Forget what was learned")!);
     await click(button("Forget")!);
     expect(forgetLearnedSender).toHaveBeenCalledWith("alice@example.com", "address");
@@ -132,9 +133,19 @@ describe("LearnedSenderSection", () => {
     expect(forgetLearnedSender).not.toHaveBeenCalled();
   });
 
-  it("offers trust for an unverified sender, as a labelled switch, and calls it", async () => {
-    trustLearnedSender.mockResolvedValueOnce(mk({ trusted: true, address: ev({ areaId: "AU", filings: 3, acting: true, reason: null }) }));
-    await mount(mk({ address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+  it("passes the message the card was opened from", async () => {
+    await mount(acting("address"));
+    expect(learnedSender).toHaveBeenCalledWith("alice@example.com", "m1");
+  });
+
+  it("offers trust when it would help, as a labelled switch, and calls it", async () => {
+    const trustedNow = mk({ trusted: true, address: ev({ areaId: "AU", filings: 3, acting: true, reason: null }) });
+    trustLearnedSender.mockResolvedValueOnce(trustedNow);
+    await mount(mk({ trustWouldHelp: true, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+    expect(document.body.textContent).toContain(
+      "Mail from this sender can't be verified, so it isn't sorted automatically. If you know them, you can trust them for sorting.",
+    );
+    learnedSender.mockResolvedValueOnce(trustedNow); // the re-read with the message
     const sw = document.querySelector<HTMLInputElement>('input[role="switch"]')!;
     expect(sw.closest("label")?.textContent).toBe("Trust this sender for sorting");
     expect(document.body.textContent).toContain("Only for senders you know, such as your own servers, whose mail no one else could plausibly fake. It changes sorting only; warnings still show.");
@@ -142,6 +153,18 @@ describe("LearnedSenderSection", () => {
     await click(sw);
     expect(trustLearnedSender).toHaveBeenCalledWith("alice@example.com", true);
     expect(document.querySelector<HTMLInputElement>('input[role="switch"]')!.checked).toBe(true);
+    expect(learnedSender).toHaveBeenLastCalledWith("alice@example.com", "m1");
+  });
+
+  it("hides the switch when trust would not help, even for an unverified reason", async () => {
+    await mount(mk({ trustWouldHelp: false, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+    expect(document.querySelector('input[role="switch"]')).toBeNull();
+  });
+
+  it("says a failed sender check plainly and offers no trust", async () => {
+    await mount(mk({ trustWouldHelp: false, decidedBy: "address", address: ev({ filings: 3, verdict: "confident", reason: "failed" }) }));
+    expect(document.body.textContent).toContain("This message failed its sender check, so it isn't sorted automatically.");
+    expect(document.querySelector('input[role="switch"]')).toBeNull();
   });
 
   it("hides the trust switch at the user's own domain and says why", async () => {
@@ -151,7 +174,7 @@ describe("LearnedSenderSection", () => {
   });
 
   it("control: trustUseful true keeps the switch and shows no own-domain note", async () => {
-    await mount(mk({ trustUseful: true, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
+    await mount(mk({ trustUseful: true, trustWouldHelp: true, address: ev({ filings: 3, verdict: "confident", reason: "unauthenticated" }) }));
     expect(document.querySelector('input[role="switch"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain("can't help here");
   });

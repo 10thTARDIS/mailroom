@@ -52,7 +52,8 @@ describe("learnedSenderSentence", () => {
     ["none", "Nothing learned about this sender yet."],
     ["mixed", "You've filed this sender into more than one area, so it waits for you."],
     ["contradicted", "You moved mail from this sender out of where it was placed, so it waits for you."],
-    ["unauthenticated", "Mail from this sender can't be verified, so it isn't sorted automatically."],
+    ["unauthenticated", "Mail from this sender can't be verified, so it isn't sorted automatically. If you know them, you can trust them for sorting."],
+    ["failed", "This message failed its sender check, so it isn't sorted automatically."],
     ["blocked", "This domain is shared by many people, so its mail isn't sorted automatically."],
     ["off", "Learned sorting is turned off."],
   ])("reason %s", (reason, sentence) => {
@@ -75,8 +76,10 @@ describe("forgetScope and showTrust", () => {
     expect(forgetScope(sender({ decidedBy: "address", address: { filings: 3 } }))).toBe("address");
     expect(forgetScope(sender({ address: { filings: 0 }, domain: { filings: 0 } }))).toBeNull();
   });
-  it("offers trust only for unverified senders or when already on", () => {
-    expect(showTrust(sender({ address: { reason: "unauthenticated" } }))).toBe(true);
+  it("offers trust only when the server says it would help, or when already on", () => {
+    expect(showTrust(sender({ trustWouldHelp: true }))).toBe(true);
+    expect(showTrust(sender({ address: { reason: "unauthenticated" } }))).toBe(false); // the reason alone is not enough
+    expect(showTrust(sender({ trustWouldHelp: false }))).toBe(false);
     expect(showTrust(sender({ trusted: true }))).toBe(true);
     expect(showTrust(sender({ address: { reason: "thin" } }))).toBe(false);
     expect(showTrust(sender({ address: { acting: true, reason: null } }))).toBe(false);

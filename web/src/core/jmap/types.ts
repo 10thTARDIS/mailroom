@@ -2945,7 +2945,7 @@ export interface LearnedSenderEvidence {
   verdict: string;
   /** Would learned sorting place this sender's next authenticated message? */
   acting: boolean;
-  /** The abstention code when not acting (none, thin, mixed, contradicted, blocked, unauthenticated, gated, off, ...). */
+  /** The abstention code when not acting (none, thin, mixed, contradicted, blocked, unauthenticated, failed, warned, gated, off, ...). */
   reason: string | null;
   /** When this key was forgotten (newer of the two is the top-level value). Absent on older servers. */
   forgottenAt?: string | null;
@@ -2964,6 +2964,12 @@ export interface LearnedSender {
    * Absent on an older server, which reads as true.
    */
   trustUseful?: boolean;
+  /**
+   * Only with a messageId: true when that message was refused ONLY for the
+   * missing trusted pass, so trusting the sender would change the outcome.
+   * Absent or false otherwise.
+   */
+  trustWouldHelp?: boolean;
   forgottenAt: string | null;
 }
 

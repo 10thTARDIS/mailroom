@@ -1495,12 +1495,13 @@ components:
         off, making `moreSenders` a lower bound. Closed to API keys.
 
         **LearnedSender/get** — what learned sorting knows about senders:
-        `{accountId, senders}` (1 to 50 From addresses, lowercased
+        `{accountId, senders, messageId?}` (1 to 50 From addresses, lowercased
         server-side) → `{accountId, list, notFound}`, `notFound` always empty
         (an address never filed still gets an entry with `filings: 0`). Each
         entry: `{sender, address: {areaId, filings, verdict, acting, reason,
         forgottenAt}, domain: {domain, areaId, filings, verdict, acting,
-        reason, forgottenAt}, decidedBy, trusted, trustUseful, forgottenAt}`.
+        reason, forgottenAt}, decidedBy, trusted, trustUseful,
+        trustWouldHelp, forgottenAt}`.
         `trustUseful` is `false` when the address is at one of the user's own
         identity domains (mail claiming to be from there is always checked, so
         trusting it cannot help). An input that is not an address does not fail
@@ -1511,9 +1512,21 @@ components:
         place the sender's next AUTHENTICATED message (the same decision as
         ingest, including the area's correction gate); `reason` says why not
         (`none`, `thin`, `mixed`, `contradicted`, `blocked`, `gated`, `off`,
-        `address_decides`). It does not read a message, so it cannot say
-        `unauthenticated`: `trusted` says whether unauthenticated mail would
-        also be acted on. Read-only. Closed to API keys.
+        `address_decides`). Without `messageId` it reads no message, so it
+        cannot say `unauthenticated`: `trusted` says whether unauthenticated
+        mail would also be acted on. With the optional `messageId` of a
+        message that belongs to the user and whose From address is one of
+        `senders`, that sender's entry is computed with the same sender checks
+        the arrival path runs on that message's own headers: `reason` can then
+        be `unauthenticated` (refused only for the missing trusted pass),
+        `failed` (its authentication failed), `warned` or `ambiguous`, and
+        `trustWouldHelp` is `true` exactly when the message was refused only
+        for authentication (no failure, no warning, an ASCII address not at
+        one of the user's own identity domains, not yet trusted), that is,
+        when trusting the sender would change the outcome. A `messageId` that
+        is not the user's, is unreadable or is not from one of the senders is
+        ignored without an error. `trustWouldHelp` is `false` without a
+        message. Read-only. Closed to API keys.
 
         **LearnedSender/forget** — `{accountId, sender, scope}` (`scope`
         `address` or `domain`) → `{accountId, forgotten}` (the fresh entry).

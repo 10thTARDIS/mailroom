@@ -784,7 +784,7 @@ export class JmapClient {
     return this.call("LearnedPlacement/getStatus", args as unknown as Record<string, unknown>) as Promise<LearningStatus>;
   }
   /** urn:mailroom:desk: what learned sorting knows about each sender (1 to 50 addresses). Read-only. */
-  learnedSenderGet(args: { accountId: string; senders: string[] }): Promise<{ list: LearnedSender[]; notFound: string[] }> {
+  learnedSenderGet(args: { accountId: string; senders: string[]; messageId?: string }): Promise<{ list: LearnedSender[]; notFound: string[] }> {
     return this.call("LearnedSender/get", args as unknown as Record<string, unknown>);
   }
   /** urn:mailroom:desk: stop counting filings made before now for this address or domain. */
