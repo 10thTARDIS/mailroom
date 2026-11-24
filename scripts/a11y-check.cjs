@@ -237,6 +237,16 @@
 //                                 in reading order under Tab, a control under the minimum target size, a
 //                                 fixture that did not produce the state it is for, or
 //                                 an in-run negative control staying green
+//    37  LEARNED <what>         — the sender card's Learned sorting section and
+//                                 Settings' status block (#167): a sentence that
+//                                 is not exactly what the server's answer says,
+//                                 the section or the trust switch not named or not
+//                                 a switch, the Forget question not opening with
+//                                 focus on Keep it, Escape closing the card or the
+//                                 message instead of only the question, a control
+//                                 under the minimum target size, a status block
+//                                 that does not read what LearnedSorting/status
+//                                 says, or an in-run negative control staying green
 
 "use strict";
 
@@ -295,6 +305,7 @@ const tally = {
   risky: 0,
   rescan: 0,
   keyChange: 0,
+  learned: 0,
 };
 let axeVersion = "?";
 
@@ -8335,6 +8346,551 @@ async function keyChangeSurfaces(page, cdp) {
   for (const s of seen) console.log("key change        " + s);
 }
 
+// ---------------------------------------------------------------------------
+// The sender card's "Learned sorting" section, and Settings' status block (#167)
+// ---------------------------------------------------------------------------
+//
+// Learned sorting acts on the user's mail without asking, so the card is where
+// they see what it learned, make it forget, and (for a sender it cannot verify)
+// trust it. Three things on it are not visible to axe: the SENTENCE (a wrong
+// sentence is a wrong claim about their mail), the FORGET QUESTION'S focus and
+// its Escape (the card answers Escape itself, and the question must answer it
+// first), and the trust SWITCH'S role and name.
+//
+// THREE SENDERS, by the fixture in scripts/a11y-e2e.sh (all `.example`):
+//   records   filed into an area twice   -> the acting sentence, count 2, Forget
+//   single    filed into an area once    -> the acting sentence, count 1, Forget
+//   feed      filed twice and TRUSTED    -> the same, plus the trust switch (on)
+// The switch is drawn for an unverified sender or one already trusted, and the
+// server never calls an untrusted sender unverified (see the fixture's note), so
+// a trusted one is the state that draws it.
+//
+// FOR EACH, IN THE THREE THEMES, before axe: the exact sentences, the section's
+// name from the accessibility tree, the switch's role, name and state. For
+// `records` also the Forget question: it opens with focus on "Keep it", is a
+// group named by its question, Escape closes ONLY the question (the card and the
+// message stay, focus is back on Forget), and a second Escape closes the card.
+// Then axe AA, AAA contrast and target size. The Settings status block's text is
+// built from the server's own LearnedSorting/status and compared.
+//
+// SIX IN-RUN NEGATIVE CONTROLS (light), each the real fault its check is for:
+//   * the sentence emptied                  -> the wording check goes red
+//   * the switch's label text removed       -> the tree check goes red
+//   * a nameless switch added to the card   -> axe's name rule goes red here
+//   * the sentence made pale                -> axe's color-contrast goes red here
+//   * Escape pressed from OUTSIDE the question -> the card closes, and the Escape
+//     check goes red (it can observe the card closing)
+//   * the status block's sentence emptied   -> the status check goes red
+
+const LS = JSON.parse(fs.readFileSync("/tmp/learned.json", "utf8"));
+const LS_NAMES = ["records", "single", "feed"];
+const LS_CARD = '.sender-popover[role="dialog"]';
+const LS_SECTION = LS_CARD + " section.learned-sender";
+const LS_HEADING = "Learned sorting";
+const LS_FORGET = "Forget what was learned";
+const LS_QUESTION =
+  "Forget what Mailroom learned about this sender? New mail from them will be sorted by the desk until you move one again.";
+const LS_SWITCH = "Trust this sender for sorting";
+const LS_HINT =
+  "Only for senders you know, such as your own servers, whose mail no one else could plausibly fake. It changes sorting only; warnings still show.";
+const lsSentence = (c) =>
+  "Files new mail from this sender to " + c.area + " (learned from " + c.filings + " of your moves).";
+const lsFail = (what) => {
+  throw new Fail(37, "LEARNED " + what);
+};
+
+const LS_HELD_WORDS = {
+  none: "no earlier filings from the sender",
+  thin: "too few filings from the sender",
+  mixed: "filed into more than one area",
+  contradicted: "you corrected it",
+  unauthenticated: "sender could not be verified",
+  gated: "area paused after corrections",
+  blocked: "shared domain",
+  warned: "sender warning",
+  ambiguous: "unclear sender",
+  elsewhere: "it would file them elsewhere",
+};
+
+/**
+ * ⚠ AXE CANNOT SEE THE LOWER PART OF THE SENDER CARD IN PLACE, AND THIS LANE
+ * MEASURED THAT (it is why this wrapper exists). The card is `position: fixed`
+ * but is a DOM child of `header.message-header`, and axe decides what is clipped
+ * by walking ancestors' boxes without knowing a fixed child escapes them. So
+ * every element of the card below the header's bottom edge (the Area and Learned
+ * sorting sections, every button under "Add to contacts") was "inapplicable" to
+ * color-contrast and target-size: zero passes, zero violations, and a pale
+ * sentence there stayed green. Measured per element: all of them n/a, all of the
+ * head's applicable.
+ *
+ * So the card is moved under <body> for the measurement and put back exactly
+ * where it was afterwards (never left moved: React owns that node and removes it
+ * from its original parent). It is the same box with the same styles, over the
+ * same page. The existing "sender-popover-pinned" surface has the same blind spot
+ * and is not wrapped here; its denominators say what it did not measure.
+ */
+async function lsMeasured(page, fn) {
+  await page.evaluate(() => {
+    const c = document.querySelector(".sender-popover");
+    if (!c) return;
+    // A moved node loses focus, and the step after this one may press Escape
+    // from inside the card: remember where focus was and put it back.
+    window.__lsHome = { parent: c.parentNode, next: c.nextSibling, focus: c.contains(document.activeElement) ? document.activeElement : null };
+    document.body.appendChild(c);
+  });
+  try {
+    return await fn();
+  } finally {
+    await page.evaluate(() => {
+      const c = document.querySelector(".sender-popover");
+      const h = window.__lsHome;
+      if (c && h && h.parent) h.parent.insertBefore(c, h.next);
+      if (h && h.focus && h.focus.isConnected) h.focus.focus();
+      window.__lsHome = null;
+    });
+  }
+}
+
+async function lsOpenCard(page, name) {
+  const c = LS.cases[name];
+  await load(page, "#/all?m=" + c.id);
+  await waitForSelectorD(page, "aside.thread-pane", { timeout: 30000 });
+  await until("the open message is " + c.subject, 30000, () =>
+    page.evaluate((s) => {
+      const h = document.querySelector("h1.thread-subject");
+      return !!h && h.textContent.indexOf(s) >= 0;
+    }, c.subject),
+  37);
+  await page.click("button.message-from-button");
+  await waitForSelectorD(page, LS_CARD, { timeout: 30000 });
+  // The section is drawn after LearnedSender/get answers; a card with no section
+  // is the failure-is-silence state, which would make every check below vacuous.
+  await until("the " + name + " learned sorting section is drawn", 30000, () =>
+    page.evaluate((sel) => !!document.querySelector(sel + " p"), LS_SECTION),
+  37, async () => JSON.stringify(await lsFacts(page)));
+}
+
+/** What the section shows, read in the page. */
+async function lsFacts(page) {
+  return page.evaluate((sel, card) => {
+    const root = document.querySelector(sel);
+    const text = (n) => (n ? (n.textContent || "").replace(/\s+/g, " ").trim() : null);
+    if (!root) return { section: false, card: !!document.querySelector(card) };
+    const sw = root.querySelector('input[role="switch"]');
+    const forget = [...root.querySelectorAll("button")].find((b) => text(b) === "Forget what was learned");
+    return {
+      section: true,
+      card: true,
+      heading: text(root.querySelector("h3")),
+      sentence: text(root.querySelector("p[aria-live]")),
+      hint: text(root.querySelector(".learned-sender-trust .hint")),
+      ownHint: text(root.querySelector(".learned-sender-trust-own")),
+      sw: sw ? { type: sw.type, checked: sw.checked, disabled: sw.disabled } : null,
+      forget: forget ? text(forget) : null,
+      confirm: !!root.querySelector(".learned-sender-confirm"),
+    };
+  }, LS_SECTION, LS_CARD);
+}
+
+/** The exact words and the controls that must (and must not) be there. */
+function lsWording(name, f) {
+  const c = LS.cases[name];
+  const bad = [];
+  if (!f || !f.section) return ["no learned sorting section on the card"];
+  if (f.heading !== LS_HEADING) bad.push("heading is " + JSON.stringify(f.heading));
+  if (f.sentence !== lsSentence(c)) bad.push("sentence is " + JSON.stringify(f.sentence) + ", want " + JSON.stringify(lsSentence(c)));
+  if (f.forget !== LS_FORGET) bad.push("Forget button is " + JSON.stringify(f.forget));
+  if (f.ownHint) bad.push("the own-domain hint is shown for a sender at a reserved domain: " + JSON.stringify(f.ownHint));
+  if (c.trusted) {
+    if (!f.sw || f.sw.type !== "checkbox" || f.sw.checked !== true) bad.push("the trust switch is " + JSON.stringify(f.sw) + ", want a checked checkbox");
+    if (f.hint !== LS_HINT) bad.push("trust hint is " + JSON.stringify(f.hint));
+  } else if (f.sw || f.hint) {
+    bad.push("the trust switch is offered for a sender that is neither unverified nor trusted: " + JSON.stringify({ sw: f.sw, hint: f.hint }));
+  }
+  return bad;
+}
+
+/** The section, its switch and its button, as the accessibility tree has them. */
+async function lsTreeProblems(page, name) {
+  const snap = await axSnapshot(page, LS_SECTION);
+  if (!snap) return ["no learned sorting section in the tree"];
+  const bad = [];
+  // Chromium names the region from the heading AS DRAWN, and the heading is
+  // upper-cased by CSS (text-transform), so its name reads "LEARNED SORTING"; the
+  // words are asserted exactly on the DOM text above, the name case-insensitively.
+  if (snap.role !== "region" || String(snap.name).toLowerCase() !== LS_HEADING.toLowerCase()) bad.push("the section is " + snap.role + " " + JSON.stringify(snap.name) + ', want region "' + LS_HEADING + '"');
+  const nodes = [];
+  const walk = (n) => {
+    if (!n) return;
+    nodes.push(n);
+    for (const k of n.children || []) walk(k);
+  };
+  walk(snap);
+  const buttons = nodes.filter((n) => n.role === "button").map((n) => n.name);
+  if (buttons.indexOf(LS_FORGET) < 0) bad.push("no button named " + LS_FORGET + ": " + JSON.stringify(buttons));
+  const sw = nodes.filter((n) => n.role === "switch");
+  if (LS.cases[name].trusted) {
+    if (sw.length !== 1 || sw[0].name !== LS_SWITCH || sw[0].checked !== true) {
+      bad.push("the switch is " + JSON.stringify(sw.map((n) => ({ name: n.name, checked: n.checked }))) + ', want one checked switch named "' + LS_SWITCH + '"');
+    }
+  } else if (sw.length) {
+    bad.push("a switch is exposed for a sender that does not offer one");
+  }
+  return bad;
+}
+
+/** WCAG 2.2's minimum target size, by axe's rule, for nodes inside `.learned-sender`. */
+async function lsTargetSize(page) {
+  await injectAxe(page);
+  return page.evaluate(
+    (shared) =>
+      window.axe
+        .run(document, Object.assign({}, shared, { runOnly: { type: "rule", values: ["target-size"] }, elementRef: true }))
+        .then((r) => {
+          const inside = (n) => !!n.element && !!n.element.closest(".learned-sender");
+          const bad = r.violations.flatMap((v) => v.nodes.filter(inside).map((n) => String(n.target[0]) + " " + (n.failureSummary || "").replace(/\s+/g, " ").slice(0, 160)));
+          return {
+            bad,
+            passed: r.passes.flatMap((v) => v.nodes.filter(inside)).length,
+            incomplete: r.incomplete.flatMap((v) => v.nodes.filter(inside)).length,
+          };
+        }),
+    AXE_SHARED,
+  );
+}
+
+async function lsActive(page) {
+  return page.evaluate(() => {
+    const a = document.activeElement;
+    return a ? a.tagName + ":" + (a.textContent || "").replace(/\s+/g, " ").trim() : "none";
+  });
+}
+
+/** Opens the Forget question from the keyboard and asserts what it is. */
+async function lsOpenQuestion(page, label) {
+  await page.evaluate((sel) => {
+    const b = [...document.querySelectorAll(sel + " button")].find((n) => (n.textContent || "").trim() === "Forget what was learned");
+    if (b) b.focus();
+  }, LS_SECTION);
+  // What the page did with the key, kept so a failure says WHICH layer ate it.
+  await page.evaluate(() => {
+    window.__lsLog = [];
+    const d = (e) => (e.target && e.target.tagName ? e.target.tagName + ":" + (e.target.textContent || "").trim().slice(0, 24) : "?");
+    window.addEventListener("keydown", (e) => window.__lsLog.push("keydown " + e.key + " on " + d(e) + " prevented=" + e.defaultPrevented), false);
+    window.addEventListener("click", (e) => window.__lsLog.push("click on " + d(e)), true);
+  });
+  await page.keyboard.press("Enter");
+  await until(label + ": the Forget question opens", 15000, () =>
+    page.evaluate((sel) => !!document.querySelector(sel + " .learned-sender-confirm"), LS_SECTION),
+  37, async () => JSON.stringify(await lsFacts(page)) + " active=" + (await lsActive(page)) + " log=" + JSON.stringify(await page.evaluate(() => window.__lsLog)));
+  await sleep(150);
+  const bad = [];
+  const focus = await lsActive(page);
+  if (focus !== "BUTTON:Keep it") bad.push("focus is on " + focus + ", want BUTTON:Keep it");
+  const snap = await axSnapshot(page, LS_SECTION + " .learned-sender-confirm");
+  if (!snap || snap.role !== "group" || snap.name !== LS_QUESTION) {
+    bad.push("the question is " + (snap && snap.role) + " " + JSON.stringify(snap && snap.name) + ", want a group named by its question");
+  }
+  const names = [];
+  const walk = (n) => {
+    if (!n) return;
+    if (n.role === "button") names.push(n.name);
+    for (const k of n.children || []) walk(k);
+  };
+  walk(snap);
+  if (names.join("|") !== "Keep it|Forget") bad.push("the question's buttons are " + JSON.stringify(names) + ", want Keep it then Forget");
+  // Forget is NOT the first or the default: Tab from Keep it reaches it.
+  await page.keyboard.press("Tab");
+  const next = await lsActive(page);
+  if (next !== "BUTTON:Forget") bad.push("Tab from Keep it reaches " + next + ", want BUTTON:Forget");
+  // Back to the safe choice, so the Escape that follows is pressed from inside the question.
+  await page.evaluate((sel) => {
+    const k = [...document.querySelectorAll(sel + " .learned-sender-confirm button")].find((n) => (n.textContent || "").trim() === "Keep it");
+    if (k) k.focus();
+  }, LS_SECTION);
+  return bad;
+}
+
+/**
+ * Presses Escape and says what happened to the layers: the question closes, the
+ * card and the message stay, focus is back on Forget. `from` names where focus
+ * is when it is pressed; the real case is inside the question.
+ */
+async function lsEscapeProblems(page) {
+  await page.keyboard.press("Escape");
+  await sleep(500);
+  const st = await page.evaluate((sel, card) => {
+    const a = document.activeElement;
+    return {
+      question: !!document.querySelector(sel + " .learned-sender-confirm"),
+      card: !!document.querySelector(card),
+      pane: !!document.querySelector("aside.thread-pane"),
+      focus: a ? a.tagName + ":" + (a.textContent || "").replace(/\s+/g, " ").trim() : "none",
+    };
+  }, LS_SECTION, LS_CARD);
+  const bad = [];
+  if (st.question) bad.push("the question is still open");
+  if (!st.card) bad.push("the card closed");
+  if (!st.pane) bad.push("the message closed");
+  if (st.focus !== "BUTTON:Forget what was learned") bad.push("focus is on " + st.focus + ", want the Forget button");
+  return bad;
+}
+
+async function lsStatusExpected(page) {
+  return page.evaluate(async (words) => {
+    const sess = await (await fetch("/jmap/session", { credentials: "include" })).json();
+    const accountId = Object.values(sess.primaryAccounts)[0];
+    const call = async (calls) =>
+      (await (await fetch(sess.apiUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail", "urn:mailroom:desk"], methodCalls: calls }),
+      })).json()).methodResponses;
+    const [[, st], [, ar]] = await call([["LearnedSorting/status", { accountId }, "s"], ["Area/get", { accountId, ids: null }, "a"]]);
+    const names = {};
+    for (const a of ar.list) names[a.id] = a.name;
+    const children = [];
+    const sentence = st.placed > 0
+      ? "Learned sorting placed " + st.placed + (st.placed === 1 ? " message" : " messages") + " in the last " + st.windowDays + " days; you corrected " + st.corrected + "."
+      : "Learned sorting hasn't placed anything in the last " + st.windowDays + " days.";
+    children.push("P:" + sentence);
+    const rows = st.areas
+      .filter((a) => names[a.areaId] !== undefined && (a.placed > 0 || a.corrected > 0 || a.gate === "stopped"))
+      .map((a) => names[a.areaId] + ": placed " + a.placed + ", corrected " + a.corrected + (a.gate === "stopped" ? " · paused after corrections" : ""));
+    if (rows.length) children.push("UL:" + rows.join("|"));
+    const held = [];
+    let other = 0;
+    for (const [code, count] of Object.entries(st.heldBack || {})) {
+      if (count <= 0) continue;
+      if (words[code]) held.push(words[code] + ": " + count);
+      else other += count;
+    }
+    if (other > 0) held.push("other reasons: " + other);
+    if (held.length) {
+      children.push("H4:" + (st.heldBackSince ? "Held back (counting since " + st.heldBackSince + ")" : "Held back"));
+      children.push("UL:" + held.join("|"));
+    } else if (st.heldBackSince) {
+      children.push("P:Nothing held back (counting since " + st.heldBackSince + ").");
+    }
+    return { enabled: st.enabled, placed: st.placed, corrected: st.corrected, heldBack: st.heldBack, rows: rows.length, held: held.length, children };
+  }, LS_HELD_WORDS);
+}
+
+async function lsStatusProblems(page) {
+  const want = await lsStatusExpected(page);
+  if (!want.enabled) return { want, bad: ["LearnedSorting/status says it is off, so the block is not drawn"] };
+  const seen = await page.evaluate(() => {
+    const root = document.querySelector('.learned-status[role="group"]');
+    if (!root) return null;
+    return [...root.children].map((el) => {
+      const text = (n) => (n.textContent || "").replace(/\s+/g, " ").trim();
+      if (el.tagName === "UL") return "UL:" + [...el.children].map(text).join("|");
+      return el.tagName + ":" + text(el);
+    });
+  });
+  const bad = [];
+  if (!seen) bad.push("no status block");
+  else if (JSON.stringify(seen) !== JSON.stringify(want.children)) {
+    bad.push("the block reads " + JSON.stringify(seen) + ", want " + JSON.stringify(want.children));
+  }
+  const snap = await axSnapshot(page, '.learned-status[role="group"]');
+  if (!snap || snap.role !== "group" || snap.name !== "What Learned sorting has done") {
+    bad.push("the block is " + (snap && snap.role) + " " + JSON.stringify(snap && snap.name) + ', want group "What Learned sorting has done"');
+  }
+  return { want, bad };
+}
+
+async function lsOpenStatus(page) {
+  await load(page, "#/settings/areas");
+  await waitForSelectorD(page, '.learned-status[role="group"]', { timeout: 45000 });
+}
+
+async function learnedSenderSurfaces(page, cdp) {
+  const seen = [];
+  const axeIds = () =>
+    lsMeasured(page, () =>
+      page.evaluate(
+        (shared, tags) =>
+          window.axe.run(document, Object.assign({}, shared, { runOnly: { type: "tag", values: tags } })).then((r) => r.violations.map((v) => v.id)),
+        AXE_SHARED,
+        AA_TAGS,
+      ),
+    );
+  let statusLine = "";
+  for (const theme of THEMES) {
+    await chooseTheme(page, theme);
+    for (const name of LS_NAMES) {
+      await lsOpenCard(page, name);
+      const shown = await page.evaluate(() => document.documentElement.dataset["theme"]);
+      if (shown !== theme.expect) {
+        throw new Fail(13, "NOTHEME learned-card " + name + " loaded with data-theme=" + shown + ", want " + theme.expect);
+      }
+      const label = name + "/" + theme.name;
+      const facts = await lsFacts(page);
+      const wording = lsWording(name, facts);
+      if (wording.length) lsFail(label + " wording: " + wording.join("; ") + " (saw " + JSON.stringify(facts) + ")");
+      const tree = await lsTreeProblems(page, name);
+      if (tree.length) lsFail(label + " accessibility tree: " + tree.join("; "));
+      await injectAxe(page);
+      await lsMeasured(page, () => axeAA(page, "learned-card-" + name, theme.name));
+      await lsMeasured(page, () => axeContrastAAA(page, "learned-card-" + name, theme.name));
+      const ts = await lsMeasured(page, () => lsTargetSize(page));
+      console.log("axe learned-card-" + name + " " + theme.name + " target-size passed=" + ts.passed + " incomplete=" + ts.incomplete + " violations=" + ts.bad.length);
+      if (ts.bad.length) lsFail(label + " target size (WCAG 2.2, 2.5.8): " + ts.bad.join(" | "));
+      if (SHOTS) await page.screenshot({ path: "/tmp/shots/learned-" + theme.name + "-card-" + name + ".png" });
+      if (theme === THEMES[0]) seen.push(name + ": " + facts.sentence + (facts.sw ? " [switch on]" : ""));
+
+      if (name === "records") {
+        const q = await lsOpenQuestion(page, label);
+        if (q.length) lsFail(label + " the Forget question: " + q.join("; "));
+        await injectAxe(page);
+        await lsMeasured(page, () => axeAA(page, "learned-forget-confirm", theme.name));
+        await lsMeasured(page, () => axeContrastAAA(page, "learned-forget-confirm", theme.name));
+        const qts = await lsMeasured(page, () => lsTargetSize(page));
+        console.log("axe learned-forget-confirm " + theme.name + " target-size passed=" + qts.passed + " incomplete=" + qts.incomplete + " violations=" + qts.bad.length);
+        if (qts.bad.length) lsFail(label + " the question's target size (WCAG 2.2, 2.5.8): " + qts.bad.join(" | "));
+        if (SHOTS) await page.screenshot({ path: "/tmp/shots/learned-" + theme.name + "-forget-confirm.png" });
+        const esc = await lsEscapeProblems(page);
+        if (esc.length) lsFail(label + " Escape in the Forget question: " + esc.join("; "));
+        // A second Escape, now with nothing open inside the card, closes the card.
+        await page.keyboard.press("Escape");
+        await until(label + ": a second Escape closes the card", 10000, () =>
+          page.evaluate((card) => !document.querySelector(card), LS_CARD),
+        37);
+      }
+    }
+
+    await lsOpenStatus(page);
+    const shown = await page.evaluate(() => document.documentElement.dataset["theme"]);
+    if (shown !== theme.expect) {
+      throw new Fail(13, "NOTHEME learned-status loaded with data-theme=" + shown + ", want " + theme.expect);
+    }
+    const st = await lsStatusProblems(page);
+    if (st.bad.length) lsFail(theme.name + " the status block: " + st.bad.join("; "));
+    await injectAxe(page);
+    await axeAA(page, "learned-status", theme.name);
+    await axeContrastAAA(page, "learned-status", theme.name);
+    if (SHOTS) await page.screenshot({ path: "/tmp/shots/learned-" + theme.name + "-status.png" });
+    if (theme === THEMES[0]) {
+      statusLine =
+        "placed=" + st.want.placed + " corrected=" + st.want.corrected + " held_back=" + JSON.stringify(st.want.heldBack) +
+        " area_rows=" + st.want.rows + " held_rows=" + st.want.held;
+      // A bound, not a total: a block that shows only "nothing placed" would pass
+      // every check above, so the numbers it was built from are printed.
+      if (st.want.placed === 0 && st.want.held === 0) {
+        console.log("learned status    WARNING the block shows no placements and no held-back reasons, so only its empty form was checked");
+      }
+    }
+  }
+
+  // ---- the in-run negative controls (light theme) ---------------------------
+  await chooseTheme(page, THEMES[0]);
+
+  // 1. THE SENTENCE GONE: the section is on the card, its words are not.
+  await lsOpenCard(page, "records");
+  const intact = lsWording("records", await lsFacts(page));
+  if (intact.length) lsFail("control precondition: the untouched records card already fails: " + intact.join("; "));
+  await control("learned-sentence", async () => {
+    await page.evaluate((sel) => {
+      document.querySelector(sel + " p[aria-live]").textContent = "";
+    }, LS_SECTION);
+    return lsWording("records", await lsFacts(page)).length > 0;
+  });
+
+  // 2. THE SWITCH'S NAME GONE: the label's words removed, the input stays.
+  await lsOpenCard(page, "feed");
+  if ((await lsTreeProblems(page, "feed")).length) lsFail("control precondition: the untouched feed card's tree already fails");
+  await control("learned-switch-name", async () => {
+    await page.evaluate((sel) => {
+      const label = document.querySelector(sel + ' input[role="switch"]').closest("label");
+      for (const n of [...label.childNodes]) if (n.nodeType === 3) n.textContent = "";
+    }, LS_SECTION);
+    return (await lsTreeProblems(page, "feed")).length > 0;
+  });
+
+  // 3. A NAMELESS SWITCH ON THE CARD: axe's name rule goes red on this surface.
+  await lsOpenCard(page, "feed");
+  await injectAxe(page);
+  const NAMERULES = ["aria-toggle-field-name", "label"];
+  if ((await axeIds()).some((id) => NAMERULES.includes(id))) lsFail("control precondition: a name rule is already red on the untouched card");
+  await control("learned-axe-switch-name", async () => {
+    await page.evaluate((sel) => {
+      const i = document.createElement("input");
+      i.type = "checkbox";
+      i.setAttribute("role", "switch");
+      document.querySelector(sel + " .learned-sender-trust").appendChild(i);
+    }, LS_SECTION);
+    return (await axeIds()).some((id) => NAMERULES.includes(id));
+  });
+
+  // 4. A PALE SENTENCE: the real contrast defect, on the very text under test.
+  await lsOpenCard(page, "records");
+  await injectAxe(page);
+  if ((await axeIds()).includes("color-contrast")) lsFail("control precondition: color-contrast is already red on the untouched card");
+  await control("learned-axe-contrast", async () => {
+    // The card floats over the message, and axe cannot resolve a background it
+    // overlaps (it reports "incomplete" rather than a violation), so the sentence
+    // gets a plain white box of its own: pale grey on white is 1.7:1, a defect
+    // axe can and must measure.
+    await page.evaluate((sel) => {
+      const p = document.querySelector(sel + " p[aria-live]");
+      p.style.setProperty("color", "#c8c8c8", "important");
+      p.style.setProperty("background-color", "#ffffff", "important");
+    }, LS_SECTION);
+    const red = (await axeIds()).includes("color-contrast");
+    if (!red) {
+      // Say what axe made of the sentence, so a control that stays green is a
+      // measurement and not a mystery.
+      const seen = await lsMeasured(page, () => page.evaluate(
+        (shared) =>
+          window.axe
+            .run(document, Object.assign({}, shared, { runOnly: { type: "rule", values: ["color-contrast"] }, elementRef: true }))
+            .then((r) => {
+              const mine = (n) => !!n.element && !!n.element.closest(".learned-sender");
+              const pick = (kind, list) => list.flatMap((v) => v.nodes.filter(mine).map((n) => kind + " " + String(n.target[0]) + " " + JSON.stringify((n.any || []).map((c) => c.message + " " + JSON.stringify(c.data || {}).slice(0, 160)))));
+              return pick("violation", r.violations).concat(pick("incomplete", r.incomplete), pick("pass", r.passes)).slice(0, 8);
+            }),
+        AXE_SHARED,
+      ));
+      console.log("control learned-axe-contrast: axe's color-contrast on the card: " + JSON.stringify(seen));
+    }
+    return red;
+  });
+
+  // 5. ESCAPE FROM OUTSIDE THE QUESTION: the card answers it by closing, which is
+  // exactly the fault the real Escape check exists to see.
+  await lsOpenCard(page, "records");
+  const q0 = await lsOpenQuestion(page, "control");
+  if (q0.length) lsFail("control precondition: the untouched Forget question already fails: " + q0.join("; "));
+  await control("learned-escape-closes-card", async () => {
+    await page.evaluate((card) => {
+      const b = document.querySelector(card + " .sender-popover-actions button");
+      if (b) b.focus();
+    }, LS_CARD);
+    return (await lsEscapeProblems(page)).length > 0;
+  });
+
+  // 6. THE STATUS BLOCK'S SENTENCE GONE.
+  await lsOpenStatus(page);
+  if ((await lsStatusProblems(page)).bad.length) lsFail("control precondition: the untouched status block already fails");
+  await control("learned-status-text", async () => {
+    await page.evaluate(() => {
+      document.querySelector('.learned-status[role="group"] p').textContent = "";
+    });
+    return (await lsStatusProblems(page)).bad.length > 0;
+  });
+
+  await load(page, "#/inbox/review");
+  await waitForDesk(page);
+  tally.learned = 1;
+  console.log(
+    "learned sender    " + LS_NAMES.length + " senders x " + THEMES.length +
+      " themes: exact sentences, section name, switch role and name, the Forget question's focus and Escape asserted before axe, then axe AA, AAA contrast and target size; status block against the server (" + statusLine + "); 6 controls tripped",
+  );
+  for (const s of seen) console.log("learned sender    " + s);
+}
+
 async function main() {
   console.log(
     "fixture accountId=" +
@@ -8410,6 +8966,12 @@ async function main() {
 
     await settled(page, "first load", () => page.goto(BASE + "/#/inbox/review", { waitUntil: "networkidle2", timeout: 60000 }));
     await waitForDesk(page);
+
+    // The sender card's Learned sorting section and Settings' status block (#167).
+    // BEFORE the matrix: it is read-only (the Forget question is cancelled, never
+    // confirmed, and nothing is trusted or untrusted), it needs no other step's
+    // state, and a failure here should not cost the whole matrix first.
+    await learnedSenderSurfaces(page, cdp);
 
     // ---- axe, every surface, every theme --------------------------------
     for (const theme of THEMES) {
@@ -8585,6 +9147,8 @@ async function main() {
         (tally.rescan ? "ok" : "NOT-RUN") +
         " key_change=" +
         (tally.keyChange ? "ok" : "NOT-RUN") +
+        " learned_sender=" +
+        (tally.learned ? "ok" : "NOT-RUN") +
         " composer_quote=" +
         (tally.quote >= 3 ? "ok" : "NOT-RUN") +
         " axe_version=" +
