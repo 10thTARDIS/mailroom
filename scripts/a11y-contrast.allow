@@ -105,7 +105,7 @@
 .desk-tab-count 5.9 the count printed inside a desk tab
 .desk-tab 5.9 a desk tab's label, selected or not
 .field-label 5.9 a form field's visible label
-.field-hint 5.9 explanatory text under a control (first seen on the day-one wizard's step 1, when it has only an inbox to report on)
+.field-hint 5.3 explanatory text under a control (first seen on the day-one wizard's step 1, when it has only an inbox to report on; 5.34:1 on Settings' grey fieldset face, where Learned sorting's status sits, 5.94:1 on white)
 .setup-step-n 5.9 a not-yet-current step's number in the day-one wizard's step list (--fg-muted; the current step is --fg, see .setup-step.is-current)
 .setup-step-name 5.9 a not-yet-current step's name in the same list
 .compose-from-reason 5.9 why the composer chose this From address
@@ -184,3 +184,13 @@
 # carries the app's button class. Each is named by its words.
 .key-change-actions>button 5.3 the key-change prompt's decision buttons on the browser's own dark button face
 .key-import-action>button 5.3 the "Import a key for this sender" button on the same face
+# The sender card's Learned sorting section and Settings' learned sorting status
+# (#167). The card's lower half was invisible to axe until the lane measured it out
+# from under the message header (scripts/a11y-check.cjs lsMeasured); what it then
+# showed is the same --fg-muted tone as everything above: 5.94:1 light, 6.31:1 dark.
+# The status sits on Settings' own faces, and brought three more labels of the same
+# tone into the AAA pass (5.34:1 on the grey fieldset face, 5.94:1 on white).
+.learned-sender-trust>.hint 5.9 the trust switch's explanation in the card's Learned sorting section
+.learned-sender-trust-own 5.9 the card's "your own address is always checked" note
+.menu-note 5.3 a muted note in a Settings row (Learned sorting's neighbours on the Areas row)
+.remote-allow-kind 5.9 the category name beside an area's feed checkbox

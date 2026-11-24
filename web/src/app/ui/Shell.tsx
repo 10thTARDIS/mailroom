@@ -75,6 +75,7 @@ import { PHONE_QUERY, useMediaQuery } from "./useMediaQuery";
 import { composePlacement as composeFor } from "./compose/placement";
 import { shouldOpenSetup } from "./setup/openSetup";
 import { alreadyOffered, markOffered } from "./setup/setupStorage";
+import { activatesOnEnter } from "./keyTarget";
 
 /** How long the splitter's writes coalesce for (#375 increment 5). A drag
  * fires on every pointermove; without this, dragging across the window would be
@@ -503,6 +504,10 @@ export function Shell({
       }
 
       if (isTyping(ev.target) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      // Enter on a focused button or link is that control's own activation. The
+      // chain's Enter ("open the cursor row") would preventDefault it and the
+      // keyboard user's press would do nothing (ui/keyTarget.ts).
+      if (ev.key === "Enter" && activatesOnEnter(ev.target)) return;
       // A route-level overlay swallows the plain verbs, which is what each of
       // the sheet booleans used to do one at a time. It now covers the rules
       // sheet too: that one was missing from the old guard, so `e` behind an
