@@ -156,9 +156,20 @@ func (tx *UserTx) learnedSenderView(ctx context.Context, sender string, msg *pla
 				return out, err
 			}
 			c := senderChecks(*msg, senderwarn.NewIndex(sd.Own, sd.Corresponded), trusted)
-			_, asciiOK := msg.TrustKey()
-			out.TrustWouldHelp = c.Refusal == placement.Unauthenticated && !c.Trusted &&
-				!c.Auth.AuthFail && !c.Auth.TrustedFail && len(c.Warnings) == 0 && asciiOK && out.TrustUseful
+			// Would trusting change the outcome? Ask the SAME check again with this
+			// address trusted, so the answer cannot drift from the ingest rule: the
+			// waiver refuses a trusted failure and every warning still refuses.
+			// (LearnedSender/trust needs no such refusal of its own: trust is per
+			// address and ingest enforces these rules on every message, whatever
+			// the UI offered.)
+			if k, asciiOK := msg.TrustKey(); asciiOK && out.TrustUseful && !c.Trusted && c.Refusal == placement.Unauthenticated {
+				with := make(map[string]bool, len(trusted)+1)
+				for t := range trusted {
+					with[t] = true
+				}
+				with[k] = true
+				out.TrustWouldHelp = senderChecks(*msg, senderwarn.NewIndex(sd.Own, sd.Corresponded), with).Refusal == ""
+			}
 			if c.Refusal != "" {
 				refusal = string(c.Refusal)
 				if c.Refusal == placement.Unauthenticated {

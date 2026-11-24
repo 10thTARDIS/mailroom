@@ -306,6 +306,24 @@ func TestLearnedSenderGetWithAMessage(t *testing.T) {
 	if e["trustWouldHelp"] != false {
 		t.Errorf("self-spoof: %v", e)
 	}
+	// A trusted failure BESIDE a forged pass (the forged header cancels the
+	// all-headers failure flag; only TrustedFail still sees it).
+	forged := seedMessageWithAuth(t, h, a, "alice@example.com", "evil.example; dmarc=pass header.from=example.com", trust3MX+"; dmarc=fail header.from=example.com")
+	if e = get(a.UserID, "alice@example.com", forged); e["trustWouldHelp"] != false || trust3Reason(e) != "failed" {
+		t.Errorf("trusted fail beside a forged pass: %v", e)
+	}
+	// A look-alike (punycode) domain carries a sender warning: trust would not
+	// help, and the card must not offer it. The control above shows the same
+	// shape of message WITHOUT the warning offers trust.
+	puny := seedMessageWithAuth(t, h, a, "robot@xn--e1afmkfd.example")
+	e = get(a.UserID, "robot@xn--e1afmkfd.example", puny)
+	if e["trustWouldHelp"] != false {
+		t.Errorf("punycode warning: %v", e)
+	}
+	plain := seedMessageWithAuth(t, h, a, "robot@plain.example")
+	if e = get(a.UserID, "robot@plain.example", plain); e["trustWouldHelp"] != true {
+		t.Errorf("control, no warning: %v", e)
+	}
 	// A message from another sender is ignored: unchanged behaviour.
 	e = get(a.UserID, "carol@example.com", noPass)
 	if e["trustWouldHelp"] != false || trust3Reason(e) == "unauthenticated" {
